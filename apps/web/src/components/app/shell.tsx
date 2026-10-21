@@ -17,6 +17,8 @@ import { cn } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Avatar, Kbd } from "./chrome";
 import { CommandMenu, useCommandMenu } from "./command-menu";
+import { ShellNav } from "./nav-context";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 
 type Icon = React.ComponentType<{ className?: string; strokeWidth?: number }>;
 type NavItem = { href: string; label: string; icon: Icon; exact?: boolean; tint: string };
@@ -48,10 +50,10 @@ export const ADMIN_NAV: NavGroup[] = [
   ] },
 ];
 
-function useRates() {
+function useRates(enabled: boolean) {
   // "22K today" must not go stale in a tab opened before a rate change: poll every 60 s and always
   // refetch on focus. A rate set in THIS tab invalidates qk.goldRates via sync's "gold_rate.set".
-  return useQuery({ queryKey: qk.goldRates, queryFn: () => api<{ current: { purity: string; ratePaisePerGram: number }[] }>("/admin/gold-rates"), refetchInterval: 60_000, refetchOnWindowFocus: "always" });
+  return useQuery({ queryKey: qk.goldRates, queryFn: () => api<{ current: { purity: string; ratePaisePerGram: number }[] }>("/admin/gold-rates"), refetchInterval: 60_000, refetchOnWindowFocus: "always", enabled });
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -61,10 +63,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const cmd = useCommandMenu();
   const [collapsed, setCollapsed] = React.useState(false);
   const [mobileOpen, setMobileOpen] = React.useState(false);
-  React.useEffect(() => { if (me.data && me.data.role !== "ADMIN") router.replace("/field"); }, [me.data, router]);
+  const wrongRole = !!me.data && me.data.role !== "ADMIN";
+  React.useEffect(() => { if (wrongRole) router.replace("/field/today"); }, [wrongRole, router]);
   React.useEffect(() => setMobileOpen(false), [path]);
   const isActive = (n: NavItem) => (n.exact ? path === n.href : path === n.href || path.startsWith(n.href + "/"));
-  const rates = useRates();
+  const rates = useRates(!wrongRole);
   const r22 = rates.data?.current.find((r) => r.purity === "K22");
 
   const sidebar = (
@@ -97,7 +100,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Search */}
       <div className="px-3 pb-2">
-        <button type="button" onClick={() => cmd.setOpen(true)} className="flex h-8 w-full items-center gap-2 rounded-lg border border-line-strong bg-white px-2.5 text-[14px] text-ink-3 shadow-[0_1px_2px_rgb(0_0_0/0.03)] hover:text-ink-2">
+        <button type="button" onClick={() => { setMobileOpen(false); cmd.setOpen(true); }} className="flex h-8 w-full items-center gap-2 rounded-lg border border-line-strong bg-white px-2.5 text-[14px] text-ink-3 shadow-[0_1px_2px_rgb(0_0_0/0.03)] transition-colors hover:border-[#d9d9db] hover:text-ink-2">
           <SearchIcon className="size-4" />Search<span className="ml-auto"><Kbd>⌘K</Kbd></span>
         </button>
       </div>
@@ -143,28 +146,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-white text-ink">
-      {!collapsed && <aside className="hidden w-[240px] shrink-0 border-r border-line lg:block">{sidebar}</aside>}
-      {/* Mobile drawer */}
-      {mobileOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-black/20" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 w-[260px] border-r border-line shadow-xl">{sidebar}</aside>
+    <ShellNav.Provider value={{ open: () => (collapsed ? setCollapsed(false) : setMobileOpen(true)), collapsed }}>
+      <div className="flex h-dvh overflow-hidden bg-white text-ink">
+        {!collapsed && <aside className="hidden w-[240px] shrink-0 border-r border-line lg:block">{sidebar}</aside>}
+        {/* Phones and tablets: the sidebar is a left sheet (Radix dialog: focus trap, Esc, scrim). */}
+        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+          <SheetContent side="left" showCloseButton={false} className="w-[264px] max-w-[85vw] gap-0 border-r border-line p-0 data-[side=left]:w-[264px] data-[side=left]:sm:max-w-[264px]">
+            <SheetTitle className="sr-only">Navigation</SheetTitle>
+            <SheetDescription className="sr-only">Move between Home, field, sales and workspace pages.</SheetDescription>
+            {sidebar}
+          </SheetContent>
+        </Sheet>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <main className="flex min-h-0 flex-1 flex-col overflow-hidden">{wrongRole ? null : children}</main>
         </div>
-      )}
-      <div className="flex min-w-0 flex-1 flex-col">
-        {(
-          <div className={cn("flex h-11 shrink-0 items-center gap-2 border-b border-line px-3", !collapsed && "lg:hidden")}>
-            <button type="button" aria-label="Open navigation" onClick={() => (collapsed ? setCollapsed(false) : setMobileOpen(true))} className="grid size-8 place-items-center rounded-md text-ink-2 hover:bg-hover">
-              <PanelLeftIcon className="size-4" />
-            </button>
-            <span className="text-[14px] font-medium">{me.data?.tenant.name ?? "Aurum Jewels"}</span>
-            <button type="button" onClick={() => cmd.setOpen(true)} className="ml-auto grid size-8 place-items-center rounded-md text-ink-2 hover:bg-hover" aria-label="Search"><SearchIcon className="size-4" /></button>
-          </div>
-        )}
-        <main className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</main>
+        <CommandMenu {...cmd} />
       </div>
-      <CommandMenu {...cmd} />
-    </div>
+    </ShellNav.Provider>
   );
 }

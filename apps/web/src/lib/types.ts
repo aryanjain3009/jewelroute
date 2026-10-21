@@ -4,7 +4,9 @@ export type Purity = "K24" | "K22" | "K18" | "K14";
 export type VisitStatus = "PLANNED" | "CHECKED_IN" | "ACTIVE" | "COMPLETED" | "MISSED" | "CANCELLED";
 export type Verification = "VERIFIED" | "LOW_ACCURACY" | "SIMULATED";
 export type MemoDisplayStatus = "ACTIVE" | "DUE_SOON" | "OVERDUE" | "PARTIALLY_RETURNED" | "RETURNED" | "CONVERTED_TO_ORDER";
-export type OrderStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED";
+/** v3: CONFIRMED is the normal case (no rule tripped); PENDING_APPROVAL only when a rule tripped.
+ *  `SUBMITTED` is legacy (migrated away in v3) — kept so an old row never crashes a screen. */
+export type OrderStatus = "DRAFT" | "CONFIRMED" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED" | "CANCELLED" | "SUBMITTED";
 export type CustodianType = "VAULT" | "AGENT" | "SHOP" | "SOLD" | "LOST";
 export type DeliveryStatus = "PENDING" | "SUCCEEDED" | "FAILED" | "DEAD";
 
@@ -27,21 +29,64 @@ export interface Design {
   makingChargeType: "PER_GRAM" | "PERCENT"; makingChargeValue: number; stoneValuePaise: number; otherComponents: { label: string; valuePaise: number }[];
   imageUrls: string[]; description?: string; price: PriceBreakdown; availablePieces?: Piece[]; pieces?: Piece[];
 }
-export interface OrderItem { id: string; designId: string; sku: string; name: string; purity: Purity; quantity: number; netWeightMg: number; ratePaisePerGram: number; goldValuePaise: number; makingPaise: number; stonePaise: number; otherPaise: number; unitPricePaise: number; lineTotalPaise: number; imageUrl?: string }
+export interface OrderItem { id: string; pieceId?: string; designId: string; sku: string; name: string; purity: Purity; quantity: number; netWeightMg: number; ratePaisePerGram: number; goldValuePaise: number; makingPaise: number; stonePaise: number; otherPaise: number; unitPricePaise: number; lineTotalPaise: number; imageUrl?: string }
 export interface Order {
-  id: string; number: string; status: OrderStatus; shop: Ref & { area?: string }; agent: Ref; visitId?: string;
+  id: string; number: string; status: OrderStatus; shop: Ref & { area?: string }; agent: Ref; visitId?: string; sourceMemoId?: string; itemCount?: number;
   subtotalPaise: number; gstPaise: number; totalPaise: number;
   goldRateSnapshot: { purity: Purity; goldRateId: string; ratePaisePerGram: number; effectiveFrom: string }[];
   items: OrderItem[]; notes?: string; decidedBy?: Ref; decidedAt?: string; rejectionReason?: string; createdAt: string;
+  /** v3 — the rule evaluation frozen when the order was written (server-authoritative). */
+  approval?: OrderApproval;
+  settledAt?: string | null; cancelledAt?: string | null; cancellationReason?: string | null;
 }
+export type SelfAckReason = "AGENT_SESSION" | "AGENT_DEVICE" | "CODE_VIEWED_ON_AGENT_DEVICE";
 export interface MemoItem { id: string; status: "OUT" | "RETURNED" | "CONVERTED"; valuePaise: number; returnedAt?: string; piece: Piece }
 export interface Memo {
   id: string; number: string; status: "ACTIVE" | "PARTIALLY_RETURNED" | "RETURNED" | "CONVERTED_TO_ORDER"; displayStatus: MemoDisplayStatus; extended: boolean;
   shop: Ref & { area?: string }; agent: Ref; visitId?: string; dueDate: string; daysToDue: number; notes?: string;
   totalValuePaise: number; outstandingValuePaise: number; ackStatus: "PENDING" | "ACKNOWLEDGED"; ackAt?: string; ackMethod?: string;
+  /** Audit B8: the acknowledgement came from the agent's own session/device (evidence only, nothing is blocked). */
+  selfAckSuspected?: boolean; selfAckReason?: SelfAckReason;
   items: MemoItem[]; extensions: { fromDueDate: string; toDueDate: string; reason?: string; createdAt: string }[]; createdAt: string;
 }
-export interface ActivityItem { id: string; type: string; title: string; amountPaise?: number; actor?: Ref; shop?: Ref; entity: { type: string; id: string }; createdAt: string }
+export type ActivityKind = "visit" | "order" | "memo" | "custody" | "proof" | "ack" | "rate" | "webhook" | "system";
+/** v3 indexed refs: every record an event touches, so any surface can show it the same way. */
+export interface ActivityRefs { shop?: Ref; agent?: Ref; visit?: { id: string; date: string; shopName: string }; order?: { id: string; number: string }; memo?: { id: string; number: string }; pieces?: { id: string; tagCode: string }[] }
+/** v3 optional detail: photo, amounts, from→to. Render only what is present. */
+export interface ActivityDetail {
+  photoUrl?: string; amountPaise?: number; status?: string; reasons?: string[]; fromLabel?: string; toLabel?: string; reason?: string;
+  pieceCount?: number; dueDate?: string; verification?: string; distanceM?: number; method?: string;
+}
+export interface ActivityItem {
+  id: string; type: string; title: string; amountPaise?: number; actor?: Ref; shop?: Ref; entity: { type: string; id: string }; createdAt: string;
+  kind?: ActivityKind; refs?: ActivityRefs; detail?: ActivityDetail;
+}
+export interface ActivityPage { items: ActivityItem[]; nextCursor?: string | null }
+export interface ActivityFilter { shopId?: string; agentId?: string; visitId?: string; orderId?: string; memoId?: string; pieceId?: string }
+
+/* ---- v3 credit (docs/CONTRACT.md § v3; arithmetic in @jewelroute/shared creditPosition) ---- */
+export type ApprovalReason = "CREDIT_LIMIT" | "ORDER_THRESHOLD";
+export interface CreditPosition {
+  creditLimitPaise: number; openingOutstandingPaise?: number; unsettledOrdersPaise?: number;
+  outstandingPaise: number; memoExposurePaise: number; exposurePaise: number;
+  /** null = no credit limit configured (unlimited) — never render it as ₹0. */
+  availableCreditPaise: number | null; overLimit?: boolean; approvalThresholdPaise?: number | null;
+  orderAmountPaise: number; projectedExposurePaise: number; requiresApproval: boolean; reasons: ApprovalReason[];
+  asOf?: string;
+}
+/** `GET /v1/memos/:id/convert-preview?pieceIds=&visitId=` — read-only preview of a memo-to-sale: lines at
+ *  today's rate (one piece each, pre-GST), GST once on the subtotal, and the shared credit rule with the
+ *  pieces already out of memo exposure (what the convert does). The convert re-checks under its locks. */
+export interface ConvertPreview {
+  memoId: string; memoNumber: string; visitId?: string;
+  lines: { pieceId: string; tagCode: string; designId: string; sku: string; name: string; purity: Purity; imageUrl?: string; netWeightMg: number; goldRateId: string; ratePaisePerGram: number; goldValuePaise: number; makingPaise: number; stonePaise: number; otherPaise: number; unitPricePaise: number; lineTotalPaise: number; memoValuePaise: number }[];
+  subtotalPaise: number; gstPaise: number; totalPaise: number;
+  goldRateSnapshot: { purity: Purity; goldRateId: string; ratePaisePerGram: number; effectiveFrom: string }[];
+  credit: CreditPosition;
+}
+/** `position` is null for orders written before v3 (no snapshot was taken). */
+export interface OrderApproval { required: boolean; reasons: ApprovalReason[]; position: CreditPosition | null }
+export interface TenantSettings { approvalThresholdPaise: number | null; demoMode: boolean }
 export interface GoldRateRow { purity: Purity; ratePaisePerGram: number; goldRateId: string; effectiveFrom: string; createdBy?: Ref | null }
 
 // ---- v2 (docs/CONTRACT.md "v2 — Attio-style IA"); additive ----
@@ -58,12 +103,15 @@ export interface CustodyEventRow {
   location?: { lat: number; lng: number; label: string; distanceM?: number; verification?: Verification };
   visit?: { id: string; shopName: string }; proof?: { id: string; url: string }; memo?: { id: string; number: string };
   eventId?: string;
+  /** v3: retailer acknowledgement of a memo hand-over; `order` for conversions. */
+  ack?: { status: "PENDING" | "ACKNOWLEDGED"; method?: "QR_CONFIRM" | "OTP"; at?: string; by?: "retailer"; selfAckSuspected?: true; note?: string };
+  order?: { id: string; number: string };
 }
 export type PieceStatus = "IN_VAULT" | "WITH_AGENT" | "ON_MEMO" | "OVERDUE" | "SOLD" | "LOST";
 /** Where an agent-held piece is (API-resolved; AGENT custody only). Render `label`. */
 export interface PieceLocation { kind: "IN_VISIT" | "LAST_CHECK_IN" | "FIELD_BAG"; label: string; shop?: Ref; visitId?: string; lat?: number; lng?: number; verification?: Verification; at?: string }
 export type PieceRow = Piece & { status: PieceStatus; memo?: { id: string; number: string; dueDate: string }; lastMovedAt: string; collection: string; location?: PieceLocation };
-export type AttentionKind = "MEMO_OVERDUE" | "MEMO_DUE_TODAY" | "VISIT_MISSED" | "PROOF_MISSING" | "PROOF_SIMULATED" | "ORDER_PENDING" | "WEBHOOK_FAILING";
+export type AttentionKind = "MEMO_OVERDUE" | "MEMO_DUE_TODAY" | "VISIT_MISSED" | "PROOF_MISSING" | "PROOF_SIMULATED" | "ORDER_PENDING" | "WEBHOOK_FAILING" | "ACK_SELF_SUSPECTED";
 export interface AttentionItem {
   id: string; kind: AttentionKind; severity: "high" | "medium"; title: string; subtitle: string; amountPaise?: number; at: string;
   entity: { type: "memo" | "visit" | "order" | "webhook" | "shop"; id: string };
@@ -73,6 +121,8 @@ export type ShopRow = Shop & {
   assignedAgent?: Ref; lastVisitAt?: string; lastVisitAgent?: Ref; openOrdersPaise: number;
   activeMemoCount: number; activeMemoValuePaise: number; samplesHereCount: number; samplesHereValuePaise: number;
   nextVisit?: { id: string; date: string; plannedTime?: string; agent: Ref }; status: ShopStatus;
+  /** v3 */ credit?: CreditPosition; upcomingVisit?: { id: string; date: string; plannedTime?: string; agent: Ref };
+  lastOrder?: { id: string; number: string; totalPaise: number; status: OrderStatus; createdAt: string };
 };
 export type AuditRefType = "user" | "shop" | "order" | "memo" | "piece" | "visit" | "design" | "webhook";
 /** Human audit row: render `actor.name` + `summary`; `refs` labels any id in before/after. */

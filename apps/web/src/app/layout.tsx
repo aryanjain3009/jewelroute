@@ -8,7 +8,8 @@ const serif = Newsreader({ variable: "--font-serif", subsets: ["latin"], display
 
 export const metadata: Metadata = {
   title: { default: "JewelRoute — field sales for jewellery makers", template: "%s · JewelRoute" },
-  description: "Know where every salesman went, what they sold, and where every piece of jewellery is.",
+  description: "Know where every salesman went, what he sold, and where every gram is. Field sales for jewellery manufacturers and wholesalers.",
+  openGraph: { siteName: "JewelRoute", locale: "en_IN", type: "website" },
 };
 export const viewport: Viewport = { themeColor: "#ffffff", width: "device-width", initialScale: 1, viewportFit: "cover" };
 

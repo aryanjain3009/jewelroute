@@ -81,6 +81,10 @@
 
   --shadow-hairline: 0 0 0 1px var(--jr-line);
   --shadow-float: 0 1px 2px rgb(25 23 20 / 0.04), 0 8px 24px -8px rgb(25 23 20 / 0.12);
+
+  /* Motion (emil-design-eng): strong ease-out for enter/press, iOS drawer curve for panels. */
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 :root {
@@ -172,6 +176,14 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* Pressable feedback for app chrome (buttons, chips): a 0.97 press, fast release (emil-design-eng).
+   Tailwind 4's hover: is already gated on (hover: hover), so taps never leave a stuck hover. */
+@layer utilities {
+  .press { transition-property: transform, background-color, color, border-color, box-shadow, opacity; transition-duration: 150ms; transition-timing-function: var(--ease-out-strong); }
+  .press:active:not(:disabled) { transform: scale(0.97); }
+}
+@media (prefers-reduced-motion: reduce) { .press:active:not(:disabled) { transform: none; } }
 
 /* MapLibre chrome tuned to the palette */
 .maplibregl-ctrl-group { border-radius: 10px !important; box-shadow: var(--shadow-float) !important; border: 1px solid var(--jr-line); }

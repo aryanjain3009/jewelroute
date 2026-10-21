@@ -15,7 +15,6 @@ export const qk = {
   catalog: ["catalog"] as const,
   // admin
   home: ["home"] as const,
-  dashboard: ["dashboard"] as const,
   search: ["search"] as const,
   shops: ["shops"] as const,
   shop: (id?: string) => (id ? (["shop", id] as const) : (["shop"] as const)),
@@ -38,16 +37,25 @@ export const qk = {
   eventTypes: ["event-types"] as const,
   geofence: (visitId: string) => ["geofence", visitId] as const,
   activity: ["activity"] as const,
+  settings: ["settings"] as const,
+  /** Credit position for a prospective order (field review) or a shop. */
+  credit: ["credit"] as const,
+  /** Memo-to-sale preview (prices at today's rate + credit net of the pieces sold). */
+  convertPreview: ["convert-preview"] as const,
 };
+
+/** Polling for live screens (focus refetch covers the rest). A field visit polls while one of its orders
+ *  waits for the manager, so the decision (and a rejection's reason) reaches an agent who keeps it open. */
+export const POLL = { home: 10_000, deliveries: 5_000, pendingDecision: 10_000, ackPage: 5_000, today: 30_000 } as const;
 
 export type Change =
   | "visit.checked_in" | "visit.proof_uploaded" | "visit.note_added" | "visit.completed" | "visit.assigned"
-  | "order.created" | "order.decided"
+  | "order.created" | "order.decided" | "order.settled" | "order.cancelled" | "order.unsold"
   | "memo.created" | "memo.returned" | "memo.extended" | "memo.converted" | "memo.acknowledged"
-  | "piece.moved" | "gold_rate.set" | "shop.saved" | "design.saved" | "agent.saved" | "webhook.changed";
+  | "piece.moved" | "gold_rate.set" | "shop.saved" | "design.saved" | "agent.saved" | "webhook.changed" | "settings.saved";
 
-const everywhereVisit: QueryKey[] = [qk.today, qk.visit(), qk.fieldVisits, qk.home, qk.dashboard, qk.adminVisits, qk.adminVisit(), qk.shop(), qk.shops, qk.agent(), qk.agents, qk.activity];
-const custody: QueryKey[] = [qk.pieces, qk.piece(), qk.profile, qk.catalog, qk.designs, qk.memos, qk.memo(), qk.shop(), qk.shops, qk.agent(), qk.agents, qk.today, qk.visit(), qk.adminVisit(), qk.home, qk.dashboard, qk.activity];
+const everywhereVisit: QueryKey[] = [qk.today, qk.visit(), qk.fieldVisits, qk.home, qk.adminVisits, qk.adminVisit(), qk.shop(), qk.shops, qk.agent(), qk.agents, qk.activity];
+const custody: QueryKey[] = [qk.credit, qk.convertPreview, qk.pieces, qk.piece(), qk.profile, qk.catalog, qk.designs, qk.memos, qk.memo(), qk.shop(), qk.shops, qk.agent(), qk.agents, qk.today, qk.visit(), qk.adminVisit(), qk.home, qk.activity];
 
 export const AFFECTS: Record<Change, QueryKey[]> = {
   "visit.checked_in": everywhereVisit,
@@ -55,19 +63,26 @@ export const AFFECTS: Record<Change, QueryKey[]> = {
   "visit.note_added": [qk.visit(), qk.adminVisit(), qk.shop(), qk.activity],
   "visit.completed": [...everywhereVisit, qk.profile],
   "visit.assigned": [...everywhereVisit],
-  "order.created": [qk.orders, qk.order(), qk.visit(), qk.adminVisit(), qk.today, qk.shop(), qk.shops, qk.agent(), qk.agents, qk.home, qk.dashboard, qk.activity, qk.profile],
-  "order.decided": [qk.orders, qk.order(), qk.home, qk.dashboard, qk.shop(), qk.shops, qk.adminVisit(), qk.visit(), qk.activity],
-  "memo.created": custody,
-  "memo.returned": custody,
-  "memo.converted": [...custody, qk.orders, qk.order()],
-  "memo.extended": [qk.memos, qk.memo(), qk.home, qk.dashboard, qk.shop(), qk.visit(), qk.adminVisit(), qk.activity],
-  "memo.acknowledged": [qk.memos, qk.memo(), qk.visit(), qk.adminVisit(), qk.shop(), qk.activity],
+  "order.created": [qk.credit, qk.convertPreview, qk.orders, qk.order(), qk.visit(), qk.adminVisit(), qk.today, qk.shop(), qk.shops, qk.agent(), qk.agents, qk.home, qk.activity, qk.profile, qk.fieldVisits, qk.adminVisits],
+  "order.decided": [qk.orders, qk.order(), qk.home, qk.shop(), qk.shops, qk.adminVisit(), qk.visit(), qk.activity, qk.credit, qk.convertPreview, qk.agent(), qk.agents, qk.today, qk.adminVisits, qk.fieldVisits, qk.profile],
+  // Settling/cancelling changes the shop's outstanding → its credit, every list showing it, and the feed.
+  // Rejecting an order converted from a memo un-sells it: pieces go back to the shop on that memo.
+  "order.unsold": [...custody, qk.orders, qk.order(), qk.adminVisit(), qk.visit(), qk.adminVisits, qk.fieldVisits],
+  "order.settled": [qk.orders, qk.order(), qk.shop(), qk.shops, qk.credit, qk.convertPreview, qk.home, qk.activity, qk.agent(), qk.adminVisit(), qk.visit()],
+  "order.cancelled": [qk.orders, qk.order(), qk.shop(), qk.shops, qk.credit, qk.convertPreview, qk.home, qk.activity, qk.agent(), qk.agents, qk.adminVisit(), qk.visit(), qk.today, qk.profile, qk.adminVisits, qk.fieldVisits],
+  "memo.created": [...custody, qk.fieldVisits, qk.adminVisits],
+  "memo.returned": [...custody, qk.fieldVisits, qk.adminVisits],
+  "memo.converted": [...custody, qk.orders, qk.order(), qk.fieldVisits, qk.adminVisits],
+  "memo.extended": [qk.memos, qk.memo(), qk.home, qk.shop(), qk.visit(), qk.adminVisit(), qk.activity, qk.today, qk.profile, qk.pieces, qk.piece(), qk.shops, qk.agents, qk.agent()],
+  "memo.acknowledged": [qk.memos, qk.memo(), qk.visit(), qk.adminVisit(), qk.shop(), qk.piece(), qk.pieces, qk.home, qk.activity],
   "piece.moved": custody,
-  "gold_rate.set": [qk.goldRates, qk.catalog, qk.designs, qk.pieces, qk.piece(), qk.home, qk.dashboard, qk.profile, qk.shops, qk.shop(), qk.agents, qk.agent(), qk.activity],
-  "shop.saved": [qk.shops, qk.shop(), qk.home, qk.dashboard, qk.today],
-  "design.saved": [qk.designs, qk.catalog, qk.pieces],
-  "agent.saved": [qk.agents, qk.agent(), qk.home, qk.dashboard],
+  "gold_rate.set": [qk.goldRates, qk.convertPreview, qk.catalog, qk.designs, qk.pieces, qk.piece(), qk.home, qk.profile, qk.today, qk.visit(), qk.adminVisit(), qk.shops, qk.shop(), qk.agents, qk.agent(), qk.activity],
+  "shop.saved": [qk.shops, qk.shop(), qk.credit, qk.convertPreview, qk.home, qk.today, qk.activity, qk.adminVisits, qk.adminVisit(), qk.orders, qk.memos],
+  "design.saved": [qk.designs, qk.catalog, qk.pieces, qk.piece()],
+  "agent.saved": [qk.agents, qk.agent(), qk.home, qk.adminVisits, qk.shops, qk.shop(), qk.pieces],
   "webhook.changed": [qk.webhooks, qk.deliveries, qk.delivery(), qk.received, qk.home],
+  // The approval threshold changes every prospective credit check and the shop credit rows.
+  "settings.saved": [qk.settings, qk.credit, qk.convertPreview, qk.shops, qk.shop(), qk.me],
 };
 
 export function invalidateAfter(qc: QueryClient, ...changes: Change[]) {

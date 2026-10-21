@@ -4,20 +4,33 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useBackHref } from "@/lib/url-state";
 import { CountBadge } from "./chrome";
+import { ADMIN_NAV } from "./shell";
+import { NavToggle } from "./nav-context";
 
 type Icon = React.ComponentType<{ className?: string; strokeWidth?: number }>;
 
-export function RecordLayout({ back, panel, children }: { back?: { href: string; label: string }; panel: React.ReactNode; children: React.ReactNode }) {
+/** Record page frame. The top bar is Attio's breadcrumb: object icon + list (back to the list with its
+ *  filters) › this record. */
+export function RecordLayout({ back, crumb, panel, children }: { back?: { href: string; label: string }; crumb?: React.ReactNode; panel: React.ReactNode; children: React.ReactNode }) {
+  const backHref = useBackHref(back?.href ?? "/admin");
+  const nav = back ? ADMIN_NAV.flatMap((g) => g.items).find((n) => n.href === back.href) : undefined;
   return (
     <div className="flex h-full min-h-0 flex-col">
       {back && (
-        <div className="flex h-11 shrink-0 items-center border-b border-line px-4">
-          <Link href={back.href} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[13px] text-ink-2 hover:bg-hover hover:text-ink">
-            <ChevronLeftIcon className="size-3.5" />{back.label}
+        <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-3 text-[13px]">
+          <NavToggle className="ml-0 mr-0.5" />
+          <Link href={backHref} className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-ink-2 transition-colors hover:bg-hover hover:text-ink">
+            {nav ? <span aria-hidden className={cn("grid size-4 place-items-center rounded-[4px] text-white", nav.tint)}><nav.icon className="size-2.5" strokeWidth={2.4} /></span> : <ChevronLeftIcon className="size-3.5" />}
+            {back.label}
           </Link>
+          {crumb && <>
+            <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 text-ink-3" />
+            <span className="min-w-0 truncate px-1 font-medium text-ink">{crumb}</span>
+          </>}
         </div>
       )}
       {/* Below lg the panel stacks above the tabs and the whole record scrolls as one page. */}
@@ -32,10 +45,11 @@ export function RecordLayout({ back, panel, children }: { back?: { href: string;
 export function RecordHeader({ lead, title, subtitle, actions, primary }: { lead: React.ReactNode; title: React.ReactNode; subtitle?: React.ReactNode; actions?: React.ReactNode; primary?: React.ReactNode }) {
   return (
     <div className="border-b border-line px-5 pb-4 pt-5">
+      {(typeof title === "string" || typeof title === "number") && <title>{`${title} · JewelRoute`}</title>}
       <div className="flex items-center gap-3">
         {lead}
         <div className="min-w-0">
-          <h1 className="truncate text-[18px] font-semibold leading-tight tracking-[-0.01em] text-ink">{title}</h1>
+          <h1 className="truncate text-[18px] font-semibold leading-tight tracking-[-0.01em] text-ink" title={typeof title === "string" ? title : undefined}>{title}</h1>
           {subtitle && <p className="mt-0.5 truncate text-[13px] text-ink-2">{subtitle}</p>}
         </div>
       </div>
@@ -49,18 +63,25 @@ export function RecordHeader({ lead, title, subtitle, actions, primary }: { lead
   );
 }
 
-/** Collapsible "Shop details ▾" section of property rows. */
-export function PropertySection({ title, children, defaultOpen = true, action }: { title: string; children: React.ReactNode; defaultOpen?: boolean; action?: React.ReactNode }) {
-  const [open, setOpen] = React.useState(defaultOpen);
+/** Collapsible "Shop details ▾" section of property rows. `collapseBelowLg`: starts closed on phones and
+ *  tablets (where the panel stacks above the tabs and the main column already shows these facts), open
+ *  on desktop — decided in CSS so server and client render the same markup. */
+export function PropertySection({ title, children, defaultOpen = true, collapseBelowLg, action }: { title: string; children: React.ReactNode; defaultOpen?: boolean; collapseBelowLg?: boolean; action?: React.ReactNode }) {
+  const [toggled, setToggled] = React.useState<boolean | null>(null);
+  const small = () => typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches;
+  const open = toggled ?? defaultOpen;
+  const onToggle = () => setToggled((t) => !(t ?? (collapseBelowLg && small() ? false : defaultOpen)));
+  // Before the first toggle a collapseBelowLg section is closed below lg via CSS only.
+  const cssCollapsed = toggled === null && collapseBelowLg && defaultOpen;
   return (
     <div className="border-b border-line px-5 py-4 last:border-b-0">
-      <div className="mb-2 flex items-center">
-        <button type="button" onClick={() => setOpen((o) => !o)} className="inline-flex items-center gap-1 text-[14px] font-medium text-ink">
-          {title}<ChevronDownIcon className={cn("size-3.5 text-ink-3 transition-transform", !open && "-rotate-90")} />
+      <div className={cn("flex items-center", open && "mb-2", cssCollapsed && "max-lg:mb-0")}>
+        <button type="button" onClick={onToggle} aria-expanded={open} className="-mx-1 inline-flex items-center gap-1 rounded-md px-1 text-[14px] font-medium text-ink transition-colors hover:bg-hover">
+          {title}<ChevronDownIcon className={cn("size-3.5 text-ink-3 transition-transform duration-150", !open && "-rotate-90", cssCollapsed && "max-lg:-rotate-90")} />
         </button>
         {action && <div className="ml-auto">{action}</div>}
       </div>
-      {open && <dl className="flex flex-col">{children}</dl>}
+      {open && <dl className={cn("flex flex-col", cssCollapsed && "max-lg:hidden")}>{children}</dl>}
     </div>
   );
 }

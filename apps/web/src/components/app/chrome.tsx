@@ -2,9 +2,11 @@
 /** Attio-grade page chrome: title bar, view bar, sort/filter bar, buttons, chips, empty states.
  *  Measurements follow docs/DESIGN.md v2 (CSS px). Keep these small and quiet. */
 import * as React from "react";
-import { ChevronDownIcon, InfoIcon, ListFilterIcon, SearchIcon, XIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, InfoIcon, ListFilterIcon, SearchIcon, XIcon } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { NavToggle } from "./nav-context";
 
 type Icon = React.ComponentType<{ className?: string; strokeWidth?: number }>;
 
@@ -24,11 +26,11 @@ export const Btn = React.forwardRef<HTMLButtonElement, BtnProps>(function Btn(
       type="button"
       {...rest}
       className={cn(
-        "inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-medium transition-colors disabled:pointer-events-none disabled:opacity-45",
+        "press inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-medium outline-none focus-visible:ring-2 focus-visible:ring-blue/35 focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-45",
         size === "md" ? "h-8 px-3 text-[14px]" : "h-7 px-2.5 text-[13px]",
         !children && (size === "md" ? "w-8 px-0" : "w-7 px-0"),
-        variant === "default" && "border border-line-strong bg-white text-ink shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:bg-hover",
-        variant === "primary" && "bg-ink text-white shadow-[0_1px_2px_rgb(0_0_0/0.12)] hover:bg-ink/90",
+        variant === "default" && "border border-line-strong bg-white text-ink shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:border-[#d9d9db] hover:bg-hover",
+        variant === "primary" && "bg-ink text-white shadow-[0_1px_2px_rgb(0_0_0/0.12),inset_0_1px_0_rgb(255_255_255/0.08)] hover:bg-[#2c2d30]",
         variant === "ghost" && "text-ink-2 hover:bg-hover hover:text-ink",
         variant === "dashed" && "border border-dashed border-line-strong text-ink-2 hover:bg-hover hover:text-ink",
         variant === "danger" && "border border-line-strong bg-white text-danger hover:bg-danger-soft",
@@ -45,7 +47,9 @@ export const Btn = React.forwardRef<HTMLButtonElement, BtnProps>(function Btn(
 /* ---------- Page chrome ---------- */
 export function TitleBar({ icon: I, iconClass, title, info, children }: { icon?: Icon; iconClass?: string; title: React.ReactNode; info?: string; children?: React.ReactNode }) {
   return (
-    <div className="flex h-[52px] shrink-0 items-center gap-2 border-b border-line px-5">
+    <div className="flex h-[52px] shrink-0 items-center gap-2 border-b border-line px-4 sm:px-5">
+      {typeof title === "string" && <title>{`${title} · JewelRoute`}</title>}
+      <NavToggle />
       {I && (
         <span className={cn("grid size-5 place-items-center rounded-[5px] text-white", iconClass ?? "bg-ink")}>
           <I className="size-3.5" strokeWidth={2} />
@@ -75,15 +79,16 @@ export function ViewBar({ children, right }: { children?: React.ReactNode; right
 /** Segmented "views" control styled as Attio's view selector (a row of quiet tabs). */
 export function ViewTabs<T extends string>({ value, onChange, items }: { value: T; onChange: (v: T) => void; items: { value: T; label: string; count?: number; icon?: Icon }[] }) {
   return (
-    <div className="flex items-center gap-0.5 rounded-lg border border-line-strong bg-white p-0.5 shadow-[0_1px_2px_rgb(0_0_0/0.04)]">
+    <div className="flex max-w-full items-center gap-0.5 overflow-x-auto rounded-lg border border-line-strong bg-white p-0.5 shadow-[0_1px_2px_rgb(0_0_0/0.04)] scrollbar-none">
       {items.map((it) => (
         <button
           key={it.value}
           type="button"
           onClick={() => onChange(it.value)}
+          aria-pressed={value === it.value}
           className={cn(
-            "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium transition-colors",
-            value === it.value ? "bg-active text-ink" : "text-ink-2 hover:text-ink",
+            "press inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-blue/35",
+            value === it.value ? "bg-active text-ink" : "text-ink-2 hover:bg-hover hover:text-ink",
           )}
         >
           {it.icon && <it.icon className="size-3.5" strokeWidth={1.75} />}
@@ -106,25 +111,31 @@ export function FilterBar({ children, right }: { children?: React.ReactNode; rig
 
 export function SearchInput({ value, onChange, placeholder = "Search", className }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string }) {
   return (
-    <label className={cn("flex h-7 w-56 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-2 text-[13px] focus-within:border-blue focus-within:ring-2 focus-within:ring-blue/15", className)}>
+    <label className={cn("flex h-7 w-56 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-2 text-[13px] transition-[border-color,box-shadow] duration-150 hover:border-[#d9d9db] focus-within:border-blue focus-within:ring-2 focus-within:ring-blue/15", className)}>
       <SearchIcon className="size-3.5 text-ink-3" />
       <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-ink-3" />
-      {value && <button type="button" aria-label="Clear search" onClick={() => onChange("")}><XIcon className="size-3.5 text-ink-3" /></button>}
+      {value && <button type="button" aria-label="Clear search" onClick={() => onChange("")} className="grid size-4 place-items-center rounded text-ink-3 hover:text-ink"><XIcon className="size-3.5" /></button>}
     </label>
   );
 }
 
-/** "Sorted by X" chip — Attio's sort affordance. Cycles through options on click. */
+/** "Sorted by X" chip — Attio's sort affordance: opens a menu of fields, the current one checked. */
 export function SortChip<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
   const cur = options.find((o) => o.value === value) ?? options[0];
   return (
-    <button
-      type="button"
-      onClick={() => { const i = options.findIndex((o) => o.value === value); onChange(options[(i + 1) % options.length].value); }}
-      className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-2.5 text-[13px] text-ink-2 hover:bg-hover"
-    >
-      <ListFilterIcon className="size-3.5" />Sorted by <span className="font-medium text-ink">{cur.label}</span>
-    </button>
+    <DropdownMenu>
+      <DropdownMenuTrigger className="press inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-lg border border-line-strong bg-white px-2.5 text-[13px] text-ink-2 outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-blue/35 data-[state=open]:bg-hover">
+        <ListFilterIcon className="size-3.5" />Sorted by <span className="font-medium text-ink">{cur.label}</span><ChevronDownIcon className="size-3 text-ink-3" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-52">
+        <DropdownMenuLabel className="text-[12px] font-normal text-ink-3">Sort shops by</DropdownMenuLabel>
+        {options.map((o) => (
+          <DropdownMenuItem key={o.value} onSelect={() => onChange(o.value)} className="text-[13px]">
+            <span className="flex-1">{o.label}</span>{o.value === value && <CheckIcon className="size-3.5 text-ink" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -134,11 +145,11 @@ export function FilterChip({ label, value, onChange, options, icon: I }: { label
   const cur = options.find((o) => o.value === value);
   return (
     <label className={cn(
-      "relative inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 text-[13px]",
-      active ? "border-blue/30 bg-selected text-ink" : "border-dashed border-line-strong text-ink-2 hover:bg-hover",
+      "press relative inline-flex h-7 max-w-[260px] shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 text-[13px] focus-within:ring-2 focus-within:ring-blue/35",
+      active ? "border-blue/30 bg-selected text-ink" : "border-dashed border-line-strong text-ink-2 hover:border-solid hover:bg-hover hover:text-ink",
     )}>
       {I && <I className="size-3.5" strokeWidth={1.75} />}
-      <span>{label}{active && <>: <span className="font-medium">{cur?.label}</span></>}</span>
+      <span className="truncate">{label}{active && <>: <span className="font-medium">{cur?.label}</span></>}</span>
       <ChevronDownIcon className="size-3 text-ink-3" />
       <select value={value} onChange={(e) => onChange(e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" aria-label={label}>
         {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -200,15 +211,24 @@ export function Empty({ icon: I, title, hint, action }: { icon?: Icon; title: st
   );
 }
 export function RowsSkeleton({ rows = 8 }: { rows?: number }) {
+  // A table-shaped skeleton (header + rows with varied widths) so the page doesn't jump when data lands.
+  const W = [["w-40", "w-24", "w-20"], ["w-32", "w-28", "w-16"], ["w-44", "w-20", "w-24"], ["w-36", "w-24", "w-14"]];
   return (
-    <div className="divide-y divide-line" aria-busy>
-      {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="flex h-10 items-center gap-3 px-5">
-          <span className="size-4 rounded bg-hover" />
-          <span className="h-3 w-40 animate-pulse rounded bg-hover" />
-          <span className="ml-auto h-3 w-24 animate-pulse rounded bg-hover" />
-        </div>
-      ))}
+    <div className="min-h-0 flex-1 overflow-hidden" aria-busy aria-label="Loading">
+      <div className="flex h-9 items-center gap-6 border-b border-line px-5"><span className="h-2.5 w-16 rounded bg-hover" /><span className="h-2.5 w-14 rounded bg-hover" /><span className="ml-auto h-2.5 w-12 rounded bg-hover" /></div>
+      <div className="divide-y divide-line">
+        {Array.from({ length: rows }).map((_, i) => {
+          const w = W[i % W.length];
+          return (
+            <div key={i} className="flex h-10 items-center gap-3 px-5" style={{ opacity: 1 - i * 0.07 }}>
+              <span className="size-5 shrink-0 rounded-[5px] bg-hover" />
+              <span className={cn("h-3 animate-pulse rounded bg-hover", w[0])} />
+              <span className={cn("ml-6 hidden h-3 animate-pulse rounded bg-hover sm:block", w[1])} />
+              <span className={cn("ml-auto h-3 animate-pulse rounded bg-hover", w[2])} />
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

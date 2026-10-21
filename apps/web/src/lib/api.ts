@@ -9,16 +9,42 @@ export class ApiError extends Error {
 
 type Opts = { method?: string; body?: unknown; idempotencyKey?: string | true; signal?: AbortSignal; headers?: Record<string, string> };
 
+/** Run `fn` while holding a browser-wide lock, so two tabs never rotate the same refresh token at once
+ *  (the loser would present a token the winner just rotated, which revokes the whole session family). */
+function withLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator !== "undefined" ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
+  return locks ? (locks.request(name, fn) as Promise<T>) : fn();
+}
+
 let refreshing: Promise<boolean> | null = null;
-async function refresh(): Promise<boolean> {
-  refreshing ??= fetch("/api/v1/auth/refresh", { method: "POST", credentials: "include" })
-    .then((r) => r.ok)
-    .catch(() => false)
-    .finally(() => setTimeout(() => (refreshing = null), 0));
+/** One refresh per tab at a time (single flight), serialized across tabs. Inside the lock, first check
+ *  whether another tab already refreshed (the cookies are shared); only then rotate. */
+function refresh(): Promise<boolean> {
+  refreshing ??= withLock("jr-session-refresh", async () => {
+    const opts: RequestInit = { credentials: "include", cache: "no-store" };
+    const me = await fetch("/api/v1/auth/me", opts).catch(() => null);
+    if (me?.ok) return true;
+    const r = await fetch("/api/v1/auth/refresh", { ...opts, method: "POST" }).catch(() => null);
+    return !!r?.ok;
+  }).finally(() => setTimeout(() => (refreshing = null), 0));
   return refreshing;
 }
 
-export async function api<T = unknown>(path: string, opts: Opts = {}, retried = false): Promise<T> {
+let signingOut = false;
+/** The session is gone: clear both cookies (so the middleware can't bounce /login back into the app on a
+ *  still-unexpired access token) and go to sign-in, returning here afterwards. */
+function toSignIn(reason?: string) {
+  if (typeof window === "undefined" || signingOut || location.pathname.startsWith("/login")) return;
+  signingOut = true;
+  const q = new URLSearchParams({ next: location.pathname + location.search });
+  if (reason) q.set("reason", reason);
+  const go = () => location.assign(`/login?${q}`);
+  fetch("/api/v1/auth/logout", { method: "POST", credentials: "include" }).then(go, go);
+}
+
+const HANDSHAKE = /^\/auth\/(login|refresh|logout)\b/;
+
+export async function api<T = unknown>(path: string, opts: Opts = {}, attempt = 0): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json", ...opts.headers };
   let body: BodyInit | undefined;
   if (opts.body instanceof FormData) body = opts.body;
@@ -33,11 +59,12 @@ export async function api<T = unknown>(path: string, opts: Opts = {}, retried = 
   let json: any = null;
   try { json = await res.json(); } catch { /* empty body */ }
 
-  if (res.status === 401 && !retried && !path.startsWith("/auth/")) {
-    if (await refresh()) return api<T>(path, opts, true);
-    if (typeof window !== "undefined" && !location.pathname.startsWith("/login")) {
-      location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
-    }
+  // 401: refresh once and retry (the same Idempotency-Key, so a create can't double). If the refresh fails,
+  // retry once more anyway — another tab may have rotated the shared cookies meanwhile — then sign in.
+  // Every call does this, including /auth/me; only the session handshake itself does not.
+  if (res.status === 401 && !HANDSHAKE.test(path)) {
+    if (attempt === 0) { await refresh(); return api<T>(path, opts, 1); }
+    toSignIn(json?.error?.code === "ACCOUNT_DISABLED" ? "disabled" : undefined);
   }
   if (!res.ok || json?.ok === false) {
     const e = json?.error ?? {};

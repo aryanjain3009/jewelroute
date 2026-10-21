@@ -33,6 +33,7 @@ export function relTime(iso: string, now = new Date()): string {
   const s = Math.round((now.getTime() - new Date(iso).getTime()) / 1000);
   if (s < 0) {
     const m = Math.round(-s / 60);
+    if (m < 1) return "in under a minute";
     return m < 60 ? `in ${m} min` : new Intl.DateTimeFormat("en-IN", { timeZone: IST, day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(new Date(iso));
   }
   if (s < 45) return "just now";
@@ -53,7 +54,7 @@ export function Timeline({ items, grouped = true, empty, className }: { items: T
     if (last && last.label === g) last.items.push(it); else groups.push({ label: g, items: [it] });
   }
   return (
-    <div className={cn("flex flex-col gap-4", className)}>
+    <div className={cn("@container flex flex-col gap-4", className)}>
       {groups.map((g, gi) => (
         <div key={gi + g.label}>
           {g.label && <h3 className="mb-2 text-[13px] font-semibold text-ink">{g.label}</h3>}
@@ -70,9 +71,17 @@ export function Timeline({ items, grouped = true, empty, className }: { items: T
                     tabIndex={it.onClick ? 0 : undefined}
                     onKeyDown={it.onClick ? (e) => { if (e.key === "Enter") it.onClick!(); } : undefined}
                   >
-                    <p className={cn("min-w-0 flex-1 text-[14px] leading-6 text-ink-2 [&_b]:font-medium [&_b]:text-ink", it.tone === "danger" && "[&_b]:text-danger", it.tone === "warn" && "[&_b]:text-warn")}>{it.text}</p>
-                    {it.right && <span className="shrink-0 pt-0.5 text-[13px]">{it.right}</span>}
-                    <time dateTime={it.at} className="shrink-0 whitespace-nowrap pt-0.5 text-[13px] text-ink-3" suppressHydrationWarning>{now ? relTime(it.at, n) : ""}</time>
+                    <div className="min-w-0 flex-1">
+                      <p className={cn("text-[14px] leading-6 text-ink-2 [&_b]:font-medium [&_b]:text-ink", it.tone === "danger" && "[&_b]:text-danger", it.tone === "warn" && "[&_b]:text-warn")}>{it.text}</p>
+                      {/* Narrow containers (rails, previews): amount and time sit under the sentence instead of squeezing it. */}
+                      <p className="flex items-center gap-1.5 text-[12.5px] leading-5 text-ink-3 @lg:hidden">
+                        {it.right && <span className="text-[12.5px]">{it.right}</span>}
+                        {it.right && <span aria-hidden>·</span>}
+                        <time dateTime={it.at} suppressHydrationWarning>{now ? relTime(it.at, n) : ""}</time>
+                      </p>
+                    </div>
+                    {it.right && <span className="hidden shrink-0 pt-0.5 text-[13px] @lg:block">{it.right}</span>}
+                    <time dateTime={it.at} className="hidden shrink-0 whitespace-nowrap pt-0.5 text-[13px] text-ink-3 @lg:block" suppressHydrationWarning>{now ? relTime(it.at, n) : ""}</time>
                   </div>
                   {it.body && <div className="mt-1.5 rounded-[10px] border border-line p-3">{it.body}</div>}
                 </div>
