@@ -20,7 +20,7 @@ after(stop);
 describe('record activity, piece location, delivery paging, batch approve', () => {
   test('R1. order, memo and piece records carry their own activity (older than the workspace feed)', async () => {
     // order: created (+ decision) events whose aggregate is the order
-    const pending = (await api(ADMIN, 'GET', '/v1/admin/orders?status=SUBMITTED')).data[0];
+    const pending = (await api(ADMIN, 'GET', '/v1/admin/orders?status=PENDING_APPROVAL')).data[0];
     let rec = (await api(ADMIN, 'GET', `/v1/admin/orders/${pending.id}`)).data;
     assert.ok(Array.isArray(rec.activity));
     assert.ok(rec.activity.some((a: J) => a.type === 'order.created' && a.entity.id === pending.id), JSON.stringify(rec.activity));
@@ -111,7 +111,7 @@ describe('record activity, piece location, delivery paging, batch approve', () =
   });
 
   test('R4. batch approve: per-order results, each order its own transaction, audited, one order.approved each', async () => {
-    // make two more SUBMITTED orders through the API
+    // make three more orders through the API
     const t = (await api(RAHUL, 'GET', '/v1/field/today')).data;
     const v = t.visits.find((x: J) => x.status === 'PLANNED');
     const shop = await db.shop.findUniqueOrThrow({ where: { id: v.shop.id } });
@@ -119,7 +119,17 @@ describe('record activity, piece location, delivery paging, batch approve', () =
     await uploadProof(RAHUL, v.id, shop.lat, shop.lng);
     const design = await db.jewelryDesign.findFirstOrThrow({ where: { tenantId: AURUM, active: true, purity: 'K22' } });
     const mk = async () => (await api(RAHUL, 'POST', '/v1/orders', { visitId: v.id, items: [{ designId: design.id, quantity: 1 }] }, { 'Idempotency-Key': randomUUID() })).data.order;
-    const [o1, o2, o3] = [await mk(), await mk(), await mk()];
+    // v3: make them PENDING_APPROVAL (threshold 1 paisa), plus one CONFIRMED that batch approve must refuse.
+    const normal = await mk();
+    assert.equal(normal.status, 'CONFIRMED');
+    await api(ADMIN, 'PATCH', '/v1/admin/settings', { approvalThresholdPaise: 1 });
+    let o1: J, o2: J, o3: J;
+    try {
+      [o1, o2, o3] = [await mk(), await mk(), await mk()];
+    } finally {
+      await api(ADMIN, 'PATCH', '/v1/admin/settings', { approvalThresholdPaise: 100_000_000 });
+    }
+    assert.ok([o1, o2, o3].every((o) => o.status === 'PENDING_APPROVAL'));
     // The already-decided fixture is this test's own order, approved here — never "some APPROVED order"
     // (that could be the one R1 approved seconds ago and carry a fresh audit row).
     assert.equal((await api(ADMIN, 'POST', `/v1/admin/orders/${o3.id}/approve`)).status, 200);
@@ -127,7 +137,7 @@ describe('record activity, piece location, delivery paging, batch approve', () =
     assert.equal(decided.status, 'APPROVED');
     const auditBefore = await db.auditLog.count({ where: { entityId: decided.id } });
     const eventsBefore = await db.outboxEvent.count({ where: { aggregateId: decided.id } });
-    const r = await api(ADMIN, 'POST', '/v1/admin/orders/approve', { orderIds: [o1.id, 'nope-not-an-order', decided.id, o2.id, o1.id] });
+    const r = await api(ADMIN, 'POST', '/v1/admin/orders/approve', { orderIds: [o1.id, 'nope-not-an-order', decided.id, o2.id, o1.id, normal.id] });
     assert.equal(r.status, 200, JSON.stringify(r.json));
     assert.deepEqual(
       r.data.results.map((x: J) => [x.id, x.ok, x.error?.code]),
@@ -136,10 +146,11 @@ describe('record activity, piece location, delivery paging, batch approve', () =
         ['nope-not-an-order', false, 'NOT_FOUND'],
         [decided.id, false, 'ORDER_ALREADY_DECIDED'],
         [o2.id, true, undefined],
+        [normal.id, false, 'ORDER_NOT_PENDING'],
       ],
     );
     assert.equal(r.data.approved, 2);
-    assert.equal(r.data.failed, 2);
+    assert.equal(r.data.failed, 3);
     for (const o of [o1, o2]) {
       const row = await db.order.findUniqueOrThrow({ where: { id: o.id } });
       assert.equal(row.status, 'APPROVED');
@@ -153,5 +164,17 @@ describe('record activity, piece location, delivery paging, batch approve', () =
     // validation + auth
     assert.equal((await api(ADMIN, 'POST', '/v1/admin/orders/approve', { orderIds: [] })).status, 400);
     assert.equal((await api(RAHUL, 'POST', '/v1/admin/orders/approve', { orderIds: [o1.id] })).status, 403);
+  });
+  test('R5. shop PATCH: null clears owner and phone, opening balance is editable, omitted fields are untouched', async () => {
+    const shop = await db.shop.findFirstOrThrow({ where: { name: 'Sharma Jewellers' } });
+    const r = await api(ADMIN, 'PATCH', `/v1/admin/shops/${shop.id}`, { ownerName: null, phone: null, openingOutstandingPaise: 12_345_00 });
+    assert.equal(r.status, 200);
+    const after = await db.shop.findUniqueOrThrow({ where: { id: shop.id } });
+    assert.equal(after.ownerName, null);
+    assert.equal(after.phone, null);
+    assert.equal(after.openingOutstandingPaise, 1_234_500n);
+    assert.equal(after.creditLimitPaise, shop.creditLimitPaise, 'omitted credit limit unchanged');
+    assert.equal(after.city, shop.city, 'omitted city unchanged');
+    assert.equal((await api(ADMIN, 'PATCH', `/v1/admin/shops/${shop.id}`, { openingOutstandingPaise: -1 })).status, 400);
   });
 });

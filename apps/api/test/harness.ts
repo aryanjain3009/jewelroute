@@ -29,16 +29,24 @@ export const ENV = {
   JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET ?? 'test-refresh-secret-0123456789',
   APP_SECRET: process.env.APP_SECRET ?? 'test-app-secret-0123456789',
   APP_ENCRYPTION_KEY: process.env.APP_ENCRYPTION_KEY ?? Buffer.alloc(32, 7).toString('base64'),
+  // Test receivers listen on 127.0.0.1; the SSRF guard is exercised by test/egress.test.ts with this off.
+  WEBHOOK_ALLOW_PRIVATE: 'true',
+  TRUST_PROXY: '',
 };
 process.env.DATABASE_URL = DB;
 
 export const db = new PrismaClient({ datasources: { db: { url: DB } } });
 let server: ChildProcess | undefined;
 
-export async function start() {
+/** Server stdout (request logs) when started with `{ captureLogs: true }`. */
+export const serverLog: string[] = [];
+
+/** `extra` overrides the server's environment for one test file (e.g. WEBHOOK_ALLOW_PRIVATE off). */
+export async function start(extra: NodeJS.ProcessEnv = {}, opts: { captureLogs?: boolean } = {}) {
   execSync('npx prisma migrate deploy', { cwd: root, env: ENV, stdio: 'pipe' });
   execSync('npx tsx prisma/seed.ts', { cwd: root, env: ENV, stdio: 'pipe' });
-  server = spawn(process.execPath, ['dist/main.js'], { cwd: root, env: ENV, stdio: ['ignore', 'ignore', 'inherit'] });
+  server = spawn(process.execPath, ['dist/main.js'], { cwd: root, env: { ...ENV, ...extra }, stdio: ['ignore', opts.captureLogs ? 'pipe' : 'ignore', 'inherit'] });
+  server.stdout?.on('data', (c: Buffer) => serverLog.push(c.toString('utf8')));
   for (let i = 0; i < 100; i++) {
     try {
       const r = await fetch(`${BASE}/v1/health`);
@@ -52,7 +60,13 @@ export async function start() {
 }
 
 export async function stop() {
-  server?.kill('SIGTERM');
+  // Wait for the API to exit so the next test file's server never races a shutting-down one on the same port.
+  if (server && server.exitCode === null) {
+    const exited = new Promise((r) => server!.once('exit', r));
+    server.kill('SIGTERM');
+    await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))]);
+    if (server.exitCode === null) server.kill('SIGKILL');
+  }
   await db.$disconnect();
 }
 

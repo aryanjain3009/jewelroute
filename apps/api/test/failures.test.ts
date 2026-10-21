@@ -466,7 +466,9 @@ describe('STEP 5 failure scenarios', () => {
     // audit: reassign a shop and approve an order, then read both audit surfaces
     const shop = (await api(ADMIN, 'GET', '/v1/admin/shops?q=Malhotra')).data[0];
     assert.equal((await api(ADMIN, 'PATCH', `/v1/admin/shops/${shop.id}`, { assignedAgentId: arjunId })).status, 200);
+    // legacy filter value SUBMITTED is an alias of PENDING_APPROVAL (v3)
     const pending = (await api(ADMIN, 'GET', '/v1/admin/orders?status=SUBMITTED')).data[0];
+    assert.equal(pending.status, 'PENDING_APPROVAL');
     assert.equal((await api(ADMIN, 'POST', `/v1/admin/orders/${pending.id}/approve`)).status, 200);
     const shopAudit = (await api(ADMIN, 'GET', `/v1/admin/audit?entityType=Shop&entityId=${shop.id}`)).data[0];
     assert.equal(shopAudit.actor.name, 'Priya Mehta');

@@ -264,7 +264,8 @@ describe('field flow invariants', () => {
   test('7b. demo receiver is honest: bad signature → 401 + signatureOk:false; unknown token → 404, nothing stored; list filters by endpoint; gated by env/demo mode', async () => {
     const BASE_URL = `http://127.0.0.1:${process.env.TEST_PORT ?? 4107}`;
     const tenant = await db.tenant.findUniqueOrThrow({ where: { slug: 'aurum' } });
-    const builtIn = await db.webhookEndpoint.findFirstOrThrow({ where: { tenantId: tenant.id, url: { contains: '/v1/dev/webhook-receiver/' } } });
+    // the SEEDED receiver (token demo-…): test 7 adds a fail-… receiver to the same tenant, and an unordered lookup could pick it (→ 500)
+    const builtIn = await db.webhookEndpoint.findFirstOrThrow({ where: { tenantId: tenant.id, url: { contains: '/v1/dev/webhook-receiver/demo-' } }, orderBy: { createdAt: 'asc' } });
     const token = builtIn.url.split('/').pop()!;
     const post = (tok: string, sig: string) =>
       fetch(`${BASE_URL}/v1/dev/webhook-receiver/${tok}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-jewelroute-timestamp': String(Math.floor(Date.now() / 1000)), 'x-jewelroute-signature': sig, 'x-jewelroute-event': 'ping', 'x-jewelroute-delivery': `dlv_test_${randomUUID()}` }, body: JSON.stringify({ id: `evt_${randomUUID()}`, type: 'ping' }) });
@@ -309,6 +310,28 @@ describe('field flow invariants', () => {
   });
 
   test('9. order decisions are one-shot and audited; a loser sees the real current status and who decided', async () => {
+    // v3: only PENDING_APPROVAL orders are decided. A normal (₹3–5L) order at Sharma is CONFIRMED and refuses a decision.
+    const k22 = await db.jewelryDesign.findFirstOrThrow({ where: { tenant: { slug: 'aurum' }, active: true, sku: 'AJ-BNG-2201' } });
+    const small = (await api(RAHUL, 'POST', '/v1/orders', { visitId: sharmaVisitId, items: [{ designId: k22.id, quantity: 1 }] }, key())).data.order;
+    assert.equal(small.status, 'CONFIRMED', JSON.stringify(small.approval));
+    const normal = await api(ADMIN, 'POST', `/v1/admin/orders/${small.id}/approve`);
+    assert.equal(normal.status, 409);
+    assert.equal(normal.error.code, 'ORDER_NOT_PENDING');
+    // Threshold 1 paisa → every new order needs approval (restored to the seeded ₹10L at the end).
+    assert.equal((await api(ADMIN, 'PATCH', '/v1/admin/settings', { approvalThresholdPaise: 1 })).status, 200);
+    try {
+      await decisions();
+    } finally {
+      await api(ADMIN, 'PATCH', '/v1/admin/settings', { approvalThresholdPaise: 100_000_000 });
+    }
+  });
+});
+
+async function decisions() {
+  {
+    const design0 = await db.jewelryDesign.findFirstOrThrow({ where: { tenant: { slug: 'aurum' }, active: true, purity: 'K22' } });
+    const orderId = (await api(RAHUL, 'POST', '/v1/orders', { visitId: sharmaVisitId, items: [{ designId: design0.id, quantity: 1 }] }, key())).data.order.id;
+    assert.equal((await db.order.findUniqueOrThrow({ where: { id: orderId } })).status, 'PENDING_APPROVAL');
     const a = await api(ADMIN, 'POST', `/v1/admin/orders/${orderId}/approve`);
     assert.equal(a.data.order.status, 'APPROVED');
     const twice = await Promise.all([api(ADMIN, 'POST', `/v1/admin/orders/${orderId}/approve`), api(ADMIN, 'POST', `/v1/admin/orders/${orderId}/reject`, { reason: 'x' })]);
@@ -319,7 +342,7 @@ describe('field flow invariants', () => {
       assert.match(r.error.message, /already approved/i);
     }
     assert.equal(await db.auditLog.count({ where: { entityId: orderId, action: 'order.approve' } }), 1);
-    // a real race: approve vs reject on a fresh SUBMITTED order, repeated. The loser always reports the winner's status.
+    // a real race: approve vs reject on a fresh PENDING_APPROVAL order, repeated. The loser always reports the winner's status.
     const design = await db.jewelryDesign.findFirstOrThrow({ where: { tenant: { slug: 'aurum' }, active: true, purity: 'K22' } });
     for (let i = 0; i < 5; i++) {
       const o = (await api(RAHUL, 'POST', '/v1/orders', { visitId: sharmaVisitId, items: [{ designId: design.id, quantity: 1 }] }, key())).data.order;
@@ -330,5 +353,5 @@ describe('field flow invariants', () => {
       assert.equal(lose.error.details.status, win.data.order.status, `loser saw ${lose.error.details.status}, winner wrote ${win.data.order.status}`);
       assert.equal((await db.order.findUniqueOrThrow({ where: { id: o.id } })).status, win.data.order.status);
     }
-  });
-});
+  }
+}
