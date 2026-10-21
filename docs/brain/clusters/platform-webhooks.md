@@ -3,6 +3,7 @@
 ## Owned paths
 - `apps/api/src/webhooks/**`: `dispatcher.ts` (claim with `FOR UPDATE SKIP LOCKED`, 30 s lease, `BACKOFF_SECONDS`, `MAX_ATTEMPTS`), `webhooks.module.ts`
 - `apps/api/src/core/outbox.ts` (`OutboxService.emit`, `activityTitle`), `core/idempotency.ts`, `core/audit.ts`
+- v3 activity: `core/event-refs.ts` (`eventRefs` — the one ref derivation, also used by the seed; SQL back-fill mirrors it), `core/activity.ts` (`ActivityService` — the only outbox → ActivityItem projection)
 - `apps/api/src/common/**`: auth (JWT, `ROLE_PERMISSIONS`, guards), context, crypto (AES-256-GCM secrets, HMAC signing, ack code), errors, http (zod `parse`, envelope, exception filter)
 - `apps/api/src/modules/auth.ts`, `apps/api/src/{app,main,serverless,env,prisma.service}.ts`, `apps/api/api/index.ts`, `apps/api/vercel.json`
 - `apps/api/prisma/**`: schema, migrations, seed entry · `apps/api/scripts/**` · `.github/workflows/**` · `docker-compose.yml`
@@ -14,6 +15,7 @@
 - INV-6 tenant only from the verified JWT
 - INV-8 outbox row in the same transaction as the change. Delivery is at-least-once: 1 attempt + 6 retries (30s, 2m, 10m, 30m, 2h, 6h), then DEAD (L0004). Signature `sha256=HMAC(secret, "${ts}.${rawBody}")`. Every attempt stores the request headers sent, never the secret.
 - Endpoint secrets are encrypted at rest. Reveal and rotate are audited.
+- Every OutboxEvent row has its refs (`shopId…memoId`, `pieceIds`) set at write time; surfaces filter on the indexed columns, never on payload JSON paths (tests V6, V7, V9).
 - Auth: 15 min access JWT, 30 d rotating refresh stored hashed; reuse of a rotated token revokes the family.
 
 ## Consequential

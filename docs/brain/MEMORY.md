@@ -3,6 +3,7 @@
 ## Stage (2026-10-21)
 MVP live on Vercel (api + web projects, hosted Neon Postgres). v1 API complete with tests 1–9.
 **v2 Attio-style IA in progress:** the API agent is adding the `docs/CONTRACT.md` v2 endpoints (`modules/records.ts`, migration `20261021000200_v2_attio_ia`). The web agent is rebuilding the admin and field chrome per `docs/DESIGN.md` v2 (Inter, sidebar shell, DataTable, record pages, ⌘K).
+**v3 implemented (API, 2026-10-21):** credit-aware orders (CONFIRMED / PENDING_APPROVAL by rule), settle/cancel, tenant threshold, one activity model (OutboxEvent refs + `ActivityService`). Migrations `…0300_v3_credit_activity` + follow-ups `…0400/0500/0600` (T3 review REJECT → lead decisions B1 reject un-sells memo conversions, B2 SUBMITTED kept for rollback + down script, M1 batched refs back-fill; docs/brain/reviews/2026-10-21-v3-credit-activity.md); tests `apps/api/test/v3.test.ts` V1–V12.
 Harness v1 (lite) installed: AGENTS.md map, path rules, brain, 13 skills, 6 subagents, 5 hooks, `.mcp.json`, `pnpm verify`.
 
 ## Clusters (owned paths, invariants, gates)
@@ -38,4 +39,8 @@ Harness v1 (lite) installed: AGENTS.md map, path rules, brain, 13 skills, 6 suba
 - L0005 `Ref` fields are `{id,name}` objects; render `.name`
 - L0006 idempotent replays are deep-equal, not byte-equal
 - L0008 nested AGENTS.md is not auto-loaded next to a root CLAUDE.md → path rules point to it
+- L0015 zod 4 `.partial()` keeps `.default()` → build PATCH schemas from default-free fields
+- L0016 per-shop money rules lock the shop row (visit lock hides the race; test with two visits)
+- L0018 enum value sets change by expand/contract, with a tested down script
+- L0019 an exit from a state that moved custody reverses it or is refused (SQL commit-time guard)
 - L0010 the invariant SQL is at the end of the init migration (line 687+)

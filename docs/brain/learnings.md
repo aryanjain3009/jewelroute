@@ -70,3 +70,39 @@
 - evidence: VERIFY-REPORT M2 — commit-then-500 made the memo UI say "Custody didn't change"; with `sendConfirmed` (`apps/web/src/components/field/guard.ts`) the replay returns the committed memo + ack and the UI lands on the QR with exactly 1 memo (`fixcheck/m2-memo.js`)
 - rule: a network error, 5xx or `IDEMPOTENCY_IN_PROGRESS` is "unknown", not "failed": keep the draft and key, re-send, and only a 2xx or a 4xx is a definite answer.
 
+
+## L0015 · zod 4 keeps `.default()` through `.partial()` — PATCH schemas silently reset fields
+- status: confirmed · 2026-10-21 · cluster: platform-webhooks
+- evidence: `z.object({a: z.number().default(0)}).partial().parse({})` → `{a: 0}`; `PATCH /admin/shops {ownerName}` reset `creditLimitPaise` to 0 (credit rule off), city and geofence; `PATCH /admin/designs` wiped stone value/images. Fixed with default-free field sets; `test/v3.test.ts` V5
+- rule: never derive a PATCH schema with `.partial()` from a create schema that has defaults. Build both from one default-free `Fields` object; only the create schema adds `.default()`.
+
+## L0016 · A per-shop money rule needs the shop row lock, and the visit lock does not give it
+- status: confirmed · 2026-10-21 · cluster: orders-pricing
+- evidence: `test/v3.test.ts` V2 — two agents with open visits at one shop, 4 concurrent orders, room for one: with `lock:false` → 2 CONFIRMED (red); with `SELECT … FROM "Shop" … FOR UPDATE` before the sums → exactly 1 CONFIRMED (green). Orders on the same visit were already serialised by the visit lock, which hid the race
+- rule: evaluate exposure only after locking the shop row in the same transaction (`CreditService.position(…, {tx, lock:true})`), and take the same lock in every write that changes exposure (approve, settle, cancel, shop PATCH). Test with two different visits.
+
+## L0017 · A forced dispatcher sweep was dropped when a post-commit run was in flight
+- status: confirmed · 2026-10-21 · cluster: platform-webhooks
+- evidence: `test/v3.test.ts` V6 — `POST /v1/internal/dispatch` right after a write returned the in-flight run, whose rerun had `forceOverdue:false`, so `memo.overdue` was not emitted for up to 60 s. Fix: `Dispatcher.forceNext` carries the force into the rerun
+- rule: when a call joins an in-flight run, carry its options into the rerun instead of discarding them.
+
+## L0018 · Dropping an enum value with the code switch breaks every read of the old build, not just its writes
+- status: confirmed · 2026-10-21 · cluster: platform-webhooks · decided by the lead (B2)
+- evidence: T3 review R8 — the pre-v3 Prisma client against the migrated DB: `findMany` → `Value 'CONFIRMED' not found in enum 'OrderStatus'`; create → 22P02. Fixed forward: `20261021000400` re-adds SUBMITTED, `…0500/0600` CHECK `Order_no_submitted`; rollback script tested in `test/v3.test.ts` V11
+- rule: changing an enum's value set is expand → migrate → contract. Add values first, guard old ones with a CHECK, drop them in a later release. Ship a tested down script with any one-way change.
+
+## L0019 · A status transition that ends a sale must undo the custody it caused, and SQL must refuse it otherwise
+- status: confirmed · 2026-10-21 · cluster: custody-memo · decided by the lead (B1)
+- evidence: review P1 — reject of a converted order left the piece SOLD, no receivable, memo return 409. Now reject un-sells (`OrdersService.unsell`, reason SALE_REJECTED); deferred constraint triggers `SamplePiece_sold_has_live_order`/`Order_dead_unsells_pieces` make the bad state uncommittable (`test/v3.test.ts` V10: red → 500 without the un-sell, green with it)
+- rule: for every exit from a state that moved custody (reject, cancel, delete), either reverse the move through `CustodyService.move` in the same transaction or refuse the exit; back it with a commit-time SQL guard.
+
+## L0020 · Back-fills go in batched scripts that reuse the app's derivation, not in the migration
+- status: confirmed · 2026-10-21 · cluster: platform-webhooks · decided by the lead (M1)
+- evidence: review R9 — `20261021000300` held ACCESS EXCLUSIVE on Order/OutboxEvent for 110 s at 40k orders/300k events. `backfillActivityRefs` (1k rows/tx, keyset, `eventRefs()`) is idempotent (`test/v3.test.ts` V12) and runs after migrate (Vercel build, run-local.sh)
+- rule: migrations add columns/values/NOT VALID checks; data moves in a script that is safe to re-run and shares code with the live write path.
+
+## L0021 · Two paths that lock the same rows in opposite order deadlock under normal use — keep one global order
+- status: confirmed · 2026-10-21 · cluster: orders-pricing · re-review N1
+- evidence: reject (Shop → Memo) ‖ convert (Memo → Shop) on one memo → `409 CONCURRENT_UPDATE` in round 0 of `test/v3.test.ts` V13 (reviewer: 11/12); after `lockConversion` (Memo → Pieces before Shop) V13 passes 6/6 rounds, 4 full-file runs
+- rule: Memo → Visit → SamplePiece (id order) → Shop → Order. A new path that locks two of these follows it, and gets a reject‖convert-style concurrency test.
+

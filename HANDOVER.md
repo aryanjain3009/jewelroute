@@ -9,11 +9,15 @@ It has two apps. The **field app** is phone-first and used by agents in shops. T
 
 **State at handover (21 Oct 2026).**
 - Code: full git history included (see the bundle in the handover zip).
-- Verification: an independent verifier ran the full scenario and the failure cases and gave an **APPROVE** verdict (`docs/VERIFY-REPORT.md`).
+- Verification:
+  - An independent verifier ran the full scenario and the failure cases and gave an **APPROVE** verdict (`docs/VERIFY-REPORT.md`).
+  - The v3 credit, approval and activity work passed a high-risk review and re-review (`docs/brain/reviews/`).
+  - A clicked UI walkthrough as Rahul, then Priya, with every number cross-checked against the API, found defects; all of them are fixed (`docs/VERIFY-P7.md`).
 - Tests:
-  - API integration tests: 32/32, against real Postgres;
-  - shared pricing tests: 4/4;
-  - end-to-end business scenario: 28/28;
+  - API integration tests: 77/77, against real Postgres (including 19 audit edge cases checked against DB rows);
+  - shared pricing and credit tests: 14/14;
+  - end-to-end business scenario: 31/31;
+  - browser E2E (Playwright): 33/33. They cover sign-in and redirects, Rahul's full visit, the manager flows, webhook retries and the landing page. Run them with `cd apps/web && pnpm e2e` against a running stack.
   - harness hook tests: 102/102.
 - Gates: the production web build passes, and so does `pnpm verify`.
 - **Not deployed yet.** Deploying needs a GitHub repo; see §6.
@@ -51,7 +55,7 @@ The script does the rest, in order:
 | API docs (Swagger) | http://localhost:4000/docs |
 | Developer guide | http://localhost:3000/developers |
 | Reset demo data | `curl -X POST localhost:4000/v1/internal/seed -H "x-cron-secret: $(grep ^CRON_SECRET= apps/api/.env \| cut -d= -f2-)"` |
-| Prove the whole flow | `cd apps/api && BASE_URL=http://localhost:4000 CRON_SECRET=$(grep ^CRON_SECRET= .env \| cut -d= -f2-) pnpm e2e` → 28/28 |
+| Prove the whole flow | `cd apps/api && BASE_URL=http://localhost:4000 CRON_SECRET=$(grep ^CRON_SECRET= .env \| cut -d= -f2-) pnpm e2e` → 31/31 |
 
 Ports can be changed: `API_PORT=4100 WEB_PORT=3100 ./scripts/run-local.sh`. To use your own database: `DATABASE_URL=postgresql://user:pass@host:5432/db ./scripts/run-local.sh`.
 
@@ -65,12 +69,20 @@ Ports can be changed: `API_PORT=4100 WEB_PORT=3100 ./scripts/run-local.sh`. To u
 3. **Rahul (field, phone width), Today.** Sharma Jewellers at 10:30 is the highlighted next stop. Tap **Open visit**.
 4. **Check in.** Away from Delhi, use **Simulate arrival (demo)**. It is labelled *simulated* everywhere, never as verified. Then take or upload the **arrival photo**, which is required before any sale.
 5. **Browse catalog → book an order.** Each price is net grams × today's rate + making + stones + other + 3% GST.
+   - The review screen shows the shop's credit position, as calculated by the server: outstanding, credit limit, available credit, this order and projected exposure.
+   - A normal order is **Confirmed** at once.
+   - An order goes to **Pending approval** only by rule: the projected exposure exceeds the shop's credit limit, or the order is above the approval threshold (₹10L by default, set in Settings → Approvals). The agent is shown the reason. For example, add the Rajwada Bridal Set to go over the limit.
 6. **Leave on memo.** Pick **AJ-S-000123** and another piece from the bag, set the due date to 5 days and create the memo. Open the QR link in a new tab as the retailer and tap **Confirm receipt**. AJ-S-000123 now leaves Rahul's bag.
 7. **Complete visit.** The next shop becomes the highlighted stop.
 8. **Back to Priya:**
-   - **Home** and **Shops → Sharma Jewellers** show the new memo, the order and the samples at the shop.
+   - **Home** shows the new memo, the order and the samples at the shop.
+   - **Shops → Sharma Jewellers** is a CRM record:
+     - it shows the assigned agent, last and upcoming visit, outstanding, credit limit, available credit, samples at the shop and active memo value;
+     - its tabs are Overview / Visits / Orders / Memos / Activity.
+   - **Orders → the pending order** shows the credit check at booking and the reasons. Approve it, or reject it with a reason. Rahul's visit screen shows the decision and the reason within about 10 seconds. Rejecting an order created by selling memo pieces puts those pieces back on the memo, with the ledger reason "Sale rejected".
    - **Visits → the visit** shows the map, the GPS distance and the photo with its checksum.
-   - **Samples → AJ-S-000123** shows the immutable custody ledger: Vault → Rahul → Sharma, each step with time, actor, location, visit, proof and event id.
+   - **Samples → AJ-S-000123** opens with **Where it is now**: which shop, since when, on which memo, due when, and who acknowledged it and how. Below that is the immutable custody ledger: Vault → Rahul → Sharma, each step with time, actor, location, visit, proof and event id.
+   - **The same event shows everywhere it applies.** One activity model (outbox events with record references) feeds Home, Shop, Agent, Visit, Order, Memo and Sample, so no screen keeps a feed of its own.
    - **Memos → the memo** shows the custody timeline.
    - **Integrations** shows signed webhook deliveries with status and latency, a retry button and the payload inspector.
 
@@ -87,13 +99,16 @@ scripts/         run-local.sh, harness tests, MCP wrappers
 
 | Read this | For |
 |---|---|
-| `JewelRoute-FE-BE-Integration-Report.pdf` (in the handover zip) | 47 pages: architecture, all endpoints, API design, data model, click-by-click data flow, 12 flowcharts |
+| `JewelRoute-FE-BE-Integration-Report.pdf` (in the handover zip, and in `docs/report/out/`) | 58 pages: architecture, all 89 endpoints, API design, data model, click-by-click data flow, 15 flowcharts |
 | `docs/CONTRACT.md` | The API contract both apps build against, with a changelog at the top |
 | `docs/DECISIONS.md` | Why things are built the way they are |
 | `docs/DESIGN.md` | Design system. The **v2 (Attio)** section is the current one. |
 | `docs/UI.md` | Every page and what it shows, plus libraries used |
 | `docs/AUDIT.md` | 19 correctness issues found and fixed, each with a test |
 | `docs/VERIFY-REPORT.md` | Independent verification: 28 steps, failure cases, findings → fixes → re-verification |
+| `docs/VERIFY-P7.md` | Independent UI walkthrough as Rahul, then Priya. Every screen number cross-checked against the API, with defects → fixes → round 2. |
+| `docs/AUDIT-SYNC.md` | Final audit: all 90 endpoints mapped as UI action → API → DB → event → screens that refresh, with bugs found and fixed |
+| `docs/brain/reviews/` | High-risk (T3) reviews of the v3 credit, approval and activity work, plus re-review |
 | `AGENTS.md` | Map for engineers and AI agents: commands, invariants, risk tiers |
 
 ## 4. Guarantees, and where they are enforced
@@ -110,6 +125,9 @@ scripts/         run-local.sh, harness tests, MCP wrappers
 | Tenants never see each other's data | Tenant taken only from the signed token; every query is filtered by it; tested with two tenants |
 | Integrations can't silently diverge | Transactional outbox; signed webhooks (HMAC-SHA256); retries 30 s / 2 m / 10 m / 30 m / 2 h / 6 h; dead letter; manual retry |
 | Every sensitive change is audited | Audit log with actor, before and after values, and request id |
+| Approval happens only by rule, and the server decides | Credit position and reasons are computed on the server with one shared function (`packages/shared/src/credit.ts`) when the order is written. The screens only display it. The memo-sale preview uses the same function. |
+| A rejected sale never strands a piece | Reject reverses a memo sale through the custody service (`SALE_REJECTED`). SQL guards stop a SOLD piece from existing without a live order. `pnpm --filter @jewelroute/api db:check-orphans` reports any. |
+| No deadlocks between order and memo writes | One lock order everywhere: Memo → Visit → Pieces → Shop → Order (DECISIONS) |
 
 ## 5. Key decisions
 
@@ -123,13 +141,15 @@ scripts/         run-local.sh, harness tests, MCP wrappers
 The repo is ready for two Vercel projects from the same Git repo:
 1. **API project.** Root directory `apps/api`, framework "Other".
    - `vercel.json` routes every path to the Nest function.
-   - The build runs `prisma migrate deploy`.
+   - The build runs `prisma migrate deploy`, then the batched, idempotent activity back-fill.
    - Environment variables:
      - `DATABASE_URL` (pooled) and `DATABASE_URL_DIRECT`;
      - `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `APP_SECRET`, `CRON_SECRET`;
      - `APP_ENCRYPTION_KEY` (32-byte base64);
      - `APP_PUBLIC_URL` (the web URL), `API_PUBLIC_URL`, `CORS_ORIGINS`;
      - optional: `BLOB_READ_WRITE_TOKEN` (Vercel Blob for photos) and `ENABLE_DEMO_RECEIVER=true` (built-in webhook test receiver).
+     - optional: `TRUST_PROXY` (proxy hops for the client IP; unset = 1 on Vercel, 0 elsewhere — set 1 behind one nginx/ingress when self-hosting).
+     - **never** `WEBHOOK_ALLOW_PRIVATE=true` in production: it switches off the webhook SSRF guard (local development / tests only — production always ignores it; a local webhook receiver on 127.0.0.1 needs it, the built-in demo receiver does not).
 2. **Web project.** Root directory `apps/web`, framework Next.js. Environment variable: `API_ORIGIN` = the API URL.
 3. After the first deploy, seed once:
 

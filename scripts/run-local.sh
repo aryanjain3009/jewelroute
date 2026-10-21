@@ -34,7 +34,7 @@ if [ -n "${DATABASE_URL:-}" ]; then
   DB_URL="$DATABASE_URL"; say "Using DATABASE_URL you provided"
 elif pg_up; then
   DB_URL="postgresql://$(whoami)@127.0.0.1:5432/jewelroute"; say "Found Postgres on :5432 — using role $(whoami)"
-  createdb -h 127.0.0.1 jewelroute 2>/dev/null || true
+  createdb -w -h 127.0.0.1 jewelroute </dev/null 2>/dev/null || true
 elif command -v docker >/dev/null && docker info >/dev/null 2>&1; then
   say "Starting Postgres 16 in Docker"
   docker compose up -d db
@@ -47,7 +47,7 @@ elif command -v brew >/dev/null; then
   export PATH="$(brew --prefix)/opt/postgresql@16/bin:$PATH"
   for _ in $(seq 1 40); do pg_up && break; sleep 1; done
   pg_up || die "Postgres didn't start. Try: brew services restart postgresql@16"
-  createdb -h 127.0.0.1 jewelroute 2>/dev/null || true
+  createdb -w -h 127.0.0.1 jewelroute </dev/null 2>/dev/null || true
   DB_URL="postgresql://$(whoami)@127.0.0.1:5432/jewelroute"
 else
   die "No Postgres found. Install one of: Postgres.app (https://postgresapp.com), Docker Desktop, or Homebrew (then rerun)."
@@ -77,6 +77,8 @@ pnpm install --frozen-lockfile
 say "Building the API and applying database migrations"
 pnpm --filter @jewelroute/api build
 ( cd apps/api && npx prisma migrate deploy )
+# Activity refs on older outbox rows (idempotent, 1k rows per batch; no-op when nothing is missing).
+pnpm --filter @jewelroute/api db:backfill-activity-refs
 
 if [ "$MODE" = "prod" ]; then
   say "Building the web app (production)"

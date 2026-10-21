@@ -97,9 +97,9 @@
     <table>
       <tr><td>Audience</td><td>Founder and CTO reviewing the system</td></tr>
       <tr><td>Date</td><td>21 October 2026 (times in IST, UTC+5:30)</td></tr>
-      <tr><td>Source</td><td>Repository <code>jewelroute</code>, branch head <code>7e34424</code> (clean working tree when this was generated). Includes batch approve, delivery paging, record activity, agent-held piece location, field "Sell" and "Extend" on memos, admin add and deactivate agent, and the removal of the legacy <code>components/admin/*</code> screens. This report documents the code on disk, not plans.</td></tr>
+      <tr><td>Source</td><td>Repository <code>jewelroute</code>, branch head <code>831d3d2</code> (clean working tree when this was generated). Revised for <b>v3</b>: credit-aware orders (CONFIRMED or PENDING_APPROVAL with reasons CREDIT_LIMIT / ORDER_THRESHOLD; approve, reject, settle, cancel), receivables and the shared credit rule, tenant approval threshold, rejection un-selling memo conversions, the memo-sale preview, one activity model with indexed refs and cursor paging, one global lock order, and the P7 walkthrough fixes (decision notes and 10 s pending polling in the field). This report documents the code on disk, not plans.</td></tr>
       <tr><td>Apps</td><td><code>apps/web</code> Next.js 15 (App Router, React, TanStack Query) · <code>apps/api</code> NestJS 11 + Prisma + PostgreSQL · <code>packages/shared</code> pricing, geo, dates, event types</td></tr>
-      <tr><td>Method</td><td>Every controller, service, migration and web call site was read. Endpoint list generated from <code>@Controller</code>/<code>@Get|@Post|@Patch|@Delete</code> decorators; click mappings traced from <code>api(</code>, <code>useMutation</code>, <code>useAction</code>, <code>useWrite</code> and <code>useSync</code> call sites.</td></tr>
+      <tr><td>Method</td><td>Every controller, service, migration and web call site was read (v3 delta: <code>docs/CONTRACT.md</code> changelog and § v3, <code>core/credit.ts</code>, <code>core/activity.ts</code>, <code>core/event-refs.ts</code>, migrations <code>…0300</code>–<code>…0800</code>, <code>lib/sync.ts</code>). Endpoint list generated from <code>@Controller</code>/<code>@Get|@Post|@Patch|@Delete</code> decorators; click mappings traced from <code>api(</code>, <code>useMutation</code>, <code>useAction</code>, <code>useWrite</code> and <code>useSync</code> call sites.</td></tr>
     </table>
   </div>
 </div>
@@ -113,11 +113,11 @@
 <!-- ============================================================ 1 SUMMARY -->
 <section class="chapter" id="s1">
 <h2 data-toc="1"><span class="num">1</span>Summary</h2>
-<p class="lead">JewelRoute is a field-sales system for jewellery makers who sell through retailers. A manager plans routes; field agents visit shops, check in with server-verified GPS, attach a photo, book orders priced from the live gold rate, and leave physical samples on <em>memo</em> (consignment) with a retailer who acknowledges receipt from their own phone. Every custody move of every sample is recorded in an append-only ledger, and state changes are published to customer systems as signed webhooks.</p>
+<p class="lead">JewelRoute is a field-sales system for jewellery makers who sell through retailers. A manager plans routes; field agents visit shops, check in with server-verified GPS, attach a photo, book orders priced from the live gold rate, and leave physical samples on <em>memo</em> (consignment) with a retailer who acknowledges receipt from their own phone. Since v3 an order is <b>confirmed straight away</b> unless a server-side rule trips (the shop would exceed its credit limit, or the order reaches the tenant's approval threshold); only then does it wait for a manager. Every custody move of every sample is recorded in an append-only ledger, and state changes are published to customer systems as signed webhooks.</p>
 
 <h3 data-toc="1.1">Two apps, one contract</h3>
 <ul>
-  <li><strong>Web</strong> (<code>apps/web</code>, Next.js 15): three surfaces in one app. The field app at <code>/field/*</code> is mobile-first (Today, Visits, Catalog, Profile tabs). The admin console is at <code>/admin/*</code> (Home, Visits, Agents, Shops, Orders, Memos, Samples, Catalog, Integrations, Settings). The public retailer acknowledgement page is at <code>/ack/[token]</code>. There are also a marketing page at <code>/</code> and <code>/developers</code> docs.</li>
+  <li><strong>Web</strong> (<code>apps/web</code>, Next.js 15): three surfaces in one app. The field app at <code>/field/*</code> is mobile-first (Today, Visits, Catalog, Profile tabs). The admin console is at <code>/admin/*</code> (Home, Visits, Agents, Shops, Orders, Memos, Samples, Catalog, Integrations, Settings). The public retailer acknowledgement page is at <code>/ack/[token]</code>. There are also a marketing page at <code>/</code> and <code>/developers</code> docs. 26 pages in all (§1.4).</li>
   <li><strong>API</strong> (<code>apps/api</code>, NestJS 11 + Prisma): all business rules, pricing, custody, idempotency, tenancy and webhooks. PostgreSQL is the single source of truth. The web never patches derived state locally: it writes, then refetches.</li>
   <li><strong>Shared</strong> (<code>packages/shared</code>): pricing maths (<code>priceDesign</code>, <code>orderTotals</code>), the geofence decision, IST business dates, money formatting and the webhook event list. The API uses them as the authority and the web uses the same code for display only.</li>
 </ul>
@@ -126,23 +126,55 @@
 <p>Browser → same-origin <code>/api/v1/…</code> → Next.js rewrite in <code>apps/web/next.config.ts</code> (<code>/api/:path*</code> → <code>${API_ORIGIN}/:path*</code>) → NestJS <code>/v1/*</code> (throttler → auth/RBAC guard → zod validation → service in a Prisma transaction) → PostgreSQL. Responses come back in one envelope, <code>{ok:true,data}</code> or <code>{ok:false,error:{code,message,details},requestId}</code>. Auth is two httpOnly first-party cookies (<code>jr_at</code> access JWT, 15 min; <code>jr_rt</code> rotating refresh token, 30 days), so the browser sends them with no CORS. State changes also write an <code>OutboxEvent</code> row in the same transaction. After the response, a post-commit interceptor kicks the dispatcher, which fans events out to subscribed endpoints as HMAC-signed HTTP POSTs with a retry ladder.</p>
 
 <div class="stat">
-  <div><b>82</b><span>HTTP routes: 4 auth · 23 field · 36 admin · 12 webhook admin · 2 public · 5 ops</span></div>
-  <div><b>25</b><span>tables (Prisma models); 3 append-only by trigger, 2 partial unique indexes, 11 CHECKs</span></div>
-  <div><b>12 + 1</b><span>webhook event types, plus <code>ping</code> for test sends</span></div>
-  <div><b>30 + 4</b><span>API integration tests on real Postgres (10 + 16 + 4) + 4 shared unit tests; 28-step HTTP e2e smoke</span></div>
+  <div><b>89</b><span>HTTP routes: 4 auth · 25 field · 41 admin · 12 webhook admin · 2 public · 5 ops (82 before v3; +7)</span></div>
+  <div><b>25</b><span>tables (Prisma models), 9 migrations; 3 append-only by trigger, 2 deferred sale guards, 2 partial unique indexes, 19 CHECKs</span></div>
+  <div><b>17 + 1</b><span>webhook event types (5 new in v3), plus <code>ping</code> for test sends</span></div>
+  <div><b>50 + 14</b><span>API integration tests on real Postgres (12 + 16 + 4 + 14 + 4) + 14 shared unit tests; 31-check HTTP e2e smoke</span></div>
 </div>
 
 <h3 data-toc="1.3">What a reviewer should know</h3>
 <table class="dense">
   <thead><tr><th style="width:24%">Topic</th><th>Finding (from the code on disk)</th></tr></thead>
   <tbody>
-  <tr><td>Strong guarantees</td><td>Money and custody creates (<code>POST /orders</code>, <code>/memos</code>, <code>/memos/:id/return</code>, <code>/memos/:id/convert</code>) <strong>require</strong> an <code>Idempotency-Key</code>; the key row is inserted inside the business transaction, so it commits or rolls back with the effect. Concurrency is guarded by row locks (<code>FOR UPDATE</code>), guarded updates (<code>… WHERE status='SUBMITTED'</code>), and database invariants (one open visit per agent, one OUT memo line per piece, append-only ledgers).</td></tr>
-  <tr><td>Earlier gaps, now closed (verified in code)</td><td>Every business endpoint now has a web caller. <b>Sell from memo</b> → <code>POST /v1/memos/:id/convert</code> and <b>Extend</b> → <code>POST /v1/memos/:id/extend</code> (<code>components/field/visit-drawers.tsx</code>, buttons in the visit's "Samples at this shop"). <b>Add agent</b> → <code>POST /v1/admin/agents</code>, and <b>Deactivate/Reactivate agent</b> → <code>PATCH /v1/admin/agents/:id</code> (<code>admin-v2/field/dialogs.tsx</code>). The Orders list bulk approve → <code>POST /v1/admin/orders/approve</code>. Routes the web does not call: the v1 read routes kept for API clients and <code>/developers</code> (<code>GET /admin/dashboard</code>, <code>/admin/pieces/:id/history</code>, <code>/admin/audit</code>, <code>/orders/:id</code>, <code>/memos/:id</code>), <code>GET /admin/activity</code> (its <code>useActivity</code> hook is defined but unused; records and Home carry their own activity) and the ops routes.</td></tr>
-  <tr><td>One refresh mechanism</td><td>Since commit <code>4d26473</code> (legacy <code>components/admin/*</code> deleted, v2-only hooks, <code>qk</code> keys everywhere), every write in the web app refreshes through <code>useSync()</code> and the single <code>AFFECTS</code> map in <code>lib/sync.ts</code>. The <code>webhook.changed</code> entry now also covers the delivery detail and the receiver log.</td></tr>
+  <tr><td>Strong guarantees</td><td>Money and custody creates (<code>POST /orders</code>, <code>/memos</code>, <code>/memos/:id/return</code>, <code>/memos/:id/convert</code>) <strong>require</strong> an <code>Idempotency-Key</code>; the key row is inserted inside the business transaction, so it commits or rolls back with the effect. Concurrency is guarded by row locks (<code>FOR UPDATE</code>) taken in <b>one global order</b> (Memo → Visit → SamplePiece by id → Shop → Order, §2.10), guarded updates (<code>… WHERE status='PENDING_APPROVAL'</code>), and database invariants (one open visit per agent, one OUT memo line per piece, append-only ledgers, deferred "a SOLD piece has a live order" triggers).</td></tr>
+  <tr><td>v3: approval is a rule</td><td>The credit rule runs inside the order transaction with the shop row locked (<code>CreditService.position(…, {lock:true})</code>): <code>CREDIT_LIMIT</code> when projected exposure &gt; limit, <code>ORDER_THRESHOLD</code> when the total ≥ the tenant threshold. No rule → <code>CONFIRMED</code> (counts as outstanding at once); otherwise <code>PENDING_APPROVAL</code> with the reasons and a frozen <code>CreditPosition</code>. The field order review and the memo-sale preview show the same numbers beforehand (<code>GET /visits/:id/credit</code>, <code>GET /memos/:id/convert-preview</code>); the server decides again when it writes.</td></tr>
+  <tr><td>v3: reject un-sells</td><td>Rejecting an order converted from a memo moves its pieces SOLD → the memo's shop (custody reason <code>SALE_REJECTED</code>), puts their memo items back to OUT and recomputes the memo status, in the same transaction. Deferred constraint triggers refuse to commit any rejection or cancel that would leave a piece SOLD without a live order. A converted order cannot be cancelled (<code>409 ORDER_NOT_CANCELLABLE</code>).</td></tr>
+  <tr><td>v3: one activity model</td><td>Every <code>OutboxEvent</code> now stores indexed refs (<code>shopId, agentId, visitId, orderId, memoId, pieceIds[]</code>, back-filled for old rows). <code>ActivityService</code> is the only projection to <code>ActivityItem {kind, refs, detail}</code>; Home and all six record types render it through one component, <code>components/app/activity-feed.tsx</code>, calling <code>GET /admin/activity?&lt;ref&gt;=…&amp;limit=…&amp;before=…</code> with cursor paging. The old "useActivity is unused" gap is closed.</td></tr>
+  <tr><td>Routes with no web caller</td><td>v1 reads kept for API clients and <code>/developers</code>: <code>GET /admin/dashboard</code>, <code>/admin/pieces/:id/history</code>, <code>/admin/audit</code>, <code>/orders/:id</code>, <code>/memos/:id</code>; <code>GET /admin/shops/:id/credit</code> (the shop record reads <code>ShopRow.credit</code> instead); and the ops routes. Every other route has a caller (verified by matching each path against <code>apps/web/src</code>).</td></tr>
+  <tr><td>One refresh mechanism</td><td>Every write in the web app refreshes through <code>useSync()</code> and the single <code>AFFECTS</code> map in <code>lib/sync.ts</code>, now 22 change kinds. v3 added <code>order.settled</code>, <code>order.cancelled</code>, <code>order.unsold</code> (a rejected memo sale back on the memo), <code>settings.saved</code>, and the <code>credit</code> / <code>convert-preview</code> keys to every change that moves exposure.</td></tr>
   <tr><td>Retry cadence depends on traffic</td><td>The only scheduled trigger is a <strong>daily</strong> Vercel cron (<code>0 3 * * *</code> UTC = 08:30 IST) on <code>/v1/internal/dispatch</code>. Between runs, due retries are attempted only when a write kicks the dispatcher or an admin opens Home, Dashboard or Deliveries (at most once per 10 s per instance). A FAILED delivery's 30 s back-off is therefore a minimum, not a schedule.</td></tr>
-  <tr><td>Optional keys</td><td>Check-in, proof attach and complete accept an optional key. The web sends one for check-in and proofs, but not for complete or for the field memo extend; a repeated complete returns <code>409 VISIT_ALREADY_COMPLETED</code>, which the web treats as success. Admin writes carry no key. They rely on state guards and unique constraints, except piece intake (<code>POST /admin/designs/:id/pieces</code>), where a double submit would create two batches. The UI disables the button while pending.</td></tr>
-  <tr><td>Small inconsistencies</td><td>The shop form accepts geofence radius 20–1000 m while the API accepts 10–2000 m. <code>JWT_REFRESH_SECRET</code> is validated at boot but unused, because refresh tokens are opaque random strings stored as SHA-256. <code>docs/AUDIT.md</code> says 25 tests; the suite now has 30 (F16 and <code>records.test.ts</code> R1–R4 were added).</td></tr>
-  <tr><td>Not verified here</td><td>The test suites and e2e smoke were not executed for this report (a verifier was running scenarios against the live servers; no data was touched). Counts and behaviours come from reading the source.</td></tr>
+  <tr><td>Optional keys</td><td>Check-in, proof attach and complete accept an optional key. The web sends one for check-in and proofs, but not for complete or for the field memo extend. Admin writes (approve, reject, settle, cancel, settings) carry no key; they rely on guarded updates (<code>ORDER_ALREADY_DECIDED</code>, <code>ORDER_ALREADY_SETTLED</code>) and unique constraints, except piece intake (<code>POST /admin/designs/:id/pieces</code>), where a double submit would create two batches. The UI disables the button while pending.</td></tr>
+  <tr><td>Small inconsistencies</td><td>The shop form accepts geofence radius 20–1000 m while the API accepts 10–2000 m. <code>JWT_REFRESH_SECRET</code> is validated at boot but unused, because refresh tokens are opaque random strings stored as SHA-256. Activity kind <code>rate</code> is reserved: setting a gold rate still emits no event.</td></tr>
+  <tr><td>Not verified here</td><td>The test suites and e2e smoke were not executed for this report. Counts and behaviours come from reading the source (tests counted from <code>it(</code> calls).</td></tr>
+  </tbody>
+</table>
+
+<h3 data-toc="1.4" style="break-before: page; margin-top: 0">Pages and record tabs</h3>
+<p class="small">26 routable pages (<code>apps/web/src/app/**/page.tsx</code>; <code>/field</code> only redirects to <code>/field/today</code> and is not counted). Record pages open with a property panel on the left and the tabs below; list rows also open a side preview (<code>components/admin-v2/previews.tsx</code>: order, shop, memo, sample, visit, agent).</p>
+<table class="dense">
+  <thead><tr><th style="width:23%">Page</th><th style="width:29%">Tabs / modes</th><th>Main API reads (polling)</th></tr></thead>
+  <tbody>
+  <tr><td colspan="3"><b>Public and auth (4)</b></td></tr>
+  <tr><td><code>/</code> · <code>/developers</code></td><td>marketing; API docs</td><td>none (static content)</td></tr>
+  <tr><td><code>/login</code></td><td>form + two demo buttons</td><td><code>POST /auth/login</code></td></tr>
+  <tr><td><code>/ack/[token]</code></td><td>retailer receipt</td><td><code>GET /public/memo-ack/:token</code> (re-read every 5 s while pending)</td></tr>
+  <tr><td colspan="3"><b>Field app (6) — bottom tabs Today · Visits · Catalog · Profile</b></td></tr>
+  <tr><td><code>/field/today</code></td><td>route list + map</td><td><code>GET /field/today</code> (60 s)</td></tr>
+  <tr><td><code>/field/visits</code></td><td>Recent · Upcoming</td><td><code>GET /field/visits?scope=</code></td></tr>
+  <tr><td><code>/field/visits/[id]</code></td><td>stages Check in → Arrival photo → Sell and complete</td><td><code>GET /visits/:id</code> (10 s while an order awaits a decision; 3 s on the ack screen), <code>POST …/geofence-check</code> (5 s)</td></tr>
+  <tr><td><code>/field/visits/[id]/sale</code></td><td>Order · Memo; catalog → review</td><td><code>GET /visits/:id/catalog</code>, <code>GET /visits/:id/credit?amountPaise=</code></td></tr>
+  <tr><td><code>/field/catalog</code> · <code>/field/profile</code></td><td>browse · bag, memos, week</td><td><code>GET /field/catalog</code> · <code>GET /field/profile</code></td></tr>
+  <tr><td colspan="3"><b>Admin console (16) — sidebar Home · Field (Visits, Agents, Shops) · Sales (Orders, Memos, Samples) · Workspace (Catalog, Integrations, Settings)</b></td></tr>
+  <tr><td><code>/admin</code> Home</td><td>attention · map · activity (agent filter)</td><td><code>GET /admin/home</code> (10 s), <code>GET /admin/activity?limit=20</code> (10 s)</td></tr>
+  <tr><td><code>/admin/visits</code> · <code>[id]</code></td><td>Today · Yesterday · Last 7 days · record: <b>Overview · Activity · Audit</b></td><td><code>GET /admin/visits</code>, <code>/admin/visits/:id</code> (15 s), activity <code>?visitId=</code></td></tr>
+  <tr><td><code>/admin/agents</code> · <code>[id]</code></td><td>record: <b>Today's route · Bag · Memos · Orders · Activity</b></td><td><code>GET /admin/agents</code>, <code>/admin/agents/:id</code> (15 s), activity <code>?agentId=</code></td></tr>
+  <tr><td><code>/admin/shops</code> · <code>[id]</code></td><td>record: <b>Overview · Visits · Orders · Memos · Activity</b> (credit and exposure on Overview)</td><td><code>GET /admin/shops</code> (30 s), <code>/admin/shops/:id</code> (15 s), activity <code>?shopId=</code></td></tr>
+  <tr><td><code>/admin/orders</code> · <code>[id]</code></td><td>All · Pending approval · Confirmed · Approved · Unsettled · Rejected · Cancelled · record: <b>Overview · History · Activity</b></td><td><code>GET /admin/orders</code>, <code>/admin/orders/:id</code> (15 s), activity <code>?orderId=</code></td></tr>
+  <tr><td><code>/admin/memos</code> · <code>[id]</code></td><td>All active · Due today · Overdue · Returned · record: <b>Overview · History · Activity</b></td><td><code>GET /admin/memos</code>, <code>/admin/memos/:id</code> (20 s), activity <code>?memoId=</code></td></tr>
+  <tr><td><code>/admin/samples</code> · <code>[id]</code></td><td>record: <b>Custody · Activity</b></td><td><code>GET /admin/pieces</code>, <code>/admin/pieces/:id</code> (20 s), activity <code>?pieceId=</code></td></tr>
+  <tr><td><code>/admin/catalog</code></td><td>design grid + sheet</td><td><code>GET /admin/designs</code></td></tr>
+  <tr><td><code>/admin/integrations</code></td><td>endpoint panel: <b>Deliveries · Test receiver · Verify signatures</b></td><td><code>GET /admin/webhooks</code>, <code>…/deliveries</code> (cursor, 5 s), <code>…/received</code> (5 s)</td></tr>
+  <tr><td><code>/admin/settings</code></td><td><b>Gold rate · Approvals · Workspace</b></td><td><code>GET /admin/gold-rates</code>, <code>GET /admin/settings</code></td></tr>
   </tbody>
 </table>
 </section>
@@ -254,10 +286,27 @@ flowchart TB
 </ul>
 
 <h3 data-toc="2.8">Outbound webhooks</h3>
-<p>Events are rows in <code>OutboxEvent</code> written in the same transaction as the change. The payload is exactly the public body <code>{id:"evt_&lt;ULID&gt;", type, tenantId:&lt;slug&gt;, createdAt, data}</code>. The dispatcher (<code>webhooks/dispatcher.ts</code>) has three triggers: the post-commit kick, an opportunistic <code>maybeKick</code> on <code>GET /admin/home</code>, <code>/admin/dashboard</code> and <code>/admin/webhooks/deliveries</code> (at most once per 10 s per instance), and the cron route. Each request is a POST with headers <code>X-JewelRoute-Event</code>, <code>-Delivery</code>, <code>-Timestamp</code> and <code>-Signature: sha256=HMAC_SHA256(secret, "&lt;timestamp&gt;.&lt;raw body&gt;")</code>, a 10 s timeout and <code>redirect:"manual"</code>. Endpoint secrets (<code>whsec_…</code>) are stored encrypted with AES-256-GCM under <code>APP_ENCRYPTION_KEY</code>. Pipeline and retry ladder: Figure 9.</p>
+<p>Events are rows in <code>OutboxEvent</code> written in the same transaction as the change. The payload is exactly the public body <code>{id:"evt_&lt;ULID&gt;", type, tenantId:&lt;slug&gt;, createdAt, data}</code>. The dispatcher (<code>webhooks/dispatcher.ts</code>) has three triggers: the post-commit kick, an opportunistic <code>maybeKick</code> on <code>GET /admin/home</code>, <code>/admin/dashboard</code> and <code>/admin/webhooks/deliveries</code> (at most once per 10 s per instance), and the cron route. Each request is a POST with headers <code>X-JewelRoute-Event</code>, <code>-Delivery</code>, <code>-Timestamp</code> and <code>-Signature: sha256=HMAC_SHA256(secret, "&lt;timestamp&gt;.&lt;raw body&gt;")</code>, a 10 s timeout and <code>redirect:"manual"</code>. Endpoint secrets (<code>whsec_…</code>) are stored encrypted with AES-256-GCM under <code>APP_ENCRYPTION_KEY</code>. There are 17 event types (<code>packages/shared</code> <code>WEBHOOK_EVENT_TYPES</code>); v3 added <code>order.confirmed</code>, <code>order.pending_approval</code>, <code>order.settled</code>, <code>order.cancelled</code> and <code>memo.acknowledged</code>. The same outbox rows are the activity feed (§2.11). Pipeline and retry ladder: Figure 9.</p>
 
 <h3 data-toc="2.9">Public acknowledgement page</h3>
-<p>Creating a memo returns <code>ack.url = APP_PUBLIC_URL/ack/&lt;token&gt;</code>. The token is 24 random bytes stored only as SHA-256 and valid for 72 h. The agent shows it as a QR code. <code>/ack/[token]</code> renders <code>AckView</code>, which calls the public endpoints with plain <code>fetch</code> (no cookies, no refresh, no redirect). The retailer sees the exact pieces and can tap <em>Confirm receipt</em>, or read a 6-digit code to the agent. The code is <code>HMAC(APP_SECRET, memoId:token) mod 10⁶</code>, shown only while pending and stored only as a hash. Five wrong codes lock code entry with <code>423 ACK_LOCKED</code>; the QR path still works.</p>
+<p>Creating a memo returns <code>ack.url = APP_PUBLIC_URL/ack/&lt;token&gt;</code>. The token is 24 random bytes stored only as SHA-256 and valid for 72 h. The agent shows it as a QR code. <code>/ack/[token]</code> renders <code>AckView</code>, which calls the public endpoints with plain <code>fetch</code> (no cookies, no refresh, no redirect). The retailer sees the exact pieces and can tap <em>Confirm receipt</em>, or read a 6-digit code to the agent. The code is <code>HMAC(APP_SECRET, memoId:token) mod 10⁶</code>, shown only while pending and stored only as a hash. Five wrong codes lock code entry with <code>423 ACK_LOCKED</code>; the QR path still works. Either confirmation path now emits <code>memo.acknowledged</code> (v3), so the receipt shows up in the activity feed and on the sample's custody row (<code>CustodyEventRow.ack</code>). While receipt is pending, the retailer page re-reads every 5 s, so a code typed on the agent's phone flips it to "confirmed".</p>
+
+<h3 data-toc="2.10">Credit-aware orders and the global lock order (v3)</h3>
+<p><code>OrdersService.createInTx()</code> is shared by <code>POST /orders</code> and <code>POST /memos/:id/convert</code>. Inside the transaction it prices every line at the current rate, then asks <code>CreditService.position(tid, shopId, {amountPaise: total, lock: true})</code>, which takes the shop row <code>FOR UPDATE</code> and sums: opening outstanding (<code>Shop.openingOutstandingPaise</code>) + unsettled CONFIRMED/APPROVED orders = <b>outstanding</b>; OUT memo items at the shop = <b>memo exposure</b>; their sum = <b>exposure</b>. The arithmetic is the pure <code>creditPosition()</code> in <code>packages/shared</code> (6 known-answer tests). The order is written <code>CONFIRMED</code> or <code>PENDING_APPROVAL</code> with <code>approvalRequired</code>, <code>approvalReasons</code> and the frozen <code>creditSnapshot</code>, and emits <code>order.created</code> plus <code>order.confirmed</code> or <code>order.pending_approval</code>. Because two orders at the same shop serialise on the shop lock, they cannot both slip under the limit. Settle and cancel take the same shop lock, so receivables stay consistent.</p>
+<table class="dense">
+  <thead><tr><th style="width:26%">Write path</th><th>Locks, in this order (Memo → Visit → SamplePiece by id → Shop → Order)</th></tr></thead>
+  <tbody>
+  <tr><td>Memo convert (sell from memo)</td><td>Memo → Visit (if acting on one) → Pieces (custody move) → Shop (credit rule) → new Order</td></tr>
+  <tr><td>Order create</td><td>Visit → Shop</td></tr>
+  <tr><td>Approve / reject a memo conversion</td><td><code>lockConversion</code>: Memo → its sold Pieces, then Shop → Order (guarded update), then un-sell on reject</td></tr>
+  <tr><td>Approve / reject / settle / cancel (plain order)</td><td>Shop → Order</td></tr>
+  <tr><td>Memo create / return</td><td>Memo or Visit → Pieces</td></tr>
+  </tbody>
+</table>
+<p class="small">Taking Shop before Memo let reject ‖ convert on the same memo deadlock (11 of 12 runs in the re-review probe, surfacing as <code>409 CONCURRENT_UPDATE</code>); <code>test/v3.test.ts</code> V13 (6 rounds) is green with the order above. Source: <code>docs/DECISIONS.md</code> › Lock order, <code>docs/brain/clusters/orders-pricing.md</code>.</p>
+
+<h3 data-toc="2.11">One activity model (v3)</h3>
+<p><code>OutboxService.emit()</code> derives refs from each payload with the pure <code>eventRefs()</code> (<code>core/event-refs.ts</code>; the SQL back-fill in migration <code>…0300</code> and the batched <code>db:backfill-activity-refs</code> script use the same rules) and stores them as indexed columns: <code>shopId</code>, <code>agentId</code>, <code>visitId</code>, <code>orderId</code>, <code>memoId</code> (also <code>sourceMemoId</code>) and the GIN-indexed <code>pieceIds[]</code>. <code>ActivityService</code> (<code>core/activity.ts</code>) is the only code that turns rows into <code>ActivityItem {id, type, kind, title, amountPaise, actor, refs, detail, createdAt}</code>, resolving ref labels in one grouped query per record type. <code>kind</code> is one of <code>visit · proof · order · memo · custody · ack · rate · webhook · system</code>; <code>detail</code> carries the evidence (photo url, from → to labels, approval reasons, verification, distance, ack method). Home, Dashboard and every record's <code>activity</code> array are the same projection with a filter; the web renders them with one <code>ActivityFeed</code> component. The event's <code>evt_…</code> id is the webhook payload id, the ActivityItem id and <code>CustodyEventRow.eventId</code>.</p>
 </section>
 
 <!-- ============================================================ 3 API DESIGN -->
@@ -275,7 +324,9 @@ flowchart TB
   <tr><td>IST business dates</td><td>The business day is <code>istDate()</code> (Asia/Kolkata), sent as <code>YYYY-MM-DD</code> and stored as a Postgres <code>date</code>. Timestamps are ISO-8601 UTC. <code>plannedTime</code> is an IST wall-clock <code>HH:MM</code> (CHECK in SQL). "Today", "overdue", check-in day and MISSED are all IST.</td></tr>
   <tr><td>Idempotency</td><td>Required on money and custody creates, optional on visit transitions; mechanics in §2.5.</td></tr>
   <tr><td>Append-only ledgers</td><td><code>GoldRate</code>, <code>CustodyEvent</code> and <code>OrderItem</code> have <code>BEFORE UPDATE OR DELETE</code> triggers that raise (the demo seed purges via a transaction-local flag). The current rate is the latest row. Custody is the ordered event chain with a gap-free <code>seq</code> per piece.</td></tr>
-  <tr><td>Transactional outbox</td><td>An event exists if and only if its state change committed. It doubles as the admin activity feed (<code>activityTitle()</code> turns payloads into sentences).</td></tr>
+  <tr><td>Transactional outbox</td><td>An event exists if and only if its state change committed. It doubles as the one activity feed: indexed refs per event, one projection (<code>ActivityService</code>, §2.11), cursor paging.</td></tr>
+  <tr><td>Approval is a rule, not a default (v3)</td><td>Orders are <code>CONFIRMED</code> unless <code>CREDIT_LIMIT</code> or <code>ORDER_THRESHOLD</code> trips inside the create transaction; the reasons and the <code>CreditPosition</code> are frozen on the order (<code>approval</code>). Clients may preview but never decide.</td></tr>
+  <tr><td>One lock order (v3)</td><td>Memo → Visit → SamplePiece (id order) → Shop → Order on every write path (§2.10).</td></tr>
   <tr><td>No existence leaks</td><td>Cross-tenant or not-yours returns <code>404</code> (§2.6).</td></tr>
   <tr><td>Resumable flows</td><td><code>GET /visits/:id</code> returns a server-derived <code>resume</code> block (<code>nextStep</code>, <code>canCheckIn</code>, <code>canSell</code>, <code>canComplete</code>, <code>blockedBy</code>, <code>pendingAcks</code>), so a reload lands on the right step.</td></tr>
   <tr><td>Gap-free document numbers</td><td><code>nextDocNumber()</code> upserts <code>DocSequence</code> under a row lock, giving <code>ORD-2026-00042</code> and <code>MEMO-2026-00017</code> (per tenant per year), piece tags <code>AJ-S-000123</code> (kind <code>TAG</code>, year 0) and shop codes <code>SH-0001</code> (kind <code>TAG</code>, year 1).</td></tr>
@@ -284,6 +335,7 @@ flowchart TB
 
 <h3 data-toc="3.2">Versioning: v1 and additive v2</h3>
 <p>Every route is under <code>/v1</code>. "v2" is not a URL prefix. It is the Attio-style IA added on 21 Oct 2026 (CONTRACT.md § "v2"): new record endpoints (<code>/admin/home</code>, <code>/admin/search</code>, <code>/admin/*/:id</code> records, <code>/field/visits</code>, <code>/field/catalog</code>, <code>/field/profile</code>) and enriched row shapes (<code>AdminVisitRow</code>, <code>ShopRow</code>, <code>PieceRow</code>, <code>CustodyEventRow</code>, <code>AttentionItem</code>, <code>AuditRow</code>). They are strict supersets: v1 fields are kept (for example <code>ShopRow.piecesHere</code> and <code>AuditRow.actorName</code>), so v1 clients keep working. Until today, <code>admin-v2/*/data.ts</code> fell back to composing v1 routes when a v2 route was missing. Those fallbacks were removed in commit <code>4d26473</code>, so the admin web now calls the v2 routes directly.</p>
+<p><b>v3</b> (same day, CONTRACT.md § v3 and the "api, v3" changelog entries) is also additive at the URL level, with one deliberate behaviour change: <code>Order.status</code> no longer has <code>SUBMITTED</code>. Legacy rows were re-evaluated by the credit rule in migration <code>…0300</code> (→ <code>PENDING_APPROVAL</code> or <code>CONFIRMED</code>, snapshot marked <code>legacy:true</code>); the enum value was re-added in <code>…0400</code> only for rollback and is forbidden by CHECK <code>Order_no_submitted</code>. <code>GET /admin/orders?status=SUBMITTED</code> is still accepted as an alias of <code>PENDING_APPROVAL</code>. New: seven routes (credit ×2, convert-preview, settle, cancel, settings GET/PATCH), <code>Order.approval / settledAt / cancelledAt / cancellationReason</code>, <code>Shop.openingOutstandingPaise</code>, <code>ShopRow.credit / upcomingVisit / lastOrder</code>, <code>ActivityItem.kind / refs / detail</code>, <code>CustodyEventRow.ack / order</code>, and <code>GET /admin/activity</code> filters with <code>limit</code>/<code>before</code> paging (without either, still the bare v1 array of 100).</p>
 
 <h3 data-toc="3.3">Conventions at a glance</h3>
 <div class="two">
@@ -292,12 +344,15 @@ flowchart TB
   <tr><td>Visit status</td><td><code>PLANNED CHECKED_IN ACTIVE COMPLETED MISSED CANCELLED</code></td></tr>
   <tr><td>Verification</td><td><code>VERIFIED LOW_ACCURACY SIMULATED</code></td></tr>
   <tr><td>Custodian</td><td><code>VAULT AGENT SHOP SOLD LOST</code></td></tr>
-  <tr><td>Order status</td><td><code>SUBMITTED APPROVED REJECTED</code> (+<code>DRAFT</code> unused)</td></tr>
+  <tr><td>Order status</td><td><code>PENDING_APPROVAL CONFIRMED APPROVED REJECTED CANCELLED</code> (+<code>DRAFT</code> unused; <code>SUBMITTED</code> forbidden)</td></tr>
+  <tr><td>Approval reasons</td><td><code>CREDIT_LIMIT ORDER_THRESHOLD</code></td></tr>
+  <tr><td>Custody reason</td><td><code>INTAKE ISSUE_TO_AGENT MEMO_HANDOVER MEMO_RETURN RETURN_TO_VAULT CONVERTED_TO_SALE SALE_REJECTED</code> (+<code>ADJUSTMENT</code> unused)</td></tr>
 </tbody></table>
 <table class="dense kv"><tbody>
   <tr><td>Memo status</td><td><code>ACTIVE PARTIALLY_RETURNED RETURNED CONVERTED_TO_ORDER</code>; display adds <code>DUE_SOON OVERDUE</code></td></tr>
   <tr><td>Memo item</td><td><code>OUT RETURNED CONVERTED</code></td></tr>
   <tr><td>Delivery</td><td><code>PENDING SUCCEEDED FAILED DEAD</code></td></tr>
+  <tr><td>Activity kind</td><td><code>visit proof order memo custody ack rate webhook system</code></td></tr>
   <tr><td>Geofence</td><td>inside ⇔ distance ≤ radius + min(accuracy, 50 m); &gt;75 m accuracy or unknown accuracy → <code>LOW_ACCURACY</code></td></tr>
   <tr><td>Status codes</td><td>creates 201, actions 200 (<code>@HttpCode(200)</code>)</td></tr>
 </tbody></table>
@@ -307,7 +362,7 @@ flowchart TB
 <table class="dense">
   <thead><tr><th style="width:24%">Code</th><th style="width:6%">HTTP</th><th>When (source)</th></tr></thead>
   <tbody>
-  <tr><td><code>VALIDATION_FAILED</code></td><td>400</td><td>zod parse failure on body or query; invalid enum filters on list endpoints; bad delivery status filter.</td></tr>
+  <tr><td><code>VALIDATION_FAILED</code></td><td>400</td><td>zod parse failure on body or query; invalid enum filters on list endpoints; bad delivery status filter; bad activity or delivery cursor; empty or unknown settings keys.</td></tr>
   <tr><td><code>INVALID_JSON</code> · <code>BAD_REQUEST</code></td><td>400</td><td>Malformed JSON body · other Nest 400s.</td></tr>
   <tr><td><code>IDEMPOTENCY_KEY_REQUIRED</code></td><td>400</td><td>Missing key on <code>POST /orders</code>, <code>/memos</code>, <code>/memos/:id/return</code>, <code>/memos/:id/convert</code>.</td></tr>
   <tr><td><code>INVALID_DATE</code></td><td>400</td><td>Assignment date before today (IST).</td></tr>
@@ -328,12 +383,17 @@ flowchart TB
   <tr><td><code>ALREADY_CHECKED_IN</code></td><td>409</td><td>Check-in on a visit that is already open (also mapped from the partial unique index).</td></tr>
   <tr><td><code>ANOTHER_VISIT_OPEN</code></td><td>409</td><td>The agent has another CHECKED_IN or ACTIVE visit; <code>details {visitId}</code>.</td></tr>
   <tr><td><code>VISIT_NOT_PLANNED</code> · <code>VISIT_NOT_TODAY</code></td><td>409</td><td>Check-in on a MISSED, CANCELLED or COMPLETED visit, or unassigning a non-planned visit · planned date is not today (IST).</td></tr>
-  <tr><td><code>VISIT_NOT_OPEN</code></td><td>409</td><td>Proof token, proof, order or memo on a visit that is not CHECKED_IN or ACTIVE.</td></tr>
+  <tr><td><code>VISIT_NOT_OPEN</code></td><td>409</td><td>Proof token, proof, order, memo or <code>GET /visits/:id/credit</code> on a visit that is not CHECKED_IN or ACTIVE.</td></tr>
   <tr><td><code>VISIT_ALREADY_COMPLETED</code> · <code>PROOF_REQUIRED</code></td><td>409</td><td>Complete called twice · complete without at least one proof.</td></tr>
   <tr><td><code>VISIT_SHOP_MISMATCH</code></td><td>409</td><td>Return or convert with an explicit <code>visitId</code> at a different shop than the memo.</td></tr>
   <tr><td><code>ALREADY_ASSIGNED</code> · <code>AGENT_INACTIVE</code></td><td>409</td><td>Same agent, shop and date already planned (unique index) · assigning to a deactivated agent.</td></tr>
   <tr><td><code>DESIGN_INACTIVE</code> · <code>GOLD_RATE_MISSING</code></td><td>409</td><td>An order line references a deactivated design · no current rate for a purity (orders, memo valuation, conversion).</td></tr>
-  <tr><td><code>ORDER_ALREADY_DECIDED</code></td><td>409</td><td>Approve or reject on a non-SUBMITTED order (guarded update).</td></tr>
+  <tr><td><code>ORDER_ALREADY_DECIDED</code></td><td>409</td><td>Approve or reject on an order already APPROVED or REJECTED (guarded update); <code>details {status, decidedBy, decidedAt}</code> name the winner of a lost race.</td></tr>
+  <tr><td><code>ORDER_NOT_PENDING</code></td><td>409</td><td>Approve or reject on a CONFIRMED, CANCELLED or DRAFT order; <code>details {status}</code>.</td></tr>
+  <tr><td><code>ORDER_ALREADY_SETTLED</code> · <code>ORDER_NOT_SETTLEABLE</code></td><td>409</td><td>Settle twice · settle an order that is not CONFIRMED or APPROVED.</td></tr>
+  <tr><td><code>ORDER_NOT_CANCELLABLE</code></td><td>409</td><td>Cancel of a settled, decided or memo-converted order; <code>details {status, settled, sourceMemoId?}</code>.</td></tr>
+  <tr><td><code>PROOF_REQUIRED_BEFORE_SALE</code></td><td>409</td><td>Order, memo, return, convert or convert-preview on a visit with no arrival photo; nothing written, key rolled back.</td></tr>
+  <tr><td><code>PIECE_NOT_SOLD</code></td><td>409</td><td>Un-selling a rejected conversion finds a piece no longer SOLD (custody expected-holder check).</td></tr>
   <tr><td><code>PIECE_NOT_IN_YOUR_CUSTODY</code></td><td>409</td><td>Memo create with a piece the agent does not hold; <code>details {pieceIds, tagCodes}</code>.</td></tr>
   <tr><td><code>PIECE_ALREADY_ON_MEMO</code></td><td>409</td><td>Partial unique index <code>MemoItem_one_out_per_piece</code> hit by a concurrent memo.</td></tr>
   <tr><td><code>PIECE_NOT_ON_MEMO</code> · <code>PIECE_NOT_AT_SHOP</code></td><td>409</td><td>Return or convert of a piece that is not OUT on this memo · not physically at the memo's shop.</td></tr>
@@ -359,7 +419,7 @@ flowchart TB
 <!-- ============================================================ 4 ENDPOINTS (landscape) -->
 <section class="chapter wide" id="s4">
 <h2 data-toc="4"><span class="num">4</span>Complete endpoint reference</h2>
-<p class="small">82 routes generated from the controller decorators in <code>apps/api/src/**</code>. Paths are shown without the browser prefix <code>/api</code>. <b>Role</b>: <code>field</code> = FIELD_AGENT or ADMIN; <code>admin</code> = ADMIN only; <code>auth</code> = any signed-in user; <code>public</code> = no auth. <b>Tx</b> = runs in one Prisma transaction (<code>maxWait</code> 10 s, <code>timeout</code> 20 s). <b>Key</b> = Idempotency-Key (req = required, opt = optional). Every successful write except auth, internal dispatch and the demo receiver also triggers a post-commit dispatcher run.</p>
+<p class="small">89 routes generated from the controller decorators in <code>apps/api/src/**</code>. Paths are shown without the browser prefix <code>/api</code>. <b>Role</b>: <code>field</code> = FIELD_AGENT or ADMIN; <code>admin</code> = ADMIN only; <code>auth</code> = any signed-in user; <code>public</code> = no auth. <b>Tx</b> = runs in one Prisma transaction (<code>maxWait</code> 10 s, <code>timeout</code> 20 s). <b>Key</b> = Idempotency-Key (req = required, opt = optional). Every successful write except auth, internal dispatch and the demo receiver also triggers a post-commit dispatcher run. Rows marked <b>v3</b> are new or changed since the previous edition.</p>
 
 <h3 data-toc="4.1">Auth</h3>
 <table class="dense">
@@ -388,6 +448,7 @@ flowchart TB
 <tr><td class="m">POST</td><td class="p"><code>/v1/visits/:id/notes</code></td><td>field (readable)</td><td>Appends a free-text note (≤4000 chars) visible to the manager. Any visit status. An admin may also add notes. 201.</td><td>none; single insert</td><td>—</td><td>VisitNote</td></tr>
 <tr><td class="m">POST</td><td class="p"><code>/v1/visits/:id/complete</code></td><td>field (assigned)</td><td>Open → COMPLETED with optional summary and position. Requires at least one proof. The event carries proof, order and memo counts and values. 200.</td><td>key opt (web sends none); tx + lock</td><td><code>visit.completed</code></td><td>Visit, OutboxEvent</td></tr>
 <tr><td class="m">GET</td><td class="p"><code>/v1/visits/:id/catalog?…</code></td><td>field</td><td>Same as the field catalog, but <code>availablePieces</code> is the visit agent's bag (so an admin reading a visit sees the agent's bag).</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/visits/:id/credit?amountPaise=</code></td><td>field (own open visit)</td><td><b>v3.</b> Bare <code>CreditPosition</code> of the visit's shop for a prospective order total: limit, opening + unsettled = outstanding, memo exposure, exposure, available (<code>null</code> = no limit), projected exposure, <code>requiresApproval</code>, <code>reasons</code>, <code>asOf</code>. Not open → <code>409 VISIT_NOT_OPEN</code>; another agent's visit → 404. Called by the field order review on every total change.</td><td>read</td><td>—</td><td>—</td></tr>
 </tbody></table>
 
 <h3 data-toc="4.3">Field: uploads and files</h3>
@@ -405,8 +466,8 @@ flowchart TB
 <colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
 <thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
 <tbody>
-<tr><td class="m">POST</td><td class="p"><code>/v1/orders</code></td><td>field (assigned, visit open)</td><td><code>{visitId, items[{designId, quantity 1..500}] (≤100), notes?}</code>. Locks the visit and rejects inactive designs. Prices every line at the current gold rate inside the transaction, freezes <code>OrderItem</code> rows and <code>goldRateSnapshot</code>, numbers <code>ORD-YYYY-NNNNN</code>, and sets status SUBMITTED. Returns <code>{order}</code>. 201.</td><td><b>key req</b>; tx; <code>clientOpId</code> unique backstop returns the existing order</td><td><code>order.created</code></td><td>Order, OrderItem, DocSequence, AuditLog, OutboxEvent, IdempotencyKey</td></tr>
-<tr><td class="m">GET</td><td class="p"><code>/v1/orders/:id</code></td><td>field (own; admin any)</td><td>One order view (lines with frozen prices, totals, snapshot, decision). No web caller.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/orders</code></td><td>field (assigned, visit open)</td><td><code>{visitId, items[{designId, quantity 1..500}] (≤100), notes?}</code>. Locks the visit and rejects inactive designs. Requires an arrival photo on the visit (<code>409 PROOF_REQUIRED_BEFORE_SALE</code>). Prices every line at the current gold rate inside the transaction, freezes <code>OrderItem</code> rows and <code>goldRateSnapshot</code>, numbers <code>ORD-YYYY-NNNNN</code>. <b>v3:</b> runs the credit rule with the shop locked and writes <code>CONFIRMED</code> or <code>PENDING_APPROVAL</code> with <code>approval {required, reasons, position}</code>. Returns <code>{order}</code>. 201.</td><td><b>key req</b>; tx; locks Visit → Shop; <code>clientOpId</code> unique backstop returns the existing order</td><td><code>order.created</code> + <code>order.confirmed</code> or <code>order.pending_approval</code></td><td>Order, OrderItem, DocSequence, AuditLog, OutboxEvent ×2, IdempotencyKey</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/orders/:id</code></td><td>field (own; admin any)</td><td>One order view (lines with frozen prices, totals, snapshot, approval, decision, settlement). No web caller (the field reads orders inside <code>GET /visits/:id</code>).</td><td>read</td><td>—</td><td>—</td></tr>
 </tbody></table>
 
 <h3 data-toc="4.5">Field: memos and retailer acknowledgement</h3>
@@ -414,25 +475,28 @@ flowchart TB
 <colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
 <thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
 <tbody>
-<tr><td class="m">POST</td><td class="p"><code>/v1/memos</code></td><td>field (assigned, visit open)</td><td><code>{visitId, pieceIds[1..100], dueDate (today…+90), notes?}</code>. Numbers <code>MEMO-YYYY-NNNNN</code> and moves each piece AGENT → SHOP (<code>MEMO_HANDOVER</code>) through the custody ledger. Values pieces at the current rate (<code>MemoItem</code> OUT, memo total), then issues a 72 h ack token and code. Returns <code>{memo, ack:{url, expiresAt}}</code>. 201.</td><td><b>key req</b>; tx; pieces locked <code>FOR UPDATE ORDER BY id</code>; partial unique index → <code>PIECE_ALREADY_ON_MEMO</code></td><td><code>sample.custody_changed</code>, <code>memo.created</code></td><td>Memo, MemoItem, SamplePiece, CustodyEvent, DocSequence, AuditLog ×2, OutboxEvent ×2, IdempotencyKey</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/memos</code></td><td>field (assigned, visit open)</td><td><code>{visitId, pieceIds[1..100], dueDate (today…+90), notes?}</code>. Needs the arrival photo. Numbers <code>MEMO-YYYY-NNNNN</code> and moves each piece AGENT → SHOP (<code>MEMO_HANDOVER</code>) through the custody ledger. Values pieces at the current rate (<code>MemoItem</code> OUT, memo total), then issues a 72 h ack token and code. Returns <code>{memo, ack:{url, expiresAt}}</code>. 201.</td><td><b>key req</b>; tx; pieces locked <code>FOR UPDATE ORDER BY id</code>; partial unique index → <code>PIECE_ALREADY_ON_MEMO</code></td><td><code>sample.custody_changed</code>, <code>memo.created</code></td><td>Memo, MemoItem, SamplePiece, CustodyEvent, DocSequence, AuditLog ×2, OutboxEvent ×2, IdempotencyKey</td></tr>
 <tr><td class="m">GET</td><td class="p"><code>/v1/memos/:id</code></td><td>field (own; admin any)</td><td>Memo view: stored and display status, items with pieces, extensions, ack state. No web caller since the admin fallback was removed.</td><td>read</td><td>—</td><td>—</td></tr>
 <tr><td class="m">POST</td><td class="p"><code>/v1/memos/:id/return</code></td><td>field (own memo; admin any)</td><td><code>{pieceIds, visitId?}</code>. Moves OUT pieces SHOP → the memo's agent (<code>MEMO_RETURN</code>), marks items RETURNED and recomputes the memo status. The move is attributed to the caller's open visit at that shop (or an explicit open visit at the same shop). 200.</td><td><b>key req</b>; tx; memo row <code>FOR UPDATE</code></td><td><code>sample.custody_changed</code>, <code>memo.returned</code></td><td>MemoItem, Memo, SamplePiece, CustodyEvent, AuditLog ×2, OutboxEvent ×2, IdempotencyKey</td></tr>
 <tr><td class="m">POST</td><td class="p"><code>/v1/memos/:id/extend</code></td><td>field (own)</td><td><code>{dueDate, reason?}</code>. The new date must be after the current one, ≥ today and ≤ +90 days. Writes <code>MemoExtension</code> and clears <code>overdueNotifiedAt</code> (re-arms <code>memo.overdue</code>). 200. Called by the field <b>Extend</b> drawer.</td><td>tx + lock; no key</td><td><code>memo.extended</code></td><td>MemoExtension, Memo, AuditLog, OutboxEvent</td></tr>
-<tr><td class="m">POST</td><td class="p"><code>/v1/memos/:id/convert</code></td><td>field (own)</td><td><code>{pieceIds, visitId?}</code>: sells OUT pieces. Moves SHOP → SOLD (<code>CONVERTED_TO_SALE</code>), creates an order (one line per piece at its own net weight, today's rate, <code>sourceMemoId</code>), marks items CONVERTED and recomputes the status. Returns <code>{memo, order}</code>. 200. Called by the field <b>Sell from memo</b> drawer.</td><td><b>key req</b>; tx; order <code>clientOpId = convert:&lt;key&gt;</code></td><td><code>sample.custody_changed</code>, <code>order.created</code>, <code>memo.converted</code></td><td>SamplePiece, CustodyEvent, Order, OrderItem, DocSequence, MemoItem, Memo, AuditLog, OutboxEvent ×3</td></tr>
-<tr><td class="m">POST</td><td class="p"><code>/v1/memos/:id/ack/verify</code></td><td>field (own)</td><td><code>{code: 6 digits}</code>. Compares against the HMAC hash in constant time. A match sets ACKNOWLEDGED (method OTP); a miss increments attempts, and the 5th miss locks. 200, <code>422 ACK_CODE_INVALID</code> or <code>423 ACK_LOCKED</code>. 20/min.</td><td>tx + memo lock</td><td>—</td><td>Memo, AuditLog</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/memos/:id/convert-preview?pieceIds=a,b&amp;visitId=</code></td><td>field (own memo)</td><td><b>v3 (P7).</b> Read-only preview of the convert below for the same pieces: one line per piece priced at today's rate (<code>price()</code>, GST once on the subtotal) with its memo value at handover, totals, rate snapshot, and <code>credit</code> from the shared rule with those pieces already out of memo exposure. Writes nothing. <code>409 PIECE_NOT_ON_MEMO</code>; with <code>visitId</code> also <code>VISIT_NOT_OPEN</code> · <code>VISIT_SHOP_MISMATCH</code> · <code>PROOF_REQUIRED_BEFORE_SALE</code>.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/memos/:id/convert</code></td><td>field (own)</td><td><code>{pieceIds, visitId?}</code>: sells OUT pieces. Locks Memo → Visit → Pieces, moves SHOP → SOLD (<code>CONVERTED_TO_SALE</code>), marks items CONVERTED <i>before</i> the credit rule (no double count), then <code>createInTx</code> (Shop lock, one line per piece at its own net weight, today's rate, <code>sourceMemoId</code>) → <b>CONFIRMED or PENDING_APPROVAL</b>; recomputes the memo status. Returns <code>{memo, order}</code>. 200. Called by the field <b>Sell from memo</b> drawer.</td><td><b>key req</b>; tx; order <code>clientOpId = convert:&lt;key&gt;</code></td><td><code>sample.custody_changed</code>, <code>order.created</code>, <code>order.confirmed|pending_approval</code>, <code>memo.converted</code></td><td>SamplePiece, CustodyEvent, Order, OrderItem, DocSequence, MemoItem, Memo, AuditLog, OutboxEvent ×4</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/memos/:id/ack/verify</code></td><td>field (own)</td><td><code>{code: 6 digits}</code>. Compares against the HMAC hash in constant time. A match sets ACKNOWLEDGED (method OTP); a miss increments attempts, and the 5th miss locks. 200, <code>422 ACK_CODE_INVALID</code> or <code>423 ACK_LOCKED</code>. 20/min.</td><td>tx + memo lock</td><td><code>memo.acknowledged</code> (v3)</td><td>Memo, AuditLog, OutboxEvent</td></tr>
 <tr><td class="m">POST</td><td class="p"><code>/v1/memos/:id/ack/link</code></td><td>field (own)</td><td>Reissues the ack link: new token, code hash and 72 h expiry, attempts reset. The old link stops working. 409 if already acknowledged. 200.</td><td>tx + lock</td><td>—</td><td>Memo</td></tr>
 </tbody></table>
-<p class="small">Where the ack events go: neither retailer confirmation path emits a webhook. Acknowledgement is visible through <code>Memo.ackStatus</code>, the audit log and the field poll.</p>
+<p class="small">Where the ack events go: since v3 both confirmation paths (agent code, retailer page) emit <code>memo.acknowledged</code> <code>{memoId, number, method, ackAt, by:'retailer', shop, agent, visitId?, pieces[]}</code>, so the receipt appears in the activity feed (kind <code>ack</code>) and on the handover row of each piece's custody ledger.</p>
 
-<h3 data-toc="4.6">Admin: home, dashboard, activity, search</h3>
+<h3 data-toc="4.6">Admin: home, dashboard, activity, search, settings</h3>
 <table class="dense">
 <colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
 <thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
 <tbody>
-<tr><td class="m">GET</td><td class="p"><code>/v1/admin/home?date=</code></td><td>admin</td><td>v2 Home: metrics (orders today, visits, samples at retailers, overdue memos, pending approvals), map (shops plus check-ins), server-built <code>attention[]</code> (memo overdue or due today, missed visit, missing or simulated proof, pending order, failing webhook), 40 activity items, agents, rates.</td><td>read; <code>maybeKick</code></td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/home?date=</code></td><td>admin</td><td>v2 Home: metrics (orders today, visits, samples at retailers, overdue memos, pending approvals), map (shops plus check-ins), server-built <code>attention[]</code> (memo overdue or due today, missed visit at its planned slot, missing or simulated proof, order pending approval with its reasons, failing webhook), 40 activity items, agents, rates. <code>pendingApprovals</code> counts PENDING_APPROVAL orders; order value metrics exclude REJECTED and CANCELLED.</td><td>read; <code>maybeKick</code></td><td>—</td><td>—</td></tr>
 <tr><td class="m">GET</td><td class="p"><code>/v1/admin/dashboard?date=</code></td><td>admin</td><td>v1 dashboard: the same metrics, map, activity and agents plus <code>exceptions</code> (pending orders, overdue memos, missed visits) and the day's visits. No web caller now (still listed on <code>/developers</code>).</td><td>read; <code>maybeKick</code></td><td>—</td><td>—</td></tr>
-<tr><td class="m">GET</td><td class="p"><code>/v1/admin/activity</code></td><td>admin</td><td>Latest 100 outbox events (excluding <code>ping</code>) as feed items <code>{title, amountPaise, actor, shop, entity}</code>. No live web caller.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/activity?shopId&amp;agentId&amp;visitId&amp;orderId&amp;memoId&amp;pieceId&amp;limit&amp;before</code></td><td>admin</td><td><b>v3.</b> The one activity stream: outbox events (no <code>ping</code>) filtered by indexed refs, newest first, projected to <code>ActivityItem {kind, title, amountPaise, actor, refs{shop, agent, visit, order, memo, pieces[]}, detail}</code>. Without <code>limit</code>/<code>before</code>: bare array of 100 (v1 shape). With either: <code>{items, nextCursor?}</code>, keyset on (createdAt, id), limit 1–200 (default 50); a bad cursor gives 400. Called by every <code>ActivityFeed</code> (Home and six record types).</td><td>read</td><td>—</td><td>—</td></tr>
 <tr><td class="m">GET</td><td class="p"><code>/v1/admin/search?q=</code></td><td>admin</td><td>⌘K search: up to 5 each of shops, pieces (tag, design), orders, memos, agents and designs, case-insensitive.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/settings</code></td><td>admin</td><td><b>v3.</b> <code>{approvalThresholdPaise: number|null, demoMode}</code>. Seed threshold ₹10,00,000.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">PATCH</td><td class="p"><code>/v1/admin/settings</code></td><td>admin</td><td><b>v3.</b> Same keys; threshold a positive integer or <code>null</code> (off); empty or unknown keys → 400. Affects every later credit check, not existing orders. Called by Settings › Approvals.</td><td>tx</td><td>— (audit <code>tenant.settings</code>)</td><td>Tenant, AuditLog</td></tr>
 </tbody></table>
 
 <h3 data-toc="4.7">Admin: shops</h3>
@@ -440,10 +504,11 @@ flowchart TB
 <colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
 <thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
 <tbody>
-<tr><td class="m">GET</td><td class="p"><code>/v1/admin/shops?q&amp;agentId&amp;status</code></td><td>admin</td><td><code>ShopRow[]</code>: assigned agent, last and next visit, open orders (30 days), memo exposure, samples here, and status ACTIVE / MEMO_OVERDUE / DORMANT / NEW (grouped queries, ≤1000).</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/shops?q&amp;agentId&amp;status</code></td><td>admin</td><td><code>ShopRow[]</code>: assigned agent, last and next visit, open orders (PENDING_APPROVAL + CONFIRMED + APPROVED, 30 days), memo exposure, samples here, status ACTIVE / MEMO_OVERDUE / DORMANT / NEW, and v3 <code>credit: CreditPosition</code>, <code>upcomingVisit</code>, <code>lastOrder</code> (grouped queries, ≤1000).</td><td>read</td><td>—</td><td>—</td></tr>
 <tr><td class="m">GET</td><td class="p"><code>/v1/admin/shops/:id</code></td><td>admin</td><td>Shop record: row, visits in the last 30 days and upcoming, orders, memos, pieces at the shop now, activity mentioning the shop.</td><td>read</td><td>—</td><td>—</td></tr>
-<tr><td class="m">POST</td><td class="p"><code>/v1/admin/shops</code></td><td>admin</td><td>Creates a shop (geofence 10–2000 m, default 100). The code is auto-generated as <code>SH-NNNN</code> if omitted; a duplicate gives 409 <code>SHOP_CODE_TAKEN</code>. 201.</td><td>tx</td><td>—</td><td>Shop, AuditLog (DocSequence if auto code)</td></tr>
-<tr><td class="m">PATCH</td><td class="p"><code>/v1/admin/shops/:id</code></td><td>admin</td><td>Partial update (the code is immutable), including <code>assignedAgentId</code> or <code>null</code>; the agent is validated. Before and after values are audited.</td><td>tx</td><td>—</td><td>Shop, AuditLog</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/shops</code></td><td>admin</td><td>Creates a shop (geofence 10–2000 m, default 100; credit limit and v3 <code>openingOutstandingPaise</code>). The code is auto-generated as <code>SH-NNNN</code> if omitted; a duplicate gives 409 <code>SHOP_CODE_TAKEN</code>. 201.</td><td>tx</td><td>—</td><td>Shop, AuditLog (DocSequence if auto code)</td></tr>
+<tr><td class="m">PATCH</td><td class="p"><code>/v1/admin/shops/:id</code></td><td>admin</td><td>Partial update (the code is immutable), including <code>assignedAgentId</code> or <code>null</code>; the agent is validated. Omitted fields are no longer reset to create defaults (v3 fix). Before and after values are audited.</td><td>tx</td><td>—</td><td>Shop, AuditLog</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/shops/:id/credit?amountPaise=</code></td><td>admin</td><td><b>v3.</b> Bare <code>CreditPosition</code> for any shop, optionally for a prospective amount. No web caller (the shop record uses <code>ShopRow.credit</code>).</td><td>read</td><td>—</td><td>—</td></tr>
 </tbody></table>
 
 <h3 data-toc="4.8">Admin: visits and assignments</h3>
@@ -473,11 +538,13 @@ flowchart TB
 <colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
 <thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
 <tbody>
-<tr><td class="m">GET</td><td class="p"><code>/v1/admin/orders?status&amp;from&amp;to&amp;agentId&amp;shopId</code></td><td>admin</td><td>Order views, newest first, ≤500. Date filters are IST days on <code>createdAt</code>.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/orders?status&amp;from&amp;to&amp;agentId&amp;shopId</code></td><td>admin</td><td>Order views, newest first, ≤500. <code>status</code> is a CSV of the v3 values (<code>SUBMITTED</code> accepted as an alias of PENDING_APPROVAL). Date filters are IST days on <code>createdAt</code>.</td><td>read</td><td>—</td><td>—</td></tr>
 <tr><td class="m">GET</td><td class="p"><code>/v1/admin/orders/:id</code></td><td>admin</td><td>Order record: order, source visit row (verification, distance), audit history, and <code>activity</code> for the order (outbox events by aggregate or <code>data.orderId</code>).</td><td>read</td><td>—</td><td>—</td></tr>
-<tr><td class="m">POST</td><td class="p"><code>/v1/admin/orders/approve</code></td><td>admin</td><td><code>{orderIds ≤200}</code> batch approve (new in <code>d8ee0eb</code>). Duplicate ids are collapsed; each order runs through the same <code>decide()</code> in its own transaction, so one failure never rolls back the others. Returns per-order <code>results[{id, ok, number?, status?, error?}]</code>, <code>approved</code> and <code>failed</code>. 200. Called by the Orders list bulk approve.</td><td>one tx per order; guarded update</td><td><code>order.approved</code> ×N</td><td>Order, AuditLog, OutboxEvent</td></tr>
-<tr><td class="m">POST</td><td class="p"><code>/v1/admin/orders/:id/approve</code></td><td>admin</td><td>SUBMITTED → APPROVED via <code>updateMany … WHERE status='SUBMITTED'</code>, recording the decider and time. A second decision gives 409 <code>ORDER_ALREADY_DECIDED</code>. 200.</td><td>tx; guarded update (one-shot)</td><td><code>order.approved</code></td><td>Order, AuditLog, OutboxEvent</td></tr>
-<tr><td class="m">POST</td><td class="p"><code>/v1/admin/orders/:id/reject</code></td><td>admin</td><td><code>{reason}</code> SUBMITTED → REJECTED with <code>rejectionReason</code>; the agent sees the reason. 200.</td><td>tx; guarded update</td><td><code>order.rejected</code></td><td>Order, AuditLog, OutboxEvent</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/orders/approve</code></td><td>admin</td><td><code>{orderIds ≤200}</code> batch approve. Duplicate ids are collapsed; each order runs through the same <code>decide()</code> in its own transaction, so one failure (<code>NOT_FOUND</code>, <code>ORDER_ALREADY_DECIDED</code>, <code>ORDER_NOT_PENDING</code>) never rolls back the others. Returns per-order <code>results[{id, ok, number?, status?, error?}]</code>, <code>approved</code> and <code>failed</code>. 200. Called by the Orders list bulk approve.</td><td>one tx per order; guarded update</td><td><code>order.approved</code> ×N</td><td>Order, AuditLog, OutboxEvent</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/orders/:id/approve</code></td><td>admin</td><td><b>v3:</b> PENDING_APPROVAL → APPROVED via <code>updateMany … WHERE status='PENDING_APPROVAL'</code>, recording the decider and time; the order now counts as outstanding. Lost race → <code>409 ORDER_ALREADY_DECIDED</code> naming who decided; any other status → <code>409 ORDER_NOT_PENDING</code>. 200.</td><td>tx; Memo → Pieces (if converted) → Shop lock; guarded update</td><td><code>order.approved</code></td><td>Order, AuditLog, OutboxEvent</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/orders/:id/reject</code></td><td>admin</td><td><code>{reason}</code> PENDING_APPROVAL → REJECTED with <code>rejectionReason</code>; the agent sees the reason. <b>v3:</b> for a memo conversion (<code>sourceMemoId</code>) it <b>un-sells</b>: pieces SOLD → the memo's shop (<code>SALE_REJECTED</code>), memo items CONVERTED → OUT, memo status recomputed (e.g. CONVERTED_TO_ORDER → ACTIVE), memo exposure restored. Response unchanged <code>{order}</code>; the event adds <code>sourceMemoId</code> and <code>unsold {memoId, memoNumber, memoStatus, pieceIds}</code>. 200.</td><td>tx; lock order as approve; guarded update; deferred trigger <code>Order_dead_unsells_pieces</code></td><td><code>order.rejected</code> (+ <code>sample.custody_changed</code> when un-selling)</td><td>Order, AuditLog, OutboxEvent; when un-selling also SamplePiece, CustodyEvent, MemoItem, Memo</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/orders/:id/settle</code></td><td>admin</td><td><b>v3.</b> No body. Marks a CONFIRMED or APPROVED order paid (<code>settledAt</code>); it stops counting towards the shop's outstanding. Returns <code>{order, credit}</code> (position after). Again → <code>409 ORDER_ALREADY_SETTLED</code>; other statuses → <code>409 ORDER_NOT_SETTLEABLE</code>. 200.</td><td>tx; Shop lock; guarded update</td><td><code>order.settled</code></td><td>Order, AuditLog, OutboxEvent</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/orders/:id/cancel</code></td><td>admin</td><td><b>v3.</b> <code>{reason?}</code>. CONFIRMED or PENDING_APPROVAL, not settled and not converted from a memo → CANCELLED (<code>cancelledAt</code>, <code>cancellationReason</code>); else <code>409 ORDER_NOT_CANCELLABLE</code>. 200.</td><td>tx; Shop lock; guarded update</td><td><code>order.cancelled</code></td><td>Order, AuditLog, OutboxEvent</td></tr>
 </tbody></table>
 
 <h3 data-toc="4.11">Admin: memos</h3>
@@ -521,7 +588,7 @@ flowchart TB
 <colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
 <thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
 <tbody>
-<tr><td class="m">GET</td><td class="p"><code>/v1/admin/webhooks/event-types</code></td><td>admin</td><td>The 12 event types with descriptions and example envelopes.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/webhooks/event-types</code></td><td>admin</td><td>The 17 event types with descriptions and example envelopes.</td><td>read</td><td>—</td><td>—</td></tr>
 <tr><td class="m">GET</td><td class="p"><code>/v1/admin/webhooks</code></td><td>admin</td><td>Endpoints with <code>secretLast4</code> and 24 h stats (succeeded; failed + dead).</td><td>read</td><td>—</td><td>—</td></tr>
 <tr><td class="m">POST</td><td class="p"><code>/v1/admin/webhooks</code></td><td>admin</td><td><code>{url (https in prod), description?, events[] or ["*"]}</code>. Generates a <code>whsec_</code> secret, stores it encrypted, and returns it once. 201.</td><td>tx</td><td>—</td><td>WebhookEndpoint, AuditLog</td></tr>
 <tr><td class="m">GET</td><td class="p"><code>/v1/admin/webhooks/deliveries?endpointId&amp;status&amp;eventType&amp;cursor&amp;limit</code></td><td>admin</td><td>Without <code>cursor</code>/<code>limit</code>: the latest 100 as a bare array (v1 shape). With either: keyset pages <code>{items, nextCursor}</code> on (createdAt, id) desc, limit ≤200 (default 50); the cursor is opaque.</td><td>read; <code>maybeKick</code></td><td>—</td><td>—</td></tr>
@@ -541,7 +608,7 @@ flowchart TB
 <thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
 <tbody>
 <tr><td class="m">GET</td><td class="p"><code>/v1/public/memo-ack/:token</code></td><td>public (token)</td><td>Retailer view: tenant, shop, agent, memo number, due date, pieces (tag, name, purity, weights, value), total, ack state and the 6-digit code while pending. Expired and pending gives 410 <code>ACK_EXPIRED</code>. 30/min.</td><td>read</td><td>—</td><td>—</td></tr>
-<tr><td class="m">POST</td><td class="p"><code>/v1/public/memo-ack/:token</code></td><td>public (token)</td><td><code>{confirm:true}</code> marks ACKNOWLEDGED (method QR_CONFIRM) via a guarded update. Repeats return the same result. Audit row with actor <code>null</code> and the retailer's IP. 10/min.</td><td>tx; guarded update (idempotent)</td><td>—</td><td>Memo, AuditLog</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/public/memo-ack/:token</code></td><td>public (token)</td><td><code>{confirm:true}</code> marks ACKNOWLEDGED (method QR_CONFIRM) via a guarded update. Repeats return the same result. Audit row with actor <code>null</code> and the retailer's IP. 10/min.</td><td>tx; guarded update (idempotent)</td><td><code>memo.acknowledged</code> (v3)</td><td>Memo, AuditLog, OutboxEvent</td></tr>
 </tbody></table>
 
 <h3 data-toc="4.16">Ops</h3>
@@ -560,7 +627,7 @@ flowchart TB
 <!-- ============================================================ 5 DATA MODEL -->
 <section class="chapter" id="s5">
 <h2 data-toc="5"><span class="num">5</span>Data model</h2>
-<p class="lead">25 Prisma models in <code>apps/api/prisma/schema.prisma</code>, three migrations. Every business row carries <code>tenantId</code>. Money columns are <code>BigInt</code> paise, weights are <code>Int</code> milligrams, business dates are <code>@db.Date</code>.</p>
+<p class="lead">25 Prisma models in <code>apps/api/prisma/schema.prisma</code>, nine migrations (<code>…0000_init</code> to <code>…0800</code>; v3 is <code>…0300_v3_credit_activity</code>, <code>…0400_v3_expand_enums</code>, <code>…0500_v3_sale_guards</code>, <code>…0600_v3_validate_no_submitted</code>, plus two concurrent OrderItem indexes). v3 added columns, not tables; <code>CreditPosition</code> is computed, never stored except as the frozen <code>Order.creditSnapshot</code>. Every business row carries <code>tenantId</code>. Money columns are <code>BigInt</code> paise, weights are <code>Int</code> milligrams, business dates are <code>@db.Date</code>.</p>
 
 
 <p class="small">Figure 2 (relationship diagram) is on the landscape page at the end of this section.</p>
@@ -570,11 +637,11 @@ flowchart TB
   <thead><tr><th style="width:15%">Table</th><th style="width:47%">Key fields</th><th>Uniques and indexes · notes</th></tr></thead>
   <tbody>
   <tr><td colspan="3"><b>Tenancy and identity</b></td></tr>
-  <tr><td>Tenant</td><td><code>slug</code>, <code>name</code>, <code>demoMode</code> (allows SIMULATED check-ins)</td><td><code>slug</code> unique</td></tr>
+  <tr><td>Tenant</td><td><code>slug</code>, <code>name</code>, <code>demoMode</code> (allows SIMULATED check-ins), v3 <code>approvalThresholdPaise?</code></td><td><code>slug</code> unique; threshold null or &gt; 0</td></tr>
   <tr><td>User</td><td><code>email</code>, <code>name</code>, <code>role</code> FIELD_AGENT|ADMIN, <code>passwordHash</code> (bcrypt), <code>active</code>, <code>phone</code>, <code>homeArea</code></td><td>(tenantId, email) unique; (tenantId, role)</td></tr>
   <tr><td>RefreshToken</td><td><code>tokenHash</code> (SHA-256), <code>expiresAt</code>, <code>revokedAt</code>, <code>userAgent</code></td><td><code>tokenHash</code> unique; rotation by revocation</td></tr>
   <tr><td colspan="3"><b>Field operations</b></td></tr>
-  <tr><td>Shop</td><td><code>code</code>, <code>name</code>, owner, phone, address, area, city, <code>lat/lng</code>, <code>geofenceRadiusM</code> (default 100), <code>creditLimitPaise</code>, <code>assignedAgentId?</code></td><td>(tenantId, code) unique; (tenantId, city); (tenantId, assignedAgentId)</td></tr>
+  <tr><td>Shop</td><td><code>code</code>, <code>name</code>, owner, phone, address, area, city, <code>lat/lng</code>, <code>geofenceRadiusM</code> (default 100), <code>creditLimitPaise</code> (0 = no limit), v3 <code>openingOutstandingPaise</code>, <code>assignedAgentId?</code></td><td>(tenantId, code) unique; (tenantId, city); (tenantId, assignedAgentId); both credit columns ≥ 0; row locked by every exposure-changing write</td></tr>
   <tr><td>Visit</td><td><code>shopId</code>, <code>agentId</code>, <code>plannedDate</code> (date), <code>plannedTime?</code> HH:MM, <code>sequence</code>, <code>status</code>, check-in lat/lng/accuracy/distance, <code>verification</code>, <code>startedAt</code>, <code>completedAt</code>, completion position, <code>summary</code>, <code>assignedById</code></td><td>(tenant, agent, shop, plannedDate) unique; partial unique "one open per agent"; indexes by date, agent+date, shop+date</td></tr>
   <tr><td>VisitProof</td><td><code>objectKey</code>, <code>url</code>, content type, size, <code>checksumSha256</code>, <code>capturedAt</code>, capture and check-in positions, <code>distanceM</code></td><td>(visitId, checksumSha256) unique, so the same photo is attached once</td></tr>
   <tr><td>VisitNote</td><td><code>visitId</code>, <code>authorId</code>, <code>body</code></td><td>—</td></tr>
@@ -583,19 +650,20 @@ flowchart TB
   <tr><td>JewelryDesign</td><td><code>sku</code>, name, category, collection, <code>purity</code>, gross and net mg, <code>makingChargeType/Value</code>, <code>stoneValuePaise</code>, <code>otherComponents</code> JSON, <code>imageUrls[]</code>, <code>active</code></td><td>(tenantId, sku) unique; (tenant, category)</td></tr>
   <tr><td colspan="3"><b>Custody</b></td></tr>
   <tr><td>SamplePiece</td><td><code>designId</code>, <code>tagCode</code>, gross and net mg (per piece), <code>custodianType</code>, <code>custodianAgentId?</code>, <code>custodianShopId?</code>, <code>custodySeq</code></td><td>(tenantId, tagCode) unique; indexes by custodian type, agent and shop</td></tr>
-  <tr><td>CustodyEvent</td><td><code>pieceId</code>, <code>seq</code>, from and to (type, agent, shop), <code>reason</code>, <code>memoId?</code>, <code>visitId?</code>, <code>actorId</code>, <code>outboxEventId?</code>, <code>occurredAt</code></td><td>append-only; (pieceId, seq) unique, gap-free; indexes by time, visit, memo</td></tr>
+  <tr><td>CustodyEvent</td><td><code>pieceId</code>, <code>seq</code>, from and to (type, agent, shop), <code>reason</code> (v3 adds <code>SALE_REJECTED</code>: SOLD → shop), <code>memoId?</code>, <code>visitId?</code>, <code>actorId</code>, <code>outboxEventId?</code>, <code>occurredAt</code></td><td>append-only; (pieceId, seq) unique, gap-free; indexes by time, visit, memo</td></tr>
   <tr><td colspan="3"><b>Commerce</b></td></tr>
-  <tr><td>Order</td><td><code>number</code>, shop, agent, <code>visitId?</code>, <code>status</code>, <code>clientOpId</code>, subtotal, GST, total (paise), <code>goldRateSnapshot</code> JSON, notes, <code>sourceMemoId?</code>, decided by and at, <code>rejectionReason</code></td><td>(tenant, clientOpId) and (tenant, number) unique; (tenant, status, createdAt); (tenant, visitId); (tenant, shop, createdAt)</td></tr>
-  <tr><td>OrderItem</td><td>design, <code>pieceId?</code>, sku, name, purity, qty, net mg, <code>goldRateId</code>, rate, gold, making, stone, other, unit and line totals</td><td>append-only frozen price snapshot</td></tr>
+  <tr><td>Order</td><td><code>number</code>, shop, agent, <code>visitId?</code>, <code>status</code> (v3: PENDING_APPROVAL · CONFIRMED · APPROVED · REJECTED · CANCELLED; DRAFT unused), <code>clientOpId</code>, subtotal, GST, total (paise), <code>goldRateSnapshot</code> JSON, notes, <code>sourceMemoId?</code>, decided by and at, <code>rejectionReason</code>; v3 <code>approvalRequired</code>, <code>approvalReasons[]</code>, <code>creditSnapshot</code> JSON, <code>settledAt?</code>, <code>cancelledAt?</code>, <code>cancellationReason?</code></td><td>(tenant, clientOpId) and (tenant, number) unique; (tenant, status, createdAt); (tenant, visitId); (tenant, shop, createdAt); v3 (tenant, shop, status)</td></tr>
+  <tr><td>OrderItem</td><td>design, <code>pieceId?</code>, sku, name, purity, qty, net mg, <code>goldRateId</code>, rate, gold, making, stone, other, unit and line totals</td><td>append-only frozen price snapshot; indexes on <code>pieceId</code> and <code>orderId</code> (for the sale guards and un-sell)</td></tr>
   <tr><td>Memo</td><td><code>number</code>, shop, agent, <code>visitId?</code>, <code>status</code>, <code>clientOpId</code>, <code>dueDate</code>, <code>totalValuePaise</code>, <code>ackStatus</code>, <code>ackTokenHash</code>, <code>ackCodeHash</code>, <code>ackAttempts</code>, <code>ackAt</code>, <code>ackMethod</code>, <code>ackTokenExpiresAt</code>, <code>overdueNotifiedAt</code>, <code>closedAt</code></td><td>(tenant, clientOpId), (tenant, number), <code>ackTokenHash</code> unique; (tenant, status, dueDate)</td></tr>
   <tr><td>MemoItem</td><td><code>memoId</code>, <code>pieceId</code>, <code>valuePaise</code> (exposure at handover), <code>status</code> OUT|RETURNED|CONVERTED, <code>returnedAt</code></td><td>partial unique: one OUT line per piece</td></tr>
   <tr><td>MemoExtension</td><td><code>fromDueDate</code>, <code>toDueDate</code>, <code>reason</code>, <code>actorId</code></td><td>history of extensions; the view exposes <code>extended: true</code></td></tr>
   <tr><td colspan="3"><b>Integration</b></td></tr>
   <tr><td>WebhookEndpoint</td><td><code>url</code>, description, <code>secretEncrypted</code> (AES-256-GCM), <code>secretLast4</code>, <code>events[]</code>, <code>active</code></td><td>soft-deleted via <code>active=false</code></td></tr>
-  <tr><td>OutboxEvent</td><td><code>id</code> evt_ULID, <code>type</code>, aggregate type and id, <code>actorId</code>, <code>payload</code> (the exact public body), <code>fannedOutAt</code>, <code>targetEndpointId?</code> (ping)</td><td>(tenant, createdAt); (fannedOutAt); (tenant, aggregate)</td></tr>
+  <tr><td>OutboxEvent</td><td><code>id</code> evt_ULID, <code>type</code>, aggregate type and id, <code>actorId</code>, <code>payload</code> (the exact public body), <code>fannedOutAt</code>, <code>targetEndpointId?</code> (ping); v3 ref columns <code>shopId?</code>, <code>agentId?</code>, <code>visitId?</code>, <code>orderId?</code>, <code>memoId?</code>, <code>pieceIds[]</code></td><td>(tenant, createdAt); (fannedOutAt); (tenant, aggregate); v3 (tenant, &lt;ref&gt;, createdAt) for each ref; GIN on <code>pieceIds</code></td></tr>
   <tr><td>WebhookDelivery</td><td><code>endpointId</code>, <code>eventId</code>, <code>status</code>, <code>attempts</code>, <code>nextAttemptAt</code>, <code>lockedUntil</code>, last status code, latency, error, <code>deliveredAt</code></td><td>(endpointId, eventId) unique; (status, nextAttemptAt)</td></tr>
   <tr><td>WebhookAttempt</td><td><code>attemptNo</code>, status code, latency, error, response body, <code>requestHeaders</code> JSON</td><td>one row per HTTP attempt</td></tr>
   <tr><td>ReceivedWebhook</td><td>endpoint token, delivery and event ids, headers, body, <code>signatureOk</code></td><td>demo receiver log</td></tr>
+  <tr><td><i>CreditPosition</i> (v3, computed)</td><td><code>shopId</code>, <code>creditLimitPaise</code>, <code>openingOutstandingPaise</code>, <code>unsettledOrdersPaise</code>, <code>outstandingPaise</code>, <code>memoExposurePaise</code>, <code>exposurePaise</code>, <code>availableCreditPaise|null</code>, <code>overLimit</code>, <code>approvalThresholdPaise|null</code>, <code>orderAmountPaise</code>, <code>projectedExposurePaise</code>, <code>requiresApproval</code>, <code>reasons</code>, <code>asOf</code></td><td>Not a table. <code>CreditService.position()</code> → shared <code>creditPosition()</code>; frozen into <code>Order.creditSnapshot</code>; returned as <code>Order.approval.position</code>, <code>ShopRow.credit</code> and by both credit routes</td></tr>
   <tr><td colspan="3"><b>Platform</b></td></tr>
   <tr><td>StoredFile</td><td><code>objectKey</code>, content type, size, <code>sha256</code>, <code>bytes</code> (bytea), <code>uploadedById</code></td><td>(tenantId, objectKey) unique; direct-mode proofs</td></tr>
   <tr><td>AuditLog</td><td><code>actorId?</code> (null = retailer via public link), <code>action</code>, entity type and id, <code>before</code>/<code>after</code> JSON, <code>requestId</code>, <code>ip</code></td><td>(tenant, entityType, entityId); (tenant, createdAt)</td></tr>
@@ -605,7 +673,7 @@ flowchart TB
 </table>
 
 <h3 data-toc="5.2">Database-enforced invariants</h3>
-<p class="small">Hand-written in <code>migrations/20261021000000_init/migration.sql</code> (after the generated DDL) and <code>20261021000200_v2_attio_ia</code>. These hold even if application code has a bug.</p>
+<p class="small">Hand-written in <code>migrations/20261021000000_init/migration.sql</code> (after the generated DDL), <code>…0200_v2_attio_ia</code> and the v3 migrations <code>…0300</code>/<code>…0500</code>/<code>…0600</code>. These hold even if application code has a bug.</p>
 <table class="dense">
   <thead><tr><th style="width:30%">Constraint</th><th style="width:12%">Kind</th><th>Rule</th></tr></thead>
   <tbody>
@@ -619,12 +687,17 @@ flowchart TB
   <tr><td><code>CustodyEvent_seq</code> · <code>Memo_ack_attempts</code></td><td>CHECK</td><td><code>seq ≥ 1</code> · <code>ackAttempts ≥ 0</code>.</td></tr>
   <tr><td><code>Visit_plannedTime_format</code></td><td>CHECK</td><td><code>plannedTime</code> null or <code>^([01][0-9]|2[0-3]):[0-5][0-9]$</code>.</td></tr>
   <tr><td><code>GoldRate_append_only</code> · <code>CustodyEvent_append_only</code> · <code>OrderItem_append_only</code></td><td>trigger</td><td><code>BEFORE UPDATE OR DELETE … jr_forbid_mutation()</code> raises <code>check_violation</code>. The only escape is DELETE with the transaction-local <code>jewelroute.allow_purge = on</code> used by the demo seed (test 8).</td></tr>
+  <tr><td><code>Order_pending_has_reason</code> · <code>Order_approval_reasons_known</code></td><td>CHECK (v3)</td><td>PENDING_APPROVAL ⇒ <code>approvalRequired</code> and ≥1 reason · reasons ⊆ {CREDIT_LIMIT, ORDER_THRESHOLD}.</td></tr>
+  <tr><td><code>Order_settled_only_when_owed</code> · <code>Order_cancelled_at</code></td><td>CHECK (v3)</td><td><code>settledAt</code> only on CONFIRMED/APPROVED · CANCELLED ⇔ <code>cancelledAt</code> set.</td></tr>
+  <tr><td><code>Order_no_submitted</code></td><td>CHECK (v3)</td><td>No row may be SUBMITTED (enum value kept only for rollback); added NOT VALID, validated in <code>…0600</code>.</td></tr>
+  <tr><td><code>Shop_credit_nonneg</code> · <code>Tenant_approval_threshold_positive</code> · <code>OutboxEvent_pieceIds_not_null</code></td><td>CHECK (v3)</td><td>limit and opening ≥ 0 · threshold null or &gt; 0 · refs array never null.</td></tr>
+  <tr><td><code>SamplePiece_sold_has_live_order</code> · <code>Order_dead_unsells_pieces</code></td><td>deferred constraint trigger (v3)</td><td>At COMMIT: a SOLD piece must appear on an OrderItem of an order that is not REJECTED or CANCELLED. Fires when a piece becomes SOLD and when a selling order is rejected or cancelled, so a rejection that does not un-sell (or a cancel of a conversion) cannot commit. Deferred because convert moves the piece before inserting the order.</td></tr>
   <tr><td>Plain uniques</td><td>unique</td><td>Per-tenant email, shop code, SKU, tag code, order and memo number, <code>clientOpId</code>; (visit, checksum); (piece, seq); (endpoint, event); (agent, shop, date).</td></tr>
   </tbody>
 </table>
 <div class="wide">
 <h3 data-toc="5.3">Relationship diagram</h3>
-<figure>
+<figure data-maxh="145">
 <script type="text/plain" class="mmd" data-id="fig-er">
 erDiagram
   Tenant ||--o{ User : has
@@ -642,11 +715,16 @@ erDiagram
   Memo ||--o{ MemoExtension : extended
   Order ||--o{ OrderItem : "frozen lines"
   JewelryDesign ||--o{ OrderItem : priced
+  Shop ||--o{ Order : "credit, outstanding"
+  Shop ||--o{ Memo : "memo exposure"
+  Memo |o..o{ Order : "sourceMemoId (convert)"
+  SamplePiece |o..o{ OrderItem : "pieceId (sold)"
+  Order |o..o{ OutboxEvent : "ref orderId"
+  Shop |o..o{ OutboxEvent : "ref shopId"
   OutboxEvent ||--o{ WebhookDelivery : "fanned out"
   WebhookEndpoint ||--o{ WebhookDelivery : receives
-  WebhookDelivery ||--o{ WebhookAttempt : attempts
 </script>
-<figcaption><b>Figure 2 — Core relationships.</b> Not shown: RefreshToken, GoldRate (append-only, per tenant and purity), ReceivedWebhook, StoredFile, AuditLog, IdempotencyKey, DocSequence. <code>Order.sourceMemoId</code>, <code>CustodyEvent.memoId/visitId/outboxEventId</code> and <code>SamplePiece.custodianAgentId/custodianShopId</code> are references shown in the tables below.</figcaption>
+<figcaption><b>Figure 2 — Core relationships.</b> Dashed lines are references without a foreign key: <code>Order.sourceMemoId</code>, <code>OrderItem.pieceId</code>, and two of the six v3 activity refs on <code>OutboxEvent</code>. Not shown: RefreshToken, GoldRate, WebhookAttempt, ReceivedWebhook, StoredFile, AuditLog, IdempotencyKey, DocSequence (see the table above).</figcaption>
 </figure>
 </div>
 </section>
@@ -654,7 +732,7 @@ erDiagram
 <!-- ============================================================ 6 CLICK-BY-CLICK (landscape) -->
 <section class="chapter wide" id="s6">
 <h2 data-toc="6"><span class="num">6</span>Click-by-click data flow</h2>
-<p class="small">Every user-facing action in the web app, traced from the component that handles it. Endpoints are shown as the browser calls them, after <code>/api</code>. "sync(x)" means <code>useSync()(x)</code> from <code>lib/sync.ts</code>, which invalidates every key in <code>AFFECTS[x]</code> (prefix match, so <code>["visit"]</code> also refreshes <code>["visit", id]</code>). The two most common lists: <b>V</b> (<code>everywhereVisit</code>) = today, visit, field-visits, home, dashboard, admin-visits, admin-visit, shop, shops, agent, agents, activity. <b>C</b> (<code>custody</code>) = pieces, piece, profile, catalog, designs, memos, memo, shop, shops, agent, agents, today, visit, admin-visit, home, dashboard, activity.</p>
+<p class="small">Every user-facing action in the web app, traced from the component that handles it. Endpoints are shown as the browser calls them, after <code>/api</code>. "sync(x)" means <code>useSync()(x)</code> from <code>lib/sync.ts</code>, which invalidates every key in <code>AFFECTS[x]</code> (prefix match, so <code>["visit"]</code> also refreshes <code>["visit", id]</code>). The two most common lists: <b>V</b> (<code>everywhereVisit</code>) = today, visit, field-visits, home, dashboard, admin-visits, admin-visit, shop, shops, agent, agents, activity. <b>C</b> (<code>custody</code>) = credit, convert-preview, pieces, piece, profile, catalog, designs, memos, memo, shop, shops, agent, agents, today, visit, admin-visit, home, dashboard, activity. <b>D</b> (<code>order.decided</code>) = orders, order, home, dashboard, shop, shops, admin-visit, visit, activity, credit, convert-preview, agent, agents, today. §6.11–6.13 follow three v3 flows end to end across both apps.</p>
 
 <h3 data-toc="6.1">Login</h3>
 <table class="dense">
@@ -716,7 +794,8 @@ erDiagram
 <tr><td>Sale: catalog</td><td>Design card (tap)</td><td>Opens the design drawer: photos, weights, full price breakdown from the list response, pieces in the bag. No extra call.</td><td>—</td><td>—</td><td>—</td></tr>
 <tr><td>Sale: catalog</td><td>Card <b>+</b> quick add · drawer quantity −/+ · <b>Add to order</b> / <b>Update order</b> / <b>Remove from order</b></td><td>Edits the local draft only (sessionStorage <code>jr:sale:&lt;visitId&gt;</code>, design id → qty). Disabled with a reason when the visit is not open or has no proof.</td><td>—</td><td>—</td><td>bottom bar shows a display-only preview (shared <code>orderTotals</code>)</td></tr>
 <tr><td>Sale: catalog</td><td><b>Review order</b></td><td>Local step change to review.</td><td>—</td><td>—</td><td>—</td></tr>
-<tr><td>Sale: review order</td><td>−/+ per line, notes, <b>Place order</b> (later <b>Place order again</b>)</td><td>Guarded. Items sorted by design id; body <code>{visitId, items, notes}</code>; key <code>opKey.for("order:&lt;visit&gt;", JSON(body))</code>, so the same body reuses the same key. A 4xx clears the key; a 5xx or network error keeps it.</td><td><code>POST /v1/orders</code></td><td>tx: idempotency row, lock visit, price at current rates, Order + OrderItems, DocSequence, AuditLog, outbox <code>order.created</code></td><td>sync(<code>order.created</code>) = orders, order, visit, admin-visit, today, shop, shops, agent, agents, home, dashboard, activity, profile. Also called on failure, so an order that did land still shows. Then the "Order booked" screen.</td></tr>
+<tr><td>Sale: review order</td><td>(automatic) <b>Credit check</b> card</td><td>Query <code>["credit","visit",id,total]</code> re-runs when the total changes; shows exposure against the limit and, if a rule would trip, why.</td><td><code>GET /v1/visits/:id/credit?amountPaise=</code></td><td>read (no lock)</td><td>—</td></tr>
+<tr><td>Sale: review order</td><td>−/+ per line, notes, <b>Place order</b> or, when the check says approval is needed, <b>Send for approval</b> (later <b>Place order again</b> / <b>Retry</b>)</td><td>Guarded. Items sorted by design id; body <code>{visitId, items, notes}</code>; key <code>opKey.for("order:&lt;visit&gt;", JSON(body))</code>. <code>sendConfirmed()</code>: on a timeout or 5xx it re-sends with the same key ("Checking") before saying anything; if still unknown it keeps the draft and offers <b>Retry</b>. A 4xx clears the key.</td><td><code>POST /v1/orders</code></td><td>tx: idempotency row, lock Visit, proof check, price at current rates, lock Shop and run the credit rule → CONFIRMED or PENDING_APPROVAL, Order + OrderItems, DocSequence, AuditLog, outbox <code>order.created</code> + <code>order.confirmed|pending_approval</code></td><td>sync(<code>order.created</code>) = credit, convert-preview, orders, order, visit, admin-visit, today, shop, shops, agent, agents, home, dashboard, activity, profile. Then "Order confirmed" or "Sent for approval".</td></tr>
 <tr><td>Order booked</td><td><b>Back to visit</b> · <b>Book another order</b></td><td>Clears <code>orderDone</code> from the draft; navigates, or returns to browse.</td><td>—</td><td>—</td><td>—</td></tr>
 </tbody></table>
 
@@ -735,7 +814,8 @@ erDiagram
 <tr><td><code>/ack/[token]</code> (retailer)</td><td>(page load)</td><td>Plain <code>fetch</code> (no cookies or refresh); renders pieces, total, code; handles invalid, expired (410) and error states.</td><td><code>GET /v1/public/memo-ack/:token</code></td><td>read</td><td>—</td></tr>
 <tr><td><code>/ack/[token]</code> (retailer)</td><td><b>Confirm receipt</b></td><td>POST <code>{confirm:true}</code>; shows the receipt.</td><td><code>POST /v1/public/memo-ack/:token</code></td><td>guarded update → ACKNOWLEDGED (QR_CONFIRM); AuditLog (actor null, IP)</td><td>The agent's 3 s poll and admin polls pick it up.</td></tr>
 <tr><td>Visit workspace</td><td><b>Return samples</b> (action list) or memo <b>Return</b> → tick pieces → <b>Return N pieces</b></td><td>Guarded. One call per memo; key <code>opKey.for("return:&lt;memo&gt;", ids)</code>.</td><td><code>POST /v1/memos/:id/return</code> (×memos)</td><td>tx: memo lock, custody SHOP → AGENT, MemoItem RETURNED, memo status, AuditLog, outbox ×2</td><td>sync(<code>memo.returned</code>) = <b>C</b>, also on failure ("some memos may have gone through"); the return then shows on the visit timeline from <code>GET /visits/:id</code> <code>returns</code></td></tr>
-<tr><td>Visit workspace, "Samples at this shop"</td><td>Memo <b>Sell</b> → tick pieces → <b>Book order for N pieces</b> → <b>Done</b></td><td>Drawer <code>SellFromMemoDrawer</code>; guarded; body <code>{pieceIds (sorted), visitId}</code>; key <code>opKey.for("convert:&lt;memo&gt;", ids)</code>. Shows the server-created order (number, lines, total, status).</td><td><code>POST /v1/memos/:id/convert</code></td><td>tx: memo lock, custody SHOP → SOLD, Order + OrderItems at today's rate (<code>sourceMemoId</code>, this visit), MemoItem CONVERTED, memo status, AuditLog, outbox <code>sample.custody_changed</code> + <code>order.created</code> + <code>memo.converted</code></td><td>sync(<code>memo.converted</code>) = <b>C</b> + orders, order; the order awaits approval on admin Orders</td></tr>
+<tr><td>Visit workspace, "Samples at this shop"</td><td>Memo <b>Sell</b> → tick pieces (preview appears)</td><td>Drawer <code>SellFromMemoDrawer</code>. Each selection change queries <code>["convert-preview", memo, ids, visit]</code>; only a preview for exactly this selection enables the button ("Checking price and credit" meanwhile).</td><td><code>GET /v1/memos/:id/convert-preview?pieceIds=&amp;visitId=</code></td><td>read: lines at today's rate, totals, credit net of the chosen pieces</td><td>—</td></tr>
+<tr><td>Sell drawer</td><td><b>Book order for N pieces</b> or <b>Send N pieces for approval</b> → <b>Done</b></td><td>Guarded; body <code>{pieceIds (sorted), visitId}</code>; key <code>opKey.for("convert:&lt;memo&gt;", ids)</code>. Shows the server-created order; title "Order confirmed" or "Sent to your manager for approval".</td><td><code>POST /v1/memos/:id/convert</code></td><td>tx: Memo → Visit → Pieces locks, custody SHOP → SOLD, MemoItem CONVERTED, Shop lock + credit rule, Order + OrderItems (<code>sourceMemoId</code>), memo status, AuditLog, outbox ×4</td><td>sync(<code>memo.converted</code>) = <b>C</b> + orders, order</td></tr>
 <tr><td>Visit workspace, "Samples at this shop"</td><td>Memo <b>Extend</b> → date (suggests +7 days, ≤ today+90) and reason → <b>Extend to &lt;date&gt;</b></td><td>Drawer <code>ExtendMemoDrawer</code>; guarded; no key.</td><td><code>POST /v1/memos/:id/extend</code></td><td>MemoExtension, due date, re-arm overdue, AuditLog, outbox <code>memo.extended</code></td><td>sync(<code>memo.extended</code>) = memos, memo, home, dashboard, shop, visit, admin-visit, activity</td></tr>
 <tr><td>Visit workspace</td><td><b>Complete visit</b> → drawer (summary) → <b>Complete visit</b></td><td>Disabled without a proof. Attaches the current fix if any; no key; <code>VISIT_ALREADY_COMPLETED</code> is treated as success.</td><td><code>POST /v1/visits/:id/complete</code></td><td>tx: lock, proof ≥ 1, Visit → COMPLETED, outbox <code>visit.completed</code></td><td>sync(<code>visit.completed</code>) = <b>V</b> + profile; <code>router.push("/field/today")</code></td></tr>
 </tbody></table>
@@ -745,7 +825,8 @@ erDiagram
 <colgroup><col style="width:9%"><col style="width:14%"><col style="width:20%"><col style="width:16%"><col style="width:23%"><col style="width:18%"></colgroup>
 <thead><tr><th>Screen</th><th>Control</th><th>What the browser does</th><th>Endpoint(s)</th><th>Server-side effect</th><th>Refreshes afterwards</th></tr></thead>
 <tbody>
-<tr><td><code>/admin</code> Home</td><td>(page load)</td><td>Query <code>["home", date]</code> polled every 10 s. The sidebar rate strip reads <code>["gold-rates"]</code>.</td><td><code>GET /v1/admin/home</code>, <code>GET /v1/admin/gold-rates</code></td><td>read; opportunistic dispatcher kick (≤1 per 10 s)</td><td>—</td></tr>
+<tr><td><code>/admin</code> Home</td><td>(page load)</td><td>Query <code>["home", date]</code> polled every 10 s. The Activity column is <code>ActivityFeed</code> (infinite query, 20 per page, polled 10 s). The sidebar rate strip reads <code>["gold-rates"]</code>.</td><td><code>GET /v1/admin/home</code>, <code>GET /v1/admin/activity?limit=20</code>, <code>GET /v1/admin/gold-rates</code></td><td>read; opportunistic dispatcher kick (≤1 per 10 s)</td><td>—</td></tr>
+<tr><td>Home · every record's Activity tab</td><td>Activity <b>Agent</b> filter · <b>Load more</b> · a row or a linked ref</td><td>Filter changes the key (<code>?agentId=</code>); Load more fetches <code>before=nextCursor</code>; refs link to the shop, agent, visit, order, memo or piece record.</td><td><code>GET /v1/admin/activity?…&amp;before=</code></td><td>read</td><td>—</td></tr>
 <tr><td>Home</td><td>Date <b>‹</b> / <b>›</b> / <b>Back to today</b></td><td>Changes the <code>date</code> in the key.</td><td><code>GET /v1/admin/home?date=</code></td><td>read</td><td>—</td></tr>
 <tr><td>Home</td><td>Attention item, activity row, check-in row, agent row, map marker, <b>All visits</b> / <b>View all</b></td><td>Navigates to the record (<code>/admin/visits/:id</code>, <code>/memos/:id</code>, <code>/orders/:id</code>, <code>/shops/:id</code>, <code>/agents/:id</code>, <code>/integrations</code>).</td><td>record GET (polled 15–20 s)</td><td>read</td><td>—</td></tr>
 <tr><td>Any admin page</td><td>⌘K / Search box; result; "Go to" items</td><td>Debounced 150 ms, ≥2 chars, key <code>["search", q]</code>, stale 15 s; selecting navigates.</td><td><code>GET /v1/admin/search?q=</code></td><td>read</td><td>—</td></tr>
@@ -762,16 +843,19 @@ erDiagram
 <colgroup><col style="width:9%"><col style="width:14%"><col style="width:20%"><col style="width:16%"><col style="width:23%"><col style="width:18%"></colgroup>
 <thead><tr><th>Screen</th><th>Control</th><th>What the browser does</th><th>Endpoint(s)</th><th>Server-side effect</th><th>Refreshes afterwards</th></tr></thead>
 <tbody>
-<tr><td>Order record</td><td><b>Approve order</b></td><td><code>useWrite</code> mutation; the button shows "Approving…".</td><td><code>POST /v1/admin/orders/:id/approve</code></td><td>guarded update SUBMITTED → APPROVED, AuditLog, outbox <code>order.approved</code></td><td>sync(<code>order.decided</code>) = orders, order, home, dashboard, shop, shops, admin-visit, visit, activity</td></tr>
-<tr><td>Order record</td><td><b>Reject</b> → reason (≥3 chars) → <b>Reject order</b></td><td>Mutation with <code>{reason}</code>.</td><td><code>POST /v1/admin/orders/:id/reject</code></td><td>→ REJECTED + reason, AuditLog, outbox <code>order.rejected</code></td><td>sync(<code>order.decided</code>)</td></tr>
-<tr><td><code>/admin/orders</code></td><td>Select rows → bulk approve → <b>Approve</b></td><td>One batch call with the selected ids; if any fail, the dialog stays open with per-order results.</td><td><code>POST /v1/admin/orders/approve</code></td><td>each order through <code>decide()</code> in its own tx: APPROVED, AuditLog, outbox <code>order.approved</code></td><td>sync(<code>order.decided</code>)</td></tr>
+<tr><td>Order record · order preview (list)</td><td><b>Approve order</b> / <b>Approve</b> (only PENDING_APPROVAL)</td><td><code>useWrite</code> mutation; the button shows "Approving…". The Overview shows "Credit check at booking" from <code>order.approval</code>.</td><td><code>POST /v1/admin/orders/:id/approve</code></td><td>locks, guarded update PENDING_APPROVAL → APPROVED, AuditLog, outbox <code>order.approved</code></td><td>sync(<code>order.decided</code>) = <b>D</b>; a lost race toasts "Already approved by …"</td></tr>
+<tr><td>Order record · preview <b>Reject…</b> (<code>?reject=1</code>)</td><td><b>Reject</b> → reason (≥3 chars) → <b>Reject order</b></td><td>Mutation with <code>{reason}</code>. For a memo conversion the dialog loads the memo and warns "Rejecting returns N pieces to MEMO-… at &lt;shop&gt; — they go back on memo, not to the vault."</td><td><code>POST /v1/admin/orders/:id/reject</code></td><td>→ REJECTED + reason, AuditLog, outbox <code>order.rejected</code>; conversion: un-sell (custody SALE_REJECTED, items OUT, memo status)</td><td>sync(<code>order.decided</code>), plus <code>order.unsold</code> = <b>C</b> + orders, order for a conversion</td></tr>
+<tr><td>Order record (CONFIRMED / APPROVED, unpaid)</td><td><b>Mark as settled</b> → confirm</td><td>Mutation, no body.</td><td><code>POST /v1/admin/orders/:id/settle</code></td><td>Shop lock, <code>settledAt</code>, AuditLog, outbox <code>order.settled</code></td><td>sync(<code>order.settled</code>) = orders, order, shop, shops, credit, convert-preview, home, dashboard, activity, agent</td></tr>
+<tr><td>Order record (not settled, not from a memo)</td><td><b>Cancel</b> → optional reason → <b>Cancel order</b></td><td>Mutation with <code>{reason?}</code>.</td><td><code>POST /v1/admin/orders/:id/cancel</code></td><td>Shop lock, → CANCELLED, AuditLog, outbox <code>order.cancelled</code></td><td>sync(<code>order.cancelled</code>)</td></tr>
+<tr><td><code>/admin/orders</code></td><td>Status tabs (Pending approval, Confirmed, Approved, Unsettled, Rejected, Cancelled); select rows → bulk approve → <b>Approve</b></td><td>One batch call with the selected ids; if any fail, the dialog stays open with per-order results.</td><td><code>POST /v1/admin/orders/approve</code></td><td>each order through <code>decide()</code> in its own tx: APPROVED, AuditLog, outbox <code>order.approved</code></td><td>sync(<code>order.decided</code>)</td></tr>
 <tr><td>Memo record</td><td><b>Extend due date</b> → calendar, reason → <b>Extend to &lt;date&gt;</b></td><td>Mutation.</td><td><code>POST /v1/admin/memos/:id/extend</code></td><td>MemoExtension, due date, re-arm overdue, AuditLog, outbox <code>memo.extended</code></td><td>sync(<code>memo.extended</code>) = memos, memo, home, dashboard, shop, visit, admin-visit, activity</td></tr>
 <tr><td><code>/admin/samples</code> (bulk) · sample record · design sheet</td><td><b>Issue to agent</b> → pick agent → <b>Issue to &lt;agent&gt;</b></td><td>Only vault pieces can be selected for issue.</td><td><code>POST /v1/admin/pieces/issue</code></td><td>tx: custody VAULT → AGENT, CustodyEvent, AuditLog, outbox <code>sample.custody_changed</code></td><td>sync(<code>piece.moved</code>) = <b>C</b></td></tr>
 <tr><td>Agent record</td><td><b>Issue samples</b> → tick vault pieces → <b>Issue samples</b></td><td>Loads the vault list for the dialog.</td><td><code>GET /v1/admin/pieces?custodianType=VAULT</code> → <code>POST /v1/admin/pieces/issue</code></td><td>as above</td><td>sync(<code>piece.moved</code>) on settle</td></tr>
 <tr><td>Samples · sample record · design sheet · agent bag</td><td><b>Return to vault</b> / <b>Return N to vault</b></td><td>Only pieces in agents' bags can be selected.</td><td><code>POST /v1/admin/pieces/return-to-vault</code></td><td>custody AGENT → VAULT, outbox <code>sample.custody_changed</code></td><td>sync(<code>piece.moved</code>) = <b>C</b></td></tr>
 <tr><td><code>/admin/catalog</code></td><td><b>New design</b> / design tile → sheet → <b>Add design</b> / <b>Save design</b></td><td>Create or patch.</td><td><code>POST /v1/admin/designs</code> · <code>PATCH /v1/admin/designs/:id</code></td><td>JewelryDesign, AuditLog</td><td>sync(<code>design.saved</code>) = designs, catalog, pieces</td></tr>
 <tr><td>Design sheet</td><td>Count → <b>Add to vault</b></td><td>Intake of N pieces.</td><td><code>POST /v1/admin/designs/:id/pieces</code></td><td>N SamplePieces in VAULT + INTAKE events, DocSequence, AuditLog (no webhook)</td><td>sync(<code>design.saved</code>, <code>piece.moved</code>)</td></tr>
-<tr><td><code>/admin/settings</code> Gold rate</td><td><b>Set rate</b> → modal (preview of affected designs and pieces) → <b>Set 22K to ₹X/g</b></td><td><code>GoldRateSettings</code> (<code>admin-v2/sales/gold-rate.tsx</code>), <code>useWrite</code>.</td><td><code>POST /v1/admin/gold-rates</code></td><td>append GoldRate, AuditLog (no webhook)</td><td>sync(<code>gold_rate.set</code>) = gold-rates, catalog, designs, pieces, piece, home, dashboard, profile, shops, shop, agents, agent, activity</td></tr>
+<tr><td><code>/admin/settings</code> Gold rate</td><td><b>Set rate</b> → modal (preview of affected designs and pieces) → <b>Set 22K to ₹X/g</b></td><td><code>GoldRateSettings</code> (<code>admin-v2/sales/gold-rate.tsx</code>), <code>useWrite</code>.</td><td><code>POST /v1/admin/gold-rates</code></td><td>append GoldRate, AuditLog (no webhook)</td><td>sync(<code>gold_rate.set</code>) = gold-rates, convert-preview, catalog, designs, pieces, piece, home, dashboard, profile, shops, shop, agents, agent, activity</td></tr>
+<tr><td><code>/admin/settings?tab=approvals</code></td><td>Approval threshold (₹, empty = Off) → <b>Save</b></td><td><code>useWrite</code>; rupees parsed to paise without floats; the credit-limit rule is shown read-only.</td><td><code>GET</code> / <code>PATCH /v1/admin/settings</code></td><td>Tenant.approvalThresholdPaise, AuditLog <code>tenant.settings</code></td><td>sync(<code>settings.saved</code>) = settings, credit, convert-preview, shops, shop, me</td></tr>
 </tbody></table>
 
 <h3 data-toc="6.9">Admin: shops and assigned agents</h3>
@@ -798,6 +882,46 @@ erDiagram
 <tr><td>Endpoint panel</td><td>Enabled switch · <b>Edit URL</b> → <b>Save</b> · events → <b>Save events</b></td><td>PATCH with the changed field.</td><td><code>PATCH /v1/admin/webhooks/:id</code></td><td>WebhookEndpoint, AuditLog</td><td>sync(<code>webhook.changed</code>)</td></tr>
 <tr><td>Endpoint panel</td><td>Trash → <b>Delete endpoint</b></td><td>Confirm modal; deselects the endpoint.</td><td><code>DELETE /v1/admin/webhooks/:id</code></td><td>deactivate; PENDING/FAILED → DEAD; AuditLog</td><td>sync(<code>webhook.changed</code>)</td></tr>
 <tr><td>Deliveries table · delivery detail</td><td><b>Retry</b> (FAILED or DEAD rows)</td><td>Mutation; toast "Retry sent".</td><td><code>POST /v1/admin/webhooks/deliveries/:id/retry</code></td><td>atomic reset + claim, immediate signed attempt, WebhookAttempt</td><td>sync(<code>webhook.changed</code>)</td></tr>
+</tbody></table>
+
+<h3 data-toc="6.11">Flow: Rahul books a big order → pending approval → Priya decides → Rahul sees why</h3>
+<p class="small">Seed: tenant threshold ₹10,00,000; each shop has a credit limit and an opening balance. Figure 11 draws the same steps as a sequence.</p>
+<table class="dense">
+<colgroup><col style="width:3%"><col style="width:11%"><col style="width:17%"><col style="width:21%"><col style="width:27%"><col style="width:21%"></colgroup>
+<thead><tr><th>#</th><th>Who · screen</th><th>Click or trigger</th><th>Endpoint</th><th>Server-side effect</th><th>What each side sees next</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Rahul · Sale › review order</td><td>Adds lines; the <b>Credit check</b> card re-reads on every total change</td><td><code>GET /v1/visits/:id/credit?amountPaise=</code></td><td>read: exposure, projected exposure, <code>requiresApproval</code>, <code>reasons</code> (e.g. ORDER_THRESHOLD)</td><td>Card: "Needs approval — above approval threshold"; button label switches to <b>Send for approval</b></td></tr>
+<tr><td>2</td><td>Rahul</td><td><b>Send for approval</b></td><td><code>POST /v1/orders</code> + key</td><td>tx: Visit lock, proof check, pricing, <b>Shop lock + rule</b> → <code>PENDING_APPROVAL</code>, reasons and position frozen; outbox <code>order.created</code> + <code>order.pending_approval</code></td><td>Rahul: "Sent for approval" screen; sync(<code>order.created</code>)</td></tr>
+<tr><td>3</td><td>Rahul · visit workspace</td><td>Back to visit</td><td><code>GET /v1/visits/:id</code> every <b>10 s</b> (foreground only) while any order on the visit or the shop's recent orders is PENDING_APPROVAL</td><td>read</td><td>Order row with amber note "Waiting for your manager" + the reasons sentence</td></tr>
+<tr><td>4</td><td>Priya · Home / Orders</td><td>(polling) Home 10 s, Orders list and record 15 s, activity 10–20 s</td><td><code>GET /v1/admin/home</code>, <code>/admin/orders</code>, <code>/admin/activity</code></td><td>read: attention <code>ORDER_PENDING</code> "ORD-… awaiting approval · Sharma Jewellers · Rahul Verma · above approval threshold"; metric "pending approvals"; feed "ORD-… at Sharma Jewellers needs approval — above approval threshold"</td><td>Priya sees it within ~10 s of step 2</td></tr>
+<tr><td>5a</td><td>Priya · order record or list preview</td><td>Reads "Credit check at booking" (frozen position) → <b>Approve order</b></td><td><code>POST /v1/admin/orders/:id/approve</code></td><td>Shop lock, guarded update PENDING_APPROVAL → APPROVED (now outstanding), AuditLog, <code>order.approved</code></td><td>Priya: sync(<code>order.decided</code>), button becomes status chip</td></tr>
+<tr><td>5b</td><td>Priya</td><td><b>Reject</b> → reason "Over limit — collect ₹2 L first" → <b>Reject order</b></td><td><code>POST /v1/admin/orders/:id/reject</code></td><td>guarded update → REJECTED with <code>rejectionReason</code>, <code>decidedBy</code>, <code>decidedAt</code>; <code>order.rejected</code></td><td>Priya: sync(<code>order.decided</code>)</td></tr>
+<tr><td>6</td><td>Rahul · visit workspace</td><td>(next 10 s poll, or on focus)</td><td><code>GET /v1/visits/:id</code></td><td>read: <code>orders[].status/decidedBy/decidedAt/rejectionReason</code> (pinned by test P1)</td><td><code>useVisit</code> notices waiting → decided and runs sync(<code>order.decided</code>); note reads "Rejected by Priya Mehta · 3:42 pm, 21 Oct — Reason: …" or "Approved by Priya Mehta"; polling stops</td></tr>
+</tbody></table>
+
+<h3 data-toc="6.12">Flow: sell from memo with preview → approval → reject returns the pieces to the memo</h3>
+<table class="dense">
+<colgroup><col style="width:3%"><col style="width:11%"><col style="width:17%"><col style="width:21%"><col style="width:27%"><col style="width:21%"></colgroup>
+<thead><tr><th>#</th><th>Who · screen</th><th>Click or trigger</th><th>Endpoint</th><th>Server-side effect</th><th>What each side sees next</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Rahul · visit workspace › Samples at this shop</td><td>Memo <b>Sell</b> → ticks AJ-S-000123 and AJ-S-000124</td><td><code>GET /v1/memos/:id/convert-preview?pieceIds=…&amp;visitId=</code></td><td>read: one line per piece at today's rate next to its memo value at handover; subtotal, GST, total; <code>credit</code> with these pieces already out of memo exposure</td><td>Preview card; button <b>Book order for 2 pieces</b> or <b>Send 2 pieces for approval</b></td></tr>
+<tr><td>2</td><td>Rahul</td><td>Taps the button</td><td><code>POST /v1/memos/:id/convert</code> + key</td><td>tx: Memo → Visit → Pieces locks; custody SHOP → SOLD (CONVERTED_TO_SALE); items CONVERTED; Shop lock + rule; order with <code>sourceMemoId</code> (e.g. PENDING_APPROVAL, CREDIT_LIMIT); memo status recomputed; outbox <code>sample.custody_changed</code>, <code>order.created</code>, <code>order.pending_approval</code>, <code>memo.converted</code></td><td>Drawer: "Sent to your manager for approval"; sync(<code>memo.converted</code>)</td></tr>
+<tr><td>3</td><td>Priya · order record</td><td><b>Reject</b></td><td><code>GET /v1/admin/memos/:id</code> (dialog only)</td><td>read</td><td>Dialog warns "Rejecting returns 2 pieces to MEMO-2026-000NN at Sharma Jewellers — they go back on memo, not to the vault."</td></tr>
+<tr><td>4</td><td>Priya</td><td>Reason → <b>Reject order</b></td><td><code>POST /v1/admin/orders/:id/reject</code></td><td>tx: <code>lockConversion</code> (Memo → sold Pieces) → Shop → guarded update REJECTED → <b>un-sell</b>: custody SOLD → SHOP (<code>SALE_REJECTED</code>), items CONVERTED → OUT, memo CONVERTED_TO_ORDER → ACTIVE, audit <code>memo.sale_rejected</code>; outbox <code>sample.custody_changed</code> + <code>order.rejected</code> with <code>unsold</code>; deferred sale guards pass at COMMIT</td><td>Priya: sync(<code>order.decided</code>, <code>order.unsold</code>): memo, samples, shop exposure and credit refresh; feed "Priya Mehta rejected ORD-… — 2 samples back on MEMO-…"</td></tr>
+<tr><td>5</td><td>Rahul · visit workspace</td><td>(10 s poll)</td><td><code>GET /v1/visits/:id</code></td><td>read</td><td>Note: "Rejected by Priya Mehta … Reason: … The pieces went back on the memo at the shop." <code>useVisit</code> runs sync(<code>order.decided</code>, <code>order.unsold</code>); the two pieces are listed under the memo again (Return or Sell)</td></tr>
+</tbody></table>
+<p class="small">Cancel is refused for a conversion (<code>409 ORDER_NOT_CANCELLABLE</code>) because only a rejection can un-sell. Figure 12 is the sequence; Figure 5 shows the new SOLD → SHOP edge.</p>
+
+<h3 data-toc="6.13">Flow: one event reaches every activity feed</h3>
+<table class="dense">
+<colgroup><col style="width:3%"><col style="width:11%"><col style="width:17%"><col style="width:21%"><col style="width:27%"><col style="width:21%"></colgroup>
+<thead><tr><th>#</th><th>Who · screen</th><th>Click or trigger</th><th>Endpoint</th><th>Server-side effect</th><th>What each side sees next</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Any write (e.g. step 2 of §6.12)</td><td>—</td><td>the write's own route</td><td><code>OutboxService.emit()</code> in the write transaction: <code>eventRefs(payload)</code> → <code>shopId, agentId, visitId, orderId, memoId</code> (or <code>sourceMemoId</code>), <code>pieceIds[]</code> stored on the row</td><td>Nothing yet; the row exists only if the write commits</td></tr>
+<tr><td>2</td><td>Writer's browser</td><td>mutation succeeds</td><td>—</td><td>—</td><td>sync(change) invalidates the <code>["activity"]</code> prefix → every mounted <code>ActivityFeed</code> refetches its first page</td></tr>
+<tr><td>3</td><td>Other admins</td><td>(polling)</td><td><code>GET /v1/admin/activity?&lt;ref&gt;=…&amp;limit=</code></td><td><code>ActivityService.page()</code>: indexed filter, keyset (createdAt, id), <code>project()</code> resolves ref labels in grouped queries</td><td>Home feed within 10 s; record Activity tabs within 20 s</td></tr>
+<tr><td>4</td><td>Where the convert shows</td><td>—</td><td><code>?shopId</code> · <code>?agentId</code> · <code>?visitId</code> · <code>?orderId</code> · <code>?memoId</code> · <code>?pieceId</code></td><td>same <code>evt_…</code> ids and the same sentences everywhere: "Rahul Verma converted 2 samples on MEMO-… at Sharma Jewellers into ORD-…"</td><td>Home; Shop, Agent, Visit, Order and Memo records; each Sample record; record previews (compact)</td></tr>
+<tr><td>5</td><td>Webhook consumer</td><td>(post-commit kick)</td><td>signed POST</td><td>same row, same <code>evt_…</code> id as the activity item</td><td>Figure 9</td></tr>
 </tbody></table>
 </section>
 
@@ -882,7 +1006,7 @@ flowchart TD
 <figure data-maxh="232">
 <script type="text/plain" class="mmd" data-id="fig-visit2">
 flowchart TD
-  WS["Workspace · Sell and complete"] --> ORD["Catalog → Place order<br/>POST /orders + key(body)"]
+  WS["Workspace · Sell and complete"] --> ORD["Catalog → credit check → Place order<br/>POST /orders + key(body)<br/>CONFIRMED or PENDING_APPROVAL"]
   ORD --> DUP{"timeout or<br/>double submit?"}
   DUP -- "yes: same key" --> ORD2["stored response<br/>one order only"]
   DUP -- "201" --> MEMO["Leave on memo · exact tags, due date<br/>POST /memos + key"]
@@ -915,6 +1039,7 @@ stateDiagram-v2
   AGENT --> SHOP : MEMO_HANDOVER · POST /memos
   SHOP --> AGENT : MEMO_RETURN · POST /memos/{id}/return
   SHOP --> SOLD : CONVERTED_TO_SALE · POST /memos/{id}/convert
+  SOLD --> SHOP : SALE_REJECTED · POST /admin/orders/{id}/reject (v3)
   SOLD --> [*]
   LOST : LOST (schema only)
   note right of LOST
@@ -922,7 +1047,7 @@ stateDiagram-v2
     but no endpoint writes them today.
   end note
 </script>
-<figcaption><b>Figure 5 — Custody of one physical piece</b> (for example <code>AJ-S-000123</code>). Every move goes through <code>CustodyService.move()</code>: lock the pieces <code>FOR UPDATE</code> in id order, verify the expected current custodian (else 409 with the specific code), update the piece, append a <code>CustodyEvent</code> with <code>seq+1</code>, emit one <code>sample.custody_changed</code>, and audit. MEMO_RETURN goes back to the memo's agent.</figcaption>
+<figcaption><b>Figure 5 — Custody of one physical piece</b> (for example <code>AJ-S-000123</code>). Every move goes through <code>CustodyService.move()</code>: lock the pieces <code>FOR UPDATE</code> in id order, verify the expected current custodian (else 409 with the specific code), update the piece, append a <code>CustodyEvent</code> with <code>seq+1</code>, emit one <code>sample.custody_changed</code>, and audit. MEMO_RETURN goes back to the memo's agent. SALE_REJECTED (v3) puts a piece sold from a memo back at the memo's shop when the manager rejects that sale; deferred triggers forbid a SOLD piece without a live order.</figcaption>
 </figure>
 
 <h3 data-toc="7.4">Memo state machine</h3>
@@ -939,30 +1064,39 @@ stateDiagram-v2
   }
   Open --> RETURNED : nothing OUT, at least one RETURNED
   Open --> CONVERTED_TO_ORDER : every item CONVERTED
+  CONVERTED_TO_ORDER --> Open : sale rejected · items OUT again (v3)
   RETURNED --> [*]
   CONVERTED_TO_ORDER --> [*]
 </script>
-<figcaption><b>Figure 6 — Memo lifecycle.</b> Stored <code>status</code> comes from <code>nextMemoStatus()</code>: all items OUT → ACTIVE; some OUT → PARTIALLY_RETURNED; none OUT → CONVERTED_TO_ORDER only if every item is CONVERTED, otherwise RETURNED (so a mix of returned and sold closes as RETURNED). DUE_SOON and OVERDUE are <em>display</em> states derived on read by <code>memoDisplayStatus()</code> and also apply to partially returned memos. "EXTENDED" is not a status: an extension writes a <code>MemoExtension</code> row and the view sets <code>extended: true</code>. Acknowledgement (<code>ackStatus</code> PENDING → ACKNOWLEDGED) is independent of these states.</figcaption>
+<figcaption><b>Figure 6 — Memo lifecycle.</b> Stored <code>status</code> comes from <code>nextMemoStatus()</code>: all items OUT → ACTIVE; some OUT → PARTIALLY_RETURNED; none OUT → CONVERTED_TO_ORDER only if every item is CONVERTED, otherwise RETURNED (so a mix of returned and sold closes as RETURNED). DUE_SOON and OVERDUE are <em>display</em> states derived on read by <code>memoDisplayStatus()</code> and also apply to partially returned memos. "EXTENDED" is not a status: an extension writes a <code>MemoExtension</code> row and the view sets <code>extended: true</code>. Acknowledgement (<code>ackStatus</code> PENDING → ACKNOWLEDGED, event <code>memo.acknowledged</code>) is independent of these states. Since v3 a rejected conversion re-opens a memo: its items go CONVERTED → OUT and the status is recomputed, so a fully converted memo returns to ACTIVE (a partly converted one stays PARTIALLY_RETURNED or becomes ACTIVE).</figcaption>
 </figure>
 
 <div>
 <div>
 <h3 data-toc="7.5">Order state machine</h3>
-<figure data-maxh="70">
+<figure data-maxh="92">
 <script type="text/plain" class="mmd" data-id="fig-order">
 stateDiagram-v2
-  [*] --> SUBMITTED : POST /orders<br/>or POST /memos/{id}/convert
-  SUBMITTED --> APPROVED : POST /admin/orders/{id}/approve
-  SUBMITTED --> REJECTED : POST /admin/orders/{id}/reject<br/>(reason required)
-  APPROVED --> [*]
+  state rule <<choice>>
+  [*] --> rule : POST /orders or /memos/{id}/convert<br/>credit rule, shop locked
+  rule --> CONFIRMED : no rule tripped
+  rule --> PENDING_APPROVAL : CREDIT_LIMIT and/or<br/>ORDER_THRESHOLD
+  PENDING_APPROVAL --> APPROVED : approve
+  PENDING_APPROVAL --> REJECTED : reject (reason)<br/>a memo sale is un-sold
+  CONFIRMED --> CANCELLED : cancel
+  PENDING_APPROVAL --> CANCELLED : cancel
+  CONFIRMED --> Settled : settle (settledAt)
+  APPROVED --> Settled : settle (settledAt)
+  Settled --> [*]
   REJECTED --> [*]
+  CANCELLED --> [*]
 </script>
-<figcaption><b>Figure 7 — Order lifecycle.</b> Decisions are one-shot (<code>updateMany … WHERE status='SUBMITTED'</code>; a second gives <code>409 ORDER_ALREADY_DECIDED</code>). Prices are frozen at creation and never change. <code>DRAFT</code> exists in the enum, but no code creates it.</figcaption>
+<figcaption><b>Figure 7 — Order lifecycle (v3).</b> CONFIRMED and APPROVED count as outstanding until settled; "Settled" is <code>settledAt</code> on a CONFIRMED or APPROVED row, not a status. Decisions are one-shot (<code>updateMany … WHERE status='PENDING_APPROVAL'</code>; lost race → <code>ORDER_ALREADY_DECIDED</code>, other status → <code>ORDER_NOT_PENDING</code>). Cancel is refused once settled or for a memo conversion. Prices are frozen at creation. <code>DRAFT</code> is unused; <code>SUBMITTED</code> is forbidden by CHECK.</figcaption>
 </figure>
 </div>
 <div>
 <h3 data-toc="7.6">Visit state machine</h3>
-<figure data-maxh="95">
+<figure data-maxh="88">
 <script type="text/plain" class="mmd" data-id="fig-visitsm">
 stateDiagram-v2
   [*] --> PLANNED : POST /admin/assignments
@@ -1038,6 +1172,91 @@ sequenceDiagram
 <figcaption><b>Figure 10 — One memo handover across all components.</b> Steps 3–5 are one transaction: if any check fails (piece not in Rahul's bag, piece already on a memo, no gold rate), everything rolls back, including the idempotency row, and the browser shows the error with the draft intact.</figcaption>
 </figure>
 </div>
+
+<div class="wide">
+<h3 data-toc="7.9">Sequence: a big order waits for approval, Priya decides, Rahul sees why</h3>
+<figure data-maxh="150">
+<script type="text/plain" class="mmd" data-id="fig-seq-approval">
+sequenceDiagram
+  autonumber
+  participant R as Rahul<br/>(field web)
+  participant A as NestJS API
+  participant P as Postgres
+  participant H as Priya<br/>(admin web)
+  R->>A: GET /visits/:id/credit?amountPaise=12,40,000
+  A-->>R: requiresApproval · reasons [ORDER_THRESHOLD]
+  R->>A: POST /orders + Idempotency-Key ("Send for approval")
+  A->>P: lock Visit → proof → price → lock Shop → rule
+  A->>P: Order PENDING_APPROVAL + creditSnapshot<br/>outbox order.created + order.pending_approval · COMMIT
+  A-->>R: 201 {order: PENDING_APPROVAL, approval}
+  loop every 10 s while pending
+    R->>A: GET /visits/:id
+    A-->>R: "Waiting for your manager" + reasons
+  end
+  loop every 10 s
+    H->>A: GET /admin/home · GET /admin/activity
+    A-->>H: attention ORDER_PENDING · feed "needs approval"
+  end
+  H->>A: POST /admin/orders/:id/reject {reason}
+  A->>P: lock Shop → guarded update → REJECTED<br/>audit · outbox order.rejected · COMMIT
+  A-->>H: 200 {order} · sync order.decided
+  R->>A: GET /visits/:id (next poll)
+  A-->>R: REJECTED · decidedBy Priya · rejectionReason
+  R->>R: sync order.decided · show reason · stop polling
+</script>
+<figcaption><b>Figure 11 — Credit-aware order approval across both apps.</b> The credit check before booking is advisory; the rule that counts runs again in step 4 with the shop row locked. An approve takes the same path as the reject (APPROVED, <code>order.approved</code>) and the order then counts as outstanding until settled.</figcaption>
+</figure>
+
+<h3 data-toc="7.10">Sequence: sell from memo with preview, then the sale is rejected and un-sold</h3>
+<figure data-maxh="150">
+<script type="text/plain" class="mmd" data-id="fig-seq-unsell">
+sequenceDiagram
+  autonumber
+  participant R as Rahul<br/>(field web)
+  participant A as NestJS API
+  participant P as Postgres
+  participant H as Priya<br/>(admin web)
+  R->>A: GET /memos/:id/convert-preview?pieceIds=…
+  A-->>R: lines at today's rate · totals · credit net of pieces
+  R->>A: POST /memos/:id/convert + key
+  A->>P: lock Memo → Visit → Pieces<br/>SHOP → SOLD (CONVERTED_TO_SALE) · items CONVERTED
+  A->>P: lock Shop → rule → Order PENDING_APPROVAL (sourceMemoId)<br/>memo status · outbox ×4 · COMMIT
+  A-->>R: 200 {memo, order} · "Sent to your manager"
+  H->>A: POST /admin/orders/:id/reject {reason}
+  A->>P: lockConversion: Memo → sold Pieces · then Shop<br/>guarded update → REJECTED
+  A->>P: un-sell: SOLD → SHOP (SALE_REJECTED) · items OUT<br/>memo → ACTIVE · outbox custody_changed + order.rejected
+  P-->>A: COMMIT · deferred sale guards pass
+  A-->>H: 200 {order} · sync order.decided + order.unsold
+  R->>A: GET /visits/:id (10 s poll)
+  A-->>R: REJECTED + reason · pieces OUT on the memo again
+</script>
+<figcaption><b>Figure 12 — Memo sale, rejection and un-sell.</b> Both transactions take locks in the global order Memo → Visit → Pieces → Shop → Order, which is what removed the reject ‖ convert deadlock (test V13). If the un-sell were skipped, the deferred trigger <code>Order_dead_unsells_pieces</code> would refuse the COMMIT.</figcaption>
+</figure>
+</div>
+
+<h3 data-toc="7.11">Activity propagation: one event, every feed</h3>
+<figure data-maxh="200">
+<script type="text/plain" class="mmd" data-id="fig-activity">
+flowchart TD
+  W["Write transaction<br/>(order, memo, custody, visit, ack)"] --> E["OutboxService.emit()<br/>eventRefs(payload)"]
+  E --> R[("OutboxEvent<br/>type · payload · shopId · agentId · visitId<br/>orderId · memoId · pieceIds[]")]
+  R --> C{"COMMIT?"}
+  C -- no --> X["no event, no feed row"]
+  C -- yes --> K["post-commit kick"]
+  K --> WH["webhook fan-out<br/>(Figure 9)"]
+  C -- yes --> S["writer: useSync(change)<br/>invalidate ['activity'] prefix"]
+  C -- yes --> PO["other admins: polling<br/>Home 10 s · records 20 s"]
+  S --> Q["GET /admin/activity?ref=…&limit=&before="]
+  PO --> Q
+  Q --> AS["ActivityService.page()<br/>indexed filter · keyset (createdAt, id)"]
+  AS --> PR["project(): kind · title · refs labels · detail"]
+  PR --> F1["Home feed"]
+  PR --> F2["Shop · Agent · Visit records"]
+  PR --> F3["Order · Memo · Sample records"]
+  PR --> F4["record previews (compact)"]
+</script>
+<figcaption><b>Figure 13 — One activity model.</b> There is one writer (<code>OutboxService.emit</code>), one projection (<code>ActivityService</code>) and one renderer (<code>ActivityFeed</code>). The ActivityItem id is the webhook payload id, so a customer's log, the admin feed and the custody ledger name the same event.</figcaption>
+</figure>
 </section>
 
 <!-- ============================================================ 8 SYNC & CONSISTENCY -->
@@ -1050,10 +1269,13 @@ sequenceDiagram
   <thead><tr><th style="width:38%">Query (key)</th><th style="width:16%">Interval</th><th>Notes</th></tr></thead>
   <tbody>
   <tr><td>Field Today <code>["today"]</code></td><td>60 s + focus</td><td>Picks up new assignments and ack changes.</td></tr>
-  <tr><td>Field visit <code>["visit", id]</code></td><td>focus; 3 s on the ack screen</td><td>3 s polling stops once ACKNOWLEDGED.</td></tr>
+  <tr><td>Field visit <code>["visit", id]</code></td><td>focus; 10 s while an order is pending; 3 s on the ack screen</td><td>v3 (<code>POLL.pendingDecision</code>): polls while any order on the visit or the shop's recent orders is PENDING_APPROVAL, foreground only; a decision triggers sync(<code>order.decided</code>, + <code>order.unsold</code>). 3 s ack polling stops once ACKNOWLEDGED.</td></tr>
+  <tr><td>Credit check <code>["credit", …]</code> · sale preview <code>["convert-preview", …]</code></td><td>on input change</td><td>Keyed by total or by piece selection; invalidated by every change that moves exposure (orders, custody, settle, cancel, settings, gold rate).</td></tr>
+  <tr><td>Retailer ack page (plain fetch)</td><td>5 s while pending + focus</td><td><code>POLL.ackPage</code>; flips to "confirmed" when the agent enters the code.</td></tr>
   <tr><td>Geofence <code>["geofence", id]</code></td><td>5 s (foreground)</td><td>Plus 600 ms after moving ≥15 m; <code>staleTime: 0</code>.</td></tr>
   <tr><td>Catalog <code>["catalog", …]</code></td><td>stale 30 s</td><td>Invalidated by <code>gold_rate.set</code>, <code>design.saved</code> and custody changes.</td></tr>
-  <tr><td>Admin Home <code>["home", date]</code></td><td>10 s</td><td>Also kicks the dispatcher (≤1 per 10 s).</td></tr>
+  <tr><td>Admin Home <code>["home", date]</code> · Home activity feed</td><td>10 s · 10 s</td><td>Home also kicks the dispatcher (≤1 per 10 s).</td></tr>
+  <tr><td>Record Activity tabs <code>["activity","feed",filter,limit]</code></td><td>20 s</td><td>Infinite query with cursor pages; every write invalidates the <code>["activity"]</code> prefix.</td></tr>
   <tr><td>Admin visits list and records; orders list and record; shop and agent records</td><td>15 s</td><td><code>admin-visits</code>, <code>admin-visit</code>, <code>orders</code>, <code>order</code>, <code>shop</code>, <code>agent</code>.</td></tr>
   <tr><td>Memos, pieces, piece and memo records</td><td>20 s</td><td></td></tr>
   <tr><td>Shops list · agents list and agent record</td><td>30 s · 15 s</td><td>Agent rows come from the single v2 <code>GET /admin/agents</code>.</td></tr>
@@ -1071,7 +1293,10 @@ sequenceDiagram
   <tr><td>Concurrent double check-in</td><td>Visit row <code>FOR UPDATE</code>; partial unique index "one open visit per agent"; unique violation mapped to 409.</td><td>tests 1, 1b, F4</td></tr>
   <tr><td>Same piece on two memos</td><td>Pieces locked <code>FOR UPDATE ORDER BY id</code> (deadlock-free), custodian verified; partial unique index on OUT memo items.</td><td>tests 4, 5, F8, F9</td></tr>
   <tr><td>Issue a held piece, or two admins issue the same piece</td><td><code>CustodyService.move</code> verifies <code>from = VAULT</code> under lock; gap-free <code>(pieceId, seq)</code> unique.</td><td>F10</td></tr>
-  <tr><td>Approve and reject at once</td><td><code>updateMany … WHERE status='SUBMITTED'</code>, one winner, one audit row. Batch approve reuses it per order.</td><td>tests 9, R4</td></tr>
+  <tr><td>Approve and reject at once</td><td><code>updateMany … WHERE status='PENDING_APPROVAL'</code>, one winner, one audit row; the loser's 409 names the winner. Batch approve reuses it per order.</td><td>tests 9, R4, V4</td></tr>
+  <tr><td>Two orders at one shop slip under the limit together</td><td>The credit rule runs with the shop row <code>FOR UPDATE</code>; the second order waits and sees the first (READ COMMITTED). Settle and cancel take the same lock.</td><td>V1, V2</td></tr>
+  <tr><td>Reject ‖ convert on the same memo (deadlock)</td><td>One global lock order Memo → Visit → Pieces → Shop → Order; <code>lockConversion</code> takes Memo and the sold pieces before the Shop.</td><td>V13 (6 rounds)</td></tr>
+  <tr><td>A rejected or cancelled sale leaves a piece SOLD</td><td>Un-sell in the same transaction; deferred triggers <code>SamplePiece_sold_has_live_order</code> / <code>Order_dead_unsells_pieces</code> refuse the COMMIT otherwise; cancel of a conversion is refused. Ops check <code>db:check-orphans</code> for old rows.</td><td>V10, V14</td></tr>
   <tr><td>Gold rate changes mid-order</td><td>Rates read once per transaction; lines and snapshot use the same map; OrderItem is append-only.</td><td>tests 8, F11</td></tr>
   <tr><td>Two dispatchers (instances or cron)</td><td><code>FOR UPDATE SKIP LOCKED</code> on fan-out and claim; <code>lockedUntil</code> lease; unique (endpoint, event); single-flight per instance; manual retry resets and claims in one statement.</td><td>tests 7, F12</td></tr>
   <tr><td>Overdue event spam</td><td><code>updateMany … WHERE overdueNotifiedAt IS NULL</code> per memo; extension resets it.</td><td>F13</td></tr>
@@ -1090,10 +1315,12 @@ sequenceDiagram
   <tr><td>Refresh mid-visit</td><td><code>resume</code> block from <code>GET /visits/:id</code>; drafts in sessionStorage; a pending photo comes back as "retry". A visit left open on an earlier day is surfaced on Today.</td><td>F5, F15; AUDIT #4–5</td></tr>
   <tr><td>Session expiry</td><td>A 401 triggers single-flight refresh and one retry; the upload XHR refreshes via <code>/auth/me</code>; otherwise redirect with <code>?next=</code>.</td><td>client code</td></tr>
   <tr><td>Tenant isolation</td><td>tenantId only from the JWT; every query filtered; foreign ids 404 on every v1 and v2 read and write; lists, search and home never contain them.</td><td>test 6, F1</td></tr>
+  <tr><td>Order submit times out</td><td><code>sendConfirmed()</code> re-sends with the same key ("Checking") before telling the agent anything; a stored response confirms the one order. Still unknown → draft kept, <b>Retry</b> with the same key.</td><td>client code + test 3</td></tr>
+  <tr><td>Preview and write disagree</td><td>The credit check and the memo-sale preview are advisory; the convert and order create re-evaluate under their locks and return the authoritative <code>order.approval</code>, which the UI renders after booking.</td><td>P2–P4</td></tr>
   <tr><td>Webhook endpoint down</td><td>FAILED with back-off → visible in Deliveries and as a Home attention item → manual retry after fixing the URL → SUCCEEDED.</td><td>test 7, F12</td></tr>
   </tbody>
 </table>
-<p class="small"><b>Test assets.</b> <code>apps/api/test/api.test.ts</code> (10 invariants), <code>apps/api/test/failures.test.ts</code> (F1–F16), <code>apps/api/test/records.test.ts</code> (R1–R4: record activity, agent-held piece location, delivery paging, batch approve) on real Postgres via <code>test/harness.ts</code>; <code>packages/shared/src/pricing.test.ts</code> (4); <code>apps/api/scripts/e2e-smoke.ts</code> (the brief's 28 steps over HTTP with sample <code>AJ-S-000123</code>, re-runnable); findings and fixes in <code>docs/AUDIT.md</code> (19 findings). These were not run for this report.</p>
+<p class="small"><b>Test assets.</b> <code>apps/api/test/api.test.ts</code> (12 cases: invariants 1–9 plus 1b, 1c proof-before-sale, 7b demo receiver), <code>failures.test.ts</code> (F1–F16), <code>records.test.ts</code> (R1–R4), <code>v3.test.ts</code> (V1–V14: rule boundaries, concurrent orders, convert net of pieces, status guards, PATCH keeps fields, refs on every event, activity filters and cursor, settings, legacy migration, un-sell, rollback, back-fill, lock order, orphans), <code>p7.test.ts</code> (P1–P4: decision fields, convert preview, attention timing) on real Postgres via <code>test/harness.ts</code>; <code>packages/shared</code> <code>pricing.test.ts</code> (4), <code>credit.test.ts</code> (6), <code>format.test.ts</code> (4); <code>apps/api/scripts/e2e-smoke.ts</code> (31 checks over HTTP with sample <code>AJ-S-000123</code>, re-runnable); reviews and verification in <code>docs/brain/reviews/</code> and <code>docs/VERIFY-P7.md</code>. These were not run for this report.</p>
 </section>
 
 <!-- ============================================================ 9 APPENDIX -->
@@ -1116,6 +1343,7 @@ sequenceDiagram
   <tr><td><code>CORS_ORIGINS</code></td><td>api</td><td>Comma-separated allowlist (fallback; the proxy makes calls same-origin).</td></tr>
   <tr><td><code>BLOB_READ_WRITE_TOKEN</code></td><td>api</td><td>Optional. Enables Vercel Blob client uploads; otherwise direct mode.</td></tr>
   <tr><td><code>LOG_LEVEL</code></td><td>api</td><td>pino level (default info).</td></tr>
+  <tr><td><code>ENABLE_DEMO_RECEIVER</code></td><td>api</td><td>Optional. <code>true</code> enables <code>/dev/webhook-receiver</code>; unset = on outside production, or in production only for demo-mode tenants; <code>false</code> = always 404.</td></tr>
   </tbody>
 </table>
 
@@ -1125,7 +1353,8 @@ sequenceDiagram
   <li>Manual: <code>pnpm install</code> → <code>docker compose up -d db</code> → <code>cp apps/api/.env.example apps/api/.env</code> (fill secrets) → <code>pnpm --filter @jewelroute/api db:migrate &amp;&amp; pnpm --filter @jewelroute/api db:seed</code> → <code>pnpm --filter @jewelroute/api dev</code> and <code>pnpm --filter @jewelroute/web dev</code>.</li>
   <li>Demo logins: <code>rahul@aurum.test</code> / <code>Rahul@2026</code> (field), <code>admin@aurum.test</code> / <code>Aurum@2026</code> (manager). Swagger at <code>http://localhost:4000/docs</code>. Away from Delhi, use <b>Simulate arrival (demo)</b>.</li>
   <li>Tests: <code>pnpm --filter @jewelroute/api test</code> (needs a test database); e2e: <code>cd apps/api &amp;&amp; BASE_URL=http://localhost:4000 CRON_SECRET=… pnpm e2e</code>.</li>
-  <li>This report: <code>node docs/report/build.mjs</code> (see the header of that file for the Playwright and Mermaid paths).</li>
+  <li>v3 ops scripts: <code>pnpm --filter @jewelroute/api db:backfill-activity-refs</code> (batched, idempotent; runs after migrate on Vercel and in <code>run-local.sh</code>) and <code>db:check-orphans</code> (read-only; exit 1 if a SOLD piece has no live order). Rollback SQL: <code>apps/api/prisma/rollback/20261021000300_v3_down.sql</code>.</li>
+  <li>This report: <code>node docs/report/build.mjs</code> writes <code>docs/report/out/JewelRoute-FE-BE-Integration-Report.pdf</code> (see the header of that file for the Playwright and Mermaid paths).</li>
 </ul>
 
 <h3 data-toc="9.3">Glossary</h3>
@@ -1143,6 +1372,10 @@ sequenceDiagram
   <tr><td>Proof</td><td>The arrival photo attached to a visit, stored with its SHA-256 checksum and capture position.</td></tr>
   <tr><td>IST business date</td><td>The calendar day in Asia/Kolkata used for "today", due dates and missed visits.</td></tr>
   <tr><td>Outbox · fan-out · dead letter</td><td>Event rows written with each change · creating one delivery per subscribed endpoint · a delivery that failed 7 times (DEAD), recoverable by manual retry.</td></tr>
+  <tr><td>Credit limit · outstanding · exposure</td><td>The shop's limit (0 = none) · opening balance + confirmed/approved orders not yet settled · outstanding + value of samples on memo at the shop. Projected exposure adds a prospective order.</td></tr>
+  <tr><td>Approval threshold · pending approval</td><td>Tenant setting: orders of at least this total need a manager · the order status when the credit limit or the threshold rule trips.</td></tr>
+  <tr><td>Settle · un-sell</td><td>Mark an order paid, removing it from outstanding · on rejecting a memo sale, return its pieces from SOLD to the memo's shop (custody reason SALE_REJECTED).</td></tr>
+  <tr><td>Activity refs</td><td>Indexed columns on each outbox event naming the shop, agent, visit, order, memo and pieces it is about; every feed filters on them.</td></tr>
   <tr><td>Idempotency key</td><td>A client-chosen id per user action; repeating the request with it returns the original result instead of acting twice.</td></tr>
   </tbody>
 </table>

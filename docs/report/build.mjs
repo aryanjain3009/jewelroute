@@ -5,7 +5,7 @@
  *   PW_DIR=/path/with/node_modules/playwright \
  *   MERMAID_JS=/path/to/node_modules/mermaid/dist/mermaid.min.js \
  *   PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
- *   OUT=/mnt/user-data/outputs/JewelRoute-FE-BE-Integration-Report.pdf \
+ *   OUT=docs/report/out/JewelRoute-FE-BE-Integration-Report.pdf \
  *   node docs/report/build.mjs
  *
  * Steps: load the HTML in headless Chromium, render every <script type="text/plain" class="mmd">
@@ -14,7 +14,7 @@
  * Requires: playwright (Chromium), mermaid@11, poppler-utils (pdftotext).
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -24,7 +24,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const req = createRequire(process.env.PW_DIR ? path.join(process.env.PW_DIR, 'package.json') : import.meta.url);
 const { chromium } = req('playwright');
 const MERMAID_JS = process.env.MERMAID_JS ?? createRequire(import.meta.url).resolve('mermaid/dist/mermaid.min.js');
-const OUT = process.env.OUT ?? path.join(here, 'JewelRoute-FE-BE-Integration-Report.pdf');
+const OUT = process.env.OUT ?? path.join(here, 'out', 'JewelRoute-FE-BE-Integration-Report.pdf');
 const HTML = path.join(here, 'report.html');
 const TITLE = 'JewelRoute · Frontend ↔ Backend Integration Report';
 const DATE = '21 Oct 2026';
@@ -35,12 +35,13 @@ const font = "font-family: Inter, system-ui, sans-serif; font-size: 7.4pt; color
 const headerTemplate = `<div style="${font} width:100%; padding: 0 16mm; display:flex; justify-content:space-between;">
   <span>${TITLE}</span><span>${DATE}</span></div>`;
 const footerTemplate = `<div style="${font} width:100%; padding: 0 16mm; display:flex; justify-content:space-between;">
-  <span>Source: jewelroute working tree (7e34424)</span>
+  <span>Source: jewelroute working tree (831d3d2)</span>
   <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>`;
 
 const pdfOpts = { printBackground: true, preferCSSPageSize: true, displayHeaderFooter: true, headerTemplate, footerTemplate };
 
 async function main() {
+  mkdirSync(path.dirname(OUT), { recursive: true });
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1200, height: 1600 } });
   await page.goto(pathToFileURL(HTML).href, { waitUntil: 'load' });
