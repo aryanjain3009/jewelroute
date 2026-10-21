@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(pnpm verify)",
+      "Bash(pnpm harness:test)",
+      "Bash(pnpm typecheck)",
+      "Bash(pnpm test)",
+      "Bash(pnpm --filter @jewelroute/shared build)",
+      "Bash(pnpm --filter @jewelroute/shared test)",
+      "Bash(pnpm --filter @jewelroute/shared typecheck)",
+      "Bash(pnpm --filter @jewelroute/api typecheck)",
+      "Bash(pnpm --filter @jewelroute/api test)",
+      "Bash(pnpm --filter @jewelroute/web typecheck)",
+      "Bash(pnpm --filter @jewelroute/web lint)",
+      "Bash(pnpm --filter @jewelroute/web lint *)",
+      "Bash(node scripts/harness/test-hooks.mjs)",
+      "Bash(node scripts/harness/verify.mjs)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git branch --show-current)",
+      "Bash(git rev-parse *)",
+      "Bash(pg_isready *)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(*.env)",
+      "Read(!.env.example)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git push --force-with-lease *)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f *)",
+      "Bash(git push * -f)",
+      "Bash(vercel --prod *)",
+      "Bash(vercel deploy --prod *)",
+      "Bash(vercel * --prod*)",
+      "Bash(vercel promote *)",
+      "Bash(vercel env pull *)",
+      "Bash(npx vercel *)",
+      "Bash(pnpm dlx vercel *)",
+      "Bash(pnpm publish *)",
+      "Bash(npm publish *)",
+      "Bash(*neon.tech*)",
+      "Bash(*.vercel.app/v1/internal/*)",
+      "Bash(rm -rf /)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~*)"
+    ]
+  },
+  "enabledMcpjsonServers": ["playwright", "postgres"],
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.mjs\"", "timeout": 10 }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-bash.mjs\"", "timeout": 10 }]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-write.mjs\"", "timeout": 10 }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/post-edit.mjs\"", "timeout": 10 }]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-verify.mjs\"", "timeout": 900 }]
+      }
+    ]
+  }
+}

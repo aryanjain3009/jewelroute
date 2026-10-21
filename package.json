@@ -1,0 +1,17 @@
+{
+  "name": "jewelroute",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev:api": "pnpm --filter @jewelroute/api dev",
+    "dev:web": "pnpm --filter @jewelroute/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:migrate": "pnpm --filter @jewelroute/api db:migrate",
+    "db:seed": "pnpm --filter @jewelroute/api db:seed",
+    "verify": "node scripts/harness/verify.mjs",
+    "harness:test": "node scripts/harness/test-hooks.mjs"
+  }
+}

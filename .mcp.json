@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@0.0.83",
+        "--headless",
+        "--isolated",
+        "--browser",
+        "chromium",
+        "--allowed-origins",
+        "http://localhost:3000",
+        "--output-dir",
+        ".artifacts/playwright"
+      ]
+    },
+    "postgres": {
+      "command": "bash",
+      "args": ["${CLAUDE_PROJECT_DIR:-.}/scripts/mcp/postgres.sh"],
+      "env": {
+        "DATABASE_URI": "${JR_AGENT_DATABASE_URI:-}"
+      }
+    }
+  }
+}
