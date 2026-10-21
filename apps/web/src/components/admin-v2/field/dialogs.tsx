@@ -4,9 +4,13 @@
 import * as React from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { MapPinIcon } from "lucide-react";
+import { CalendarIcon, MapPinIcon } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import { addDays, istDate } from "@jewelroute/shared";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useOpKey } from "@/lib/op-key";
+import { apiErrorText } from "@/components/admin-v2/sales/data";
 import { qk, useSync } from "@/lib/sync";
 import { cn } from "@/lib/utils";
 import type { Shop } from "@/lib/types";
@@ -17,7 +21,25 @@ import { JrMap } from "@/components/admin/map-lazy";
 import { useAgentOptions, useVisitRows } from "./data";
 import { StatusDot, VISIT_STATUS, istDay } from "./ui";
 
-export const errMsg = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : "Something went wrong. Try again.");
+export const errMsg = (e: unknown) => apiErrorText(e);
+
+/** Date picker that reads "22 Oct" (IST business date) — Popover + Calendar instead of the browser's locale field. */
+function DateField({ value, min, max, onChange }: { value: string; min: string; max: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = React.useState(false);
+  const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger className="press flex h-8 w-full items-center gap-2 rounded-lg border border-line-strong bg-white px-2.5 text-left text-[14px] text-ink outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-blue/35">
+        <CalendarIcon className="size-4 text-ink-3" /><span className="num">{value === istDate() ? `Today, ${istDay(value)}` : istDay(value)}</span>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-auto p-0">
+        <Calendar mode="single" selected={new Date(`${value}T12:00:00`)} defaultMonth={new Date(`${value}T12:00:00`)}
+          disabled={{ before: new Date(`${min}T00:00:00`), after: new Date(`${max}T23:59:59`) }}
+          onSelect={(d) => { if (d) { onChange(ymd(d)); setOpen(false); } }} />
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 /* ---------------- form atoms (Attio modal: 13px labels, 32px inputs) ---------------- */
 export function FormField({ label, hint, children, className }: { label: string; hint?: string; children: React.ReactNode; className?: string }) {
@@ -82,7 +104,7 @@ export function AssignVisitDialog({ open, onOpenChange, shopId: initialShop, age
               </SelectInput>
             </FormField>
             <FormField label="Date">
-              <TextInput type="date" value={date} min={today} max={addDays(today, 60)} onChange={(e) => setDate(e.target.value)} className="num" />
+              <DateField value={date} min={today} max={addDays(today, 60)} onChange={setDate} />
             </FormField>
           </div>
           {agent && (
@@ -135,9 +157,12 @@ export function useSetShopAgent(shopId: string) {
 }
 
 /* ---------------- Create / edit shop ---------------- */
-type Form = { code: string; name: string; ownerName: string; phone: string; address: string; area: string; city: string; lat: string; lng: string; geofenceRadiusM: string; creditLimit: string };
-const blank: Form = { code: "", name: "", ownerName: "", phone: "", address: "", area: "", city: "New Delhi", lat: "", lng: "", geofenceRadiusM: "100", creditLimit: "" };
-const toForm = (s: Shop): Form => ({ code: s.code, name: s.name, ownerName: s.ownerName ?? "", phone: s.phone ?? "", address: s.address, area: s.area, city: s.city, lat: String(s.lat), lng: String(s.lng), geofenceRadiusM: String(s.geofenceRadiusM), creditLimit: String(s.creditLimitPaise / 100) });
+type Form = { code: string; name: string; ownerName: string; phone: string; address: string; area: string; city: string; lat: string; lng: string; geofenceRadiusM: string; creditLimit: string; opening: string };
+const blank: Form = { code: "", name: "", ownerName: "", phone: "", address: "", area: "", city: "New Delhi", lat: "", lng: "", geofenceRadiusM: "100", creditLimit: "", opening: "" };
+const toForm = (s: Shop, openingPaise?: number): Form => ({ code: s.code, name: s.name, ownerName: s.ownerName ?? "", phone: s.phone ?? "", address: s.address, area: s.area, city: s.city, lat: String(s.lat), lng: String(s.lng), geofenceRadiusM: String(s.geofenceRadiusM), creditLimit: paiseToRupees(s.creditLimitPaise), opening: openingPaise == null ? "" : paiseToRupees(openingPaise) });
+/** Indian digit grouping of an integer string ("3000000" → "30,00,000"); the parser strips commas. */
+const groupIN = (d: string) => (d.length <= 3 ? d : `${d.slice(0, -3).replace(/\B(?=(\d{2})+(?!\d))/g, ",")},${d.slice(-3)}`);
+const paiseToRupees = (p: number) => (p % 100 === 0 ? groupIN(String(p / 100)) : `${groupIN(String(Math.trunc(p / 100)))}.${String(p % 100).padStart(2, "0")}`);
 /** Rupees (as typed, integer or 2 dp) → paise without float maths. */
 function rupeesToPaise(s: string): number | null {
   const t = s.replace(/[,₹\s]/g, "");
@@ -147,20 +172,26 @@ function rupeesToPaise(s: string): number | null {
   return Number(m[1]) * 100 + Number((m[2] ?? "").padEnd(2, "0") || 0);
 }
 
-export function ShopSheet({ open, onOpenChange, shop, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; shop?: Shop | null; onSaved?: (id: string) => void }) {
+export function ShopSheet({ open, onOpenChange, shop, openingOutstandingPaise, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; shop?: Shop | null; /** From the shop's credit position; editable only once it is known. */ openingOutstandingPaise?: number; onSaved?: (id: string) => void }) {
   const sync = useSync();
-  const [f, setF] = React.useState<Form>(shop ? toForm(shop) : blank);
-  React.useEffect(() => { if (open) setF(shop ? toForm(shop) : blank); }, [open, shop]);
+  const [f, setF] = React.useState<Form>(shop ? toForm(shop, openingOutstandingPaise) : blank);
+  React.useEffect(() => { if (open) setF(shop ? toForm(shop, openingOutstandingPaise) : blank); }, [open, shop, openingOutstandingPaise]);
   const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement>) => setF((x) => ({ ...x, [k]: e.target.value }));
   const lat = Number(f.lat), lng = Number(f.lng), radius = Number(f.geofenceRadiusM);
   const geoOk = f.lat.trim() !== "" && f.lng.trim() !== "" && Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
   const credit = rupeesToPaise(f.creditLimit);
+  const opening = rupeesToPaise(f.opening);
+  // Editing a shop whose opening balance isn't loaded yet must not overwrite it with 0.
+  const openingKnown = !shop || openingOutstandingPaise != null;
   const radiusOk = Number.isInteger(radius) && radius >= 20 && radius <= 1000;
-  const valid = !!(f.name.trim() && f.code.trim() && f.area.trim() && f.address.trim() && geoOk && radiusOk && credit !== null);
-  const body = { code: f.code.trim(), name: f.name.trim(), ownerName: f.ownerName.trim() || undefined, phone: f.phone.trim() || undefined, address: f.address.trim(), area: f.area.trim(), city: f.city.trim(), lat, lng, geofenceRadiusM: radius, creditLimitPaise: credit ?? 0 };
+  const valid = !!(f.name.trim() && f.code.trim() && f.area.trim() && f.address.trim() && geoOk && radiusOk && credit !== null && opening !== null);
+  // On edit an emptied owner/phone is sent as null so it clears; on create it is simply omitted.
+  const body = { code: f.code.trim(), name: f.name.trim(), ownerName: f.ownerName.trim() || (shop ? null : undefined), phone: f.phone.trim() || (shop ? null : undefined), address: f.address.trim(), area: f.area.trim(), city: f.city.trim(), lat, lng, geofenceRadiusM: radius, creditLimitPaise: credit ?? 0, ...(openingKnown ? { openingOutstandingPaise: opening ?? 0 } : {}) };
+  const createOp = useOpKey();
   const m = useMutation({
-    mutationFn: () => (shop ? api<{ shop?: Shop } & Partial<Shop>>(`/admin/shops/${shop.id}`, { method: "PATCH", body }) : api<{ shop?: Shop } & Partial<Shop>>("/admin/shops", { body })),
+    mutationFn: () => (shop ? api<{ shop?: Shop } & Partial<Shop>>(`/admin/shops/${shop.id}`, { method: "PATCH", body }) : api<{ shop?: Shop } & Partial<Shop>>("/admin/shops", { body, idempotencyKey: createOp.keyFor(body) })),
     onSuccess: (r) => {
+      createOp.done();
       sync("shop.saved");
       toast.success(shop ? `${f.name} saved` : `${f.name} added`);
       onOpenChange(false);
@@ -185,6 +216,8 @@ export function ShopSheet({ open, onOpenChange, shop, onSaved }: { open: boolean
           <FormField label="Owner"><TextInput value={f.ownerName} onChange={set("ownerName")} placeholder="Rakesh Sharma" /></FormField>
           <FormField label="Phone"><TextInput value={f.phone} onChange={set("phone")} placeholder="+91 98110 00000" className="num" /></FormField>
           <FormField label="Credit limit (₹)" hint={credit === null ? "Use digits, up to 2 decimals." : undefined}><TextInput inputMode="decimal" value={f.creditLimit} onChange={set("creditLimit")} placeholder="15,00,000" className="num" /></FormField>
+          <FormField label="Opening balance (₹)" hint={opening === null ? "Use digits, up to 2 decimals." : !openingKnown ? "Loading the current balance…" : "Owed before JewelRoute; counts toward outstanding."}><TextInput inputMode="decimal" value={f.opening} onChange={set("opening")} placeholder="0" className="num" disabled={!openingKnown} /></FormField>
+          <div aria-hidden />
           <FormField label="Address" className="col-span-2"><TextInput value={f.address} onChange={set("address")} placeholder="2611 Bank Street, Karol Bagh" /></FormField>
           <FormField label="Area"><TextInput value={f.area} onChange={set("area")} placeholder="Karol Bagh" /></FormField>
           <FormField label="City"><TextInput value={f.city} onChange={set("city")} /></FormField>

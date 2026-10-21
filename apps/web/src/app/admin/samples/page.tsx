@@ -1,7 +1,8 @@
 "use client";
 /** Samples — "Where every piece is". Attio list of every tagged piece with its one current custodian. */
 import * as React from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { useUrlPatch, useUrlSort, useUrlState } from "@/lib/url-state";
 import {
   ArchiveRestoreIcon, BoxesIcon, CircleDotIcon, ClockIcon, GemIcon, IndianRupeeIcon, LandmarkIcon, MapPinIcon, ScaleIcon, SendIcon, TagIcon, UserIcon, UsersIcon,
 } from "lucide-react";
@@ -12,6 +13,8 @@ import { qk } from "@/lib/sync";
 import type { PieceRow, PieceStatus, ShopRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Avatar, Btn, Empty, FilterBar, FilterChip, RowsSkeleton, SearchInput, TitleBar, ViewBar, ViewTabs } from "@/components/app/chrome";
+import { RecordPreview, usePreview } from "@/components/app/record-preview";
+import { SamplePreview } from "@/components/admin-v2/previews";
 import { DataTable, Muted, NameCell, type Col } from "@/components/app/data-table";
 import { OBJECT_TINT } from "@/components/app/shell";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -31,12 +34,20 @@ function HolderLead({ p }: { p: PieceRow }) {
 }
 
 function SamplesBody() {
-  const sp = useSearchParams(); const router = useRouter();
-  const v = sp.get("view");
-  const view: View = v && v in IN_VIEW ? (v as View) : "all";
-  const [q, setQ] = React.useState("");
-  const [holder, setHolder] = React.useState(sp.get("holder") ?? "all");
-  const [purity, setPurity] = React.useState("all");
+  const router = useRouter();
+  const preview = usePreview();
+  const [v, setView] = useUrlState("view", "all");
+  const view: View = v in IN_VIEW ? (v as View) : "all";
+  const [q, setQ] = useUrlState("q");
+  // ?shop=<id> / ?agent=<id> (links from shop and agent records) are shorthands for the custodian filter.
+  const [shopParam] = useUrlState("shop");
+  const [agentParam] = useUrlState("agent");
+  const [holderRaw, setHolderRaw] = useUrlState("holder", "all");
+  const holder = holderRaw !== "all" ? holderRaw : shopParam ? `S:${shopParam}` : agentParam ? `A:${agentParam}` : "all";
+  const patch = useUrlPatch();
+  const setHolder = (h: string) => { patch({ shop: null, agent: null }); setHolderRaw(h); };
+  const [purity, setPurity] = useUrlState("purity", "all");
+  const [sorting, setSorting] = useUrlSort([{ id: "tag", desc: false }]);
   const [dialog, setDialog] = React.useState<{ kind: "issue" | "return"; rows: PieceRow[]; clear: () => void } | null>(null);
   const pieces = usePieces();
   // Agent-held pieces carry the API's own `location`; retailer areas come from the shop records.
@@ -76,24 +87,23 @@ function SamplesBody() {
   };
 
   const columns: Col<PieceRow>[] = [
-    { id: "tag", header: "Tag", accessorFn: (p) => p.tagCode, meta: { icon: TagIcon, width: 155 }, cell: ({ row: { original: p } }) => <NameCell lead={<Thumb src={p.imageUrl} alt={p.name} />} name={<span className="num">{p.tagCode}</span>} /> },
-    { id: "design", header: "Design", accessorFn: (p) => p.name, meta: { icon: GemIcon, width: 190 }, cell: ({ row: { original: p } }) => <span className="truncate" title={p.collection ? `${p.name} · ${p.collection} collection` : p.name}>{p.name}</span> },
-    { id: "purity", header: "Purity", accessorFn: (p) => p.purity, meta: { width: 64 }, cell: ({ row: { original: p } }) => <span className="text-gold-ink">{PURITY_LABEL[p.purity]}</span> },
-    { id: "net", header: "Net wt", accessorFn: (p) => p.netWeightMg, meta: { icon: ScaleIcon, width: 92, align: "right" }, cell: ({ row: { original: p } }) => <span className="num">{formatGrams(p.netWeightMg)}</span> },
+    { id: "tag", header: "Tag", accessorFn: (p) => p.tagCode, meta: { icon: TagIcon, width: 176 }, cell: ({ row: { original: p } }) => <NameCell lead={<Thumb src={p.imageUrl} alt={p.name} />} name={<span className="num">{p.tagCode}</span>} /> },
+    { id: "design", header: "Design", accessorFn: (p) => p.name, meta: { icon: GemIcon, width: 140 }, cell: ({ row: { original: p } }) => <span className="truncate" title={p.collection ? `${p.name} · ${p.collection} collection` : p.name}>{p.name}</span> },
+    { id: "purity", header: "Purity", accessorFn: (p) => p.purity, meta: { width: 66 }, cell: ({ row: { original: p } }) => <span className="text-gold-ink">{PURITY_LABEL[p.purity]}</span> },
+    { id: "net", header: "Net wt", accessorFn: (p) => p.netWeightMg, meta: { icon: ScaleIcon, width: 90, align: "right" }, cell: ({ row: { original: p } }) => <span className="num">{formatGrams(p.netWeightMg)}</span> },
     {
-      id: "value", header: "Value today", accessorFn: (p) => p.valuePaise, meta: { icon: IndianRupeeIcon, width: 122, align: "right", footer: rows.length ? <span className="num font-medium text-gold-ink">{formatINRCompact(total)}</span> : undefined },
+      id: "value", header: "Value today", accessorFn: (p) => p.valuePaise, meta: { icon: IndianRupeeIcon, width: 124, align: "right", footer: rows.length ? <span className="num font-medium text-gold-ink">{formatINRCompact(total)}</span> : undefined },
       cell: ({ row: { original: p } }) => <span className="num font-medium text-gold-ink">{formatINR(p.valuePaise)}</span>,
     },
-    { id: "holder", header: "Custodian", accessorFn: (p) => holderLabel(p), meta: { icon: UserIcon, width: 160 }, cell: ({ row: { original: p } }) => <span className="flex min-w-0 items-center gap-2"><HolderLead p={p} /><span className="truncate">{holderLabel(p)}</span></span> },
-    { id: "location", header: "Location", accessorFn: (p) => p.custodianType, meta: { icon: MapPinIcon, width: 160 }, cell: ({ row: { original: p } }) => location(p) },
+    { id: "holder", header: "Custodian", accessorFn: (p) => holderLabel(p), meta: { icon: UserIcon, width: 140 }, cell: ({ row: { original: p } }) => <span className="flex min-w-0 items-center gap-2"><HolderLead p={p} /><span className="truncate">{holderLabel(p)}</span></span> },
+    { id: "location", header: "Location", accessorFn: (p) => p.custodianType, meta: { icon: MapPinIcon, width: 124 }, cell: ({ row: { original: p } }) => location(p) },
     {
-      id: "status", header: "Status", accessorFn: (p) => p.status, meta: { icon: CircleDotIcon, width: 145 },
+      id: "status", header: "Status", accessorFn: (p) => p.status, meta: { icon: CircleDotIcon, width: 166 },
       cell: ({ row: { original: p } }) => <span className="flex items-baseline gap-1.5"><PieceStatusDot status={p.status} />{p.memo && (p.status === "ON_MEMO" || p.status === "OVERDUE") && <span className={cn("num text-[12px]", p.status === "OVERDUE" ? "text-danger" : "text-ink-3")}>due {fmtDay(p.memo.dueDate)}</span>}</span>,
     },
-    { id: "moved", header: "Last moved", accessorFn: (p) => p.lastMovedAt, meta: { icon: ClockIcon, width: 110 }, cell: ({ row: { original: p } }) => (p.lastMovedAt ? <span className="num" title={p.lastMovedAt}>{relTime(p.lastMovedAt)}</span> : <Muted />) },
+    { id: "moved", header: "Last moved", accessorFn: (p) => p.lastMovedAt, meta: { icon: ClockIcon, width: 144 }, cell: ({ row: { original: p } }) => (p.lastMovedAt ? <span className="num" title={p.lastMovedAt}>{relTime(p.lastMovedAt)}</span> : <Muted />) },
   ];
 
-  const setView = (nv: string) => { const p = new URLSearchParams(sp.toString()); p.set("view", nv); router.replace(`/admin/samples?${p}`); };
   const count = (vv: View) => (IN_VIEW[vv] ? all.filter((p) => IN_VIEW[vv]!.includes(p.status)).length : all.length);
   const vault = by("VAULT"), agents = by("AGENT"), shopsAt = by("SHOP");
 
@@ -136,11 +146,16 @@ function SamplesBody() {
           data={rows}
           columns={columns}
           getRowId={(p) => p.id}
+          fit
           onOpen={(p) => router.push(`/admin/samples/${p.id}`)}
+          onPreview={(p) => preview.open(p.id)}
+          activeId={preview.id}
+          onOrderChange={preview.setOrder}
           countLabel="pieces"
-          initialSort={[{ id: "tag", desc: false }]}
+          sorting={sorting}
+          onSortingChange={setSorting}
           rowClassName={(p) => (p.status === "SOLD" ? "text-ink-2" : undefined)}
-          empty={<Empty icon={GemIcon} title="No pieces match" hint={all.length ? "Change the view or clear the filters." : "Take pieces into the vault from a design in the catalog."} action={!all.length ? <Btn onClick={() => router.push("/admin/catalog")}>Open catalog</Btn> : undefined} />}
+          empty={<Empty icon={GemIcon} title="No pieces match" hint={all.length ? "Change the view or clear the filters." : "Take pieces into the vault from a design in the catalog."} action={!all.length ? <Btn onClick={() => router.push("/admin/catalog")}>Open catalog</Btn> : <Btn onClick={() => patch({ q: null, holder: null, shop: null, agent: null, purity: null, view: null })}>Clear filters</Btn>} />}
           bulkActions={(sel, clear) => {
             const vaultSel = sel.filter((p) => p.status === "IN_VAULT"), bagSel = sel.filter((p) => p.status === "WITH_AGENT");
             return (
@@ -153,6 +168,9 @@ function SamplesBody() {
         />
       )}
       <IssueDialog pieces={dialog?.kind === "issue" ? dialog.rows : []} open={dialog?.kind === "issue"} onOpenChange={(o) => !o && setDialog(null)} onDone={() => dialog?.clear()} />
+      <RecordPreview state={preview} viewLabel="Samples" href={preview.id ? `/admin/samples/${preview.id}` : undefined}>
+        {preview.id && <SamplePreview id={preview.id} />}
+      </RecordPreview>
       <ReturnDialog pieces={dialog?.kind === "return" ? dialog.rows : []} open={dialog?.kind === "return"} onOpenChange={(o) => !o && setDialog(null)} onDone={() => dialog?.clear()} />
     </div>
   );

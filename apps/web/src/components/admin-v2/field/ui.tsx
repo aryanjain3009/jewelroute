@@ -1,47 +1,15 @@
 "use client";
-/** Shared bits for the Field surfaces: status vocab, IST formatting, activity → timeline mapping,
+/** Shared bits for the Field surfaces: status vocab (re-exported), IST formatting,
  *  error/loading states. Builds on components/app/* (chrome, timeline) — additive only. */
 import * as React from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
-import {
-  AlertTriangleIcon, BellRingIcon, CameraIcon, CheckCircle2Icon, CheckIcon, ClockIcon, GemIcon, MapPinCheckIcon, ReceiptTextIcon,
-  RotateCcwIcon, ScrollTextIcon, TimerIcon, WebhookIcon, XCircleIcon,
-} from "lucide-react";
-import { formatINRCompact } from "@jewelroute/shared";
-import { api, ApiError } from "@/lib/api";
-import { qk } from "@/lib/sync";
+import { AlertTriangleIcon } from "lucide-react";
+import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { ActivityItem, MemoDisplayStatus, OrderStatus, ProofState, Proof, ShopStatus, VisitStatus, PieceStatus } from "@/lib/types";
-import { Btn, Chip, Dot, type Tone } from "@/components/app/chrome";
-import { IconBubble, type TimelineItem } from "@/components/app/timeline";
+import { Btn } from "@/components/app/chrome";
 
-/* ---------------- status vocabulary (restrained: dot + label) ---------------- */
-export const VISIT_STATUS: Record<VisitStatus, [Tone, string]> = {
-  PLANNED: ["grey", "Planned"], CHECKED_IN: ["blue", "Checked in"], ACTIVE: ["blue", "In visit"],
-  COMPLETED: ["green", "Completed"], MISSED: ["red", "Missed"], CANCELLED: ["grey", "Cancelled"],
-};
-export const PROOF: Record<ProofState, [Tone, string]> = {
-  VERIFIED: ["green", "Verified"], LOW_ACCURACY: ["amber", "Low GPS accuracy"], SIMULATED: ["blue", "Simulated"],
-  MISSING: ["red", "Missing"], NOT_STARTED: ["grey", "Not started"],
-};
-export const SHOP_STATUS: Record<ShopStatus, [Tone, string]> = {
-  ACTIVE: ["green", "Active"], MEMO_OVERDUE: ["red", "Memo overdue"], DORMANT: ["amber", "Dormant"], NEW: ["grey", "New"],
-};
-export const MEMO_STATUS: Record<MemoDisplayStatus, [Tone, string]> = {
-  ACTIVE: ["gold", "On memo"], DUE_SOON: ["amber", "Due soon"], OVERDUE: ["red", "Overdue"],
-  PARTIALLY_RETURNED: ["blue", "Partly returned"], RETURNED: ["grey", "Returned"], CONVERTED_TO_ORDER: ["green", "Converted"],
-};
-export const ORDER_STATUS: Record<OrderStatus, [Tone, string]> = {
-  DRAFT: ["grey", "Draft"], SUBMITTED: ["amber", "Awaiting approval"], APPROVED: ["green", "Approved"], REJECTED: ["red", "Rejected"],
-};
-export const PIECE_STATUS: Record<PieceStatus, [Tone, string]> = {
-  IN_VAULT: ["grey", "In vault"], WITH_AGENT: ["blue", "With agent"], ON_MEMO: ["gold", "On memo"], OVERDUE: ["red", "Overdue"], SOLD: ["green", "Sold"], LOST: ["red", "Lost"],
-};
-export const StatusDot = <K extends string>({ map, value, className }: { map: Record<K, [Tone, string]>; value: K; className?: string }) =>
-  <Dot tone={map[value]?.[0] ?? "grey"} className={className}>{map[value]?.[1] ?? value}</Dot>;
-export const StatusChip = <K extends string>({ map, value }: { map: Record<K, [Tone, string]>; value: K }) =>
-  <Chip tone={map[value]?.[0] ?? "grey"}>{map[value]?.[1] ?? value}</Chip>;
+/* ---------------- status vocabulary: one module (components/app/status) ---------------- */
+export { VISIT_STATUS, PROOF, SHOP_STATUS, MEMO_STATUS, ORDER_STATUS, PIECE_STATUS, StatusDot, StatusChip } from "@/components/app/status";
 
 /* ---------------- IST formatting ---------------- */
 const TZ = "Asia/Kolkata";
@@ -100,78 +68,27 @@ export function entityHref(e: { type: string; id: string }): string | undefined 
   }
 }
 
-/* ---------------- activity → Attio timeline ---------------- */
 type Icon = React.ComponentType<{ className?: string; strokeWidth?: number }>;
-const EVT: Record<string, [Icon, "grey" | "green" | "amber" | "red" | "blue" | "gold"]> = {
-  "visit.checked_in": [MapPinCheckIcon, "blue"], "visit.proof_uploaded": [CameraIcon, "blue"], "visit.completed": [CheckCircle2Icon, "green"],
-  "order.created": [ReceiptTextIcon, "grey"], "order.approved": [CheckIcon, "green"], "order.rejected": [XCircleIcon, "red"],
-  "memo.created": [ScrollTextIcon, "gold"], "memo.extended": [TimerIcon, "amber"], "memo.returned": [RotateCcwIcon, "grey"], "memo.overdue": [BellRingIcon, "red"], "memo.converted": [ReceiptTextIcon, "green"], "memo.acknowledged": [CheckIcon, "green"],
-  "sample.custody_changed": [GemIcon, "gold"], ping: [WebhookIcon, "grey"],
-};
-const ISO_DAY = /\b(\d{4}-\d{2}-\d{2})\b/g;
-/** API sentences carry business dates as YYYY-MM-DD; show them as "21 Oct". */
-export const prettyDates = (t: string) => t.replace(ISO_DAY, (_, d: string) => istDay(d) ?? d);
-/** Compact age for exception rows: "12 min", "3 h", "2 days". Future instants read "in 3 h". */
-export function age(iso: string, now: Date) {
-  const s = Math.round((now.getTime() - new Date(iso).getTime()) / 1000);
-  const a = Math.abs(s);
-  const v = a < 3600 ? `${Math.max(1, Math.round(a / 60))} min` : a < 86400 ? `${Math.round(a / 3600)} h` : `${Math.round(a / 86400)} day${Math.round(a / 86400) === 1 ? "" : "s"}`;
-  return s < 0 ? `in ${v}` : v;
-}
-/** Turn the API's sentence into "**Actor** verb **Object**" without inventing words. */
-export function activitySentence(a: ActivityItem): React.ReactNode {
-  let t = a.title.replace(/\s·\s₹[\d.,]+[LCr]*\s*$/u, "").replace(ISO_DAY, (_, d: string) => istDay(d) ?? d);
-  const marks = [a.actor?.name, a.shop?.name, ...(t.match(/\b(ORD|MEMO)-\d{4}-\d{5}\b/g) ?? [])].filter(Boolean) as string[];
-  if (!marks.length) return t;
-  const parts: React.ReactNode[] = [];
-  let i = 0;
-  while (t.length) {
-    let best = -1, word = "";
-    for (const m of marks) { const at = t.indexOf(m); if (at !== -1 && (best === -1 || at < best)) { best = at; word = m; } }
-    if (best === -1) { parts.push(t); break; }
-    if (best > 0) parts.push(t.slice(0, best));
-    parts.push(<b key={i++}>{word}</b>);
-    t = t.slice(best + word.length);
-  }
-  return parts;
-}
-export function toTimeline(items: ActivityItem[], go: (href: string) => void, opts: { proofs?: boolean } = {}): TimelineItem[] {
-  return items.map((a) => {
-    const [I, tone] = EVT[a.type] ?? [ClockIcon, "grey" as const];
-    const href = entityHref(a.entity);
-    const money = a.type.startsWith("memo.") || a.type.startsWith("sample.");
-    return {
-      id: a.id,
-      at: a.createdAt,
-      lead: <IconBubble icon={I} tone={tone} />,
-      text: activitySentence(a),
-      right: a.amountPaise ? <span className={cn("num font-medium", money ? "text-gold-ink" : "text-ink")}>{formatINRCompact(a.amountPaise)}</span> : undefined,
-      body: opts.proofs && a.type === "visit.proof_uploaded" ? <ProofPreview visitId={a.entity.id} /> : undefined,
-      onClick: href ? () => go(href) : undefined,
-    };
-  });
-}
 
-/** Nested card for "uploaded visit proof": the actual photo, its capture time and GPS check. */
-function ProofPreview({ visitId }: { visitId: string }) {
-  const q = useQuery({
-    queryKey: qk.adminVisit(visitId),
-    queryFn: () => api<{ proofs: Proof[]; visit: { verification?: string } }>(`/admin/visits/${visitId}`),
-    staleTime: 60_000,
-  });
-  const p = q.data?.proofs?.[0];
-  if (!p) return <div className="h-14 animate-pulse rounded-md bg-hover" />;
-  return (
-    <Link href={`/admin/visits/${visitId}`} className="flex items-center gap-3">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={mediaUrl(p.url)} alt="Visit proof" className="size-14 shrink-0 rounded-md border border-line object-cover" />
-      <div className="min-w-0 text-[13px]">
-        <div className="font-medium text-ink">Arrival photo</div>
-        <div className="text-ink-3">Captured {istTime(p.capturedAt ?? p.uploadedAt)}{p.distanceM != null && <> · {fmtDist(p.distanceM)} from check-in</>}</div>
-        {q.data?.visit.verification === "SIMULATED" && <div className="text-info">Check-in location simulated (demo)</div>}
-      </div>
-    </Link>
-  );
+/* ---------------- dates in API sentences ---------------- */
+const ISO_DAY_TIME = /\b(\d{4}-\d{2}-\d{2})(?: (\d{2}:\d{2})\b)?/g;
+/** API sentences carry business dates as YYYY-MM-DD and planned slots as 24-hour "HH:MM" (IST wall clock);
+ *  show them as "21 Oct" and "21 Oct, 2:30 pm". */
+export const prettyDates = (t: string) => t.replace(ISO_DAY_TIME, (_, d: string, hm?: string) => `${istDay(d) ?? d}${hm ? `, ${wallTime(hm)}` : ""}`);
+/** IST calendar days between two instants (later minus earlier). */
+const istDayDiff = (from: Date, to: Date) => {
+  const k = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(d);
+  return Math.round((+new Date(`${k(to)}T00:00:00Z`) - +new Date(`${k(from)}T00:00:00Z`)) / 86400_000);
+};
+/** Compact age for exception rows: "12 min", "3 h", then IST calendar days ("2 days") — the same count as
+ *  a memo's "2d late" or a visit planned two days ago, never a rounded 24-hour block. Future reads "in 3 h". */
+export function age(iso: string, now: Date) {
+  const at = new Date(iso);
+  const s = Math.round((now.getTime() - at.getTime()) / 1000);
+  const a = Math.abs(s);
+  const days = Math.abs(s < 0 ? istDayDiff(now, at) : istDayDiff(at, now));
+  const v = a < 3600 ? `${Math.max(1, Math.round(a / 60))} min` : a < 86400 || days === 0 ? `${Math.round(a / 3600)} h` : `${days} day${days === 1 ? "" : "s"}`;
+  return s < 0 ? `in ${v}` : v;
 }
 
 /* ---------------- states ---------------- */

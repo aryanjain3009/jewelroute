@@ -4,6 +4,7 @@ import * as React from "react";
 import { CoinsIcon, HistoryIcon, LockIcon, PlusIcon } from "lucide-react";
 import { formatINR, formatRate, formatRateDelta, formatRupees, parseRupeesToPaise, priceDesign, PURITY_LABEL } from "@jewelroute/shared";
 import { api } from "@/lib/api";
+import { useOpKey } from "@/lib/op-key";
 import type { GoldRateRow, Purity } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Avatar, Btn, Empty, ViewTabs } from "@/components/app/chrome";
@@ -40,8 +41,9 @@ function SetRate({ purity, current, open, onOpenChange }: { purity: Purity; curr
   const piecesAffected = (pieces.data ?? []).filter((p) => p.purity === purity && p.status !== "SOLD").length;
   const sample = affected[0];
   const price = (rate: number) => (sample ? priceDesign({ netWeightMg: sample.netWeightMg, ratePaisePerGram: rate, makingChargeType: sample.makingChargeType, makingChargeValue: sample.makingChargeValue, stoneValuePaise: sample.stoneValuePaise, otherComponents: sample.otherComponents }).unitPricePaise : 0);
-  const save = useWrite(() => api("/admin/gold-rates", { body: { purity, ratePaisePerGram: next } }), {
-    changes: ["gold_rate.set"], success: `${PURITY_LABEL[purity]} set to ${formatRate(next)}`, onSuccess: () => onOpenChange(false),
+  const op = useOpKey();
+  const save = useWrite(() => { const body = { purity, ratePaisePerGram: next }; return api("/admin/gold-rates", { body, idempotencyKey: op.keyFor(body) }); }, {
+    changes: ["gold_rate.set"], success: `${PURITY_LABEL[purity]} set to ${formatRate(next)}`, onSuccess: () => { op.done(); onOpenChange(false); },
   });
   const delta = current && valid ? next - current.ratePaisePerGram : 0;
   return (
@@ -59,7 +61,9 @@ function SetRate({ purity, current, open, onOpenChange }: { purity: Purity; curr
       <div className="mt-4 overflow-hidden rounded-[10px] border border-line text-[13px]">
         <div className="space-y-1.5 px-3.5 py-3">
           <p className="text-ink">What changes now</p>
-          <p className="text-ink-2"><span className="num text-ink">{affected.length}</span> {PURITY_LABEL[purity]} design{affected.length === 1 ? "" : "s"} in the catalog and <span className="num text-ink">{piecesAffected}</span> sample piece{piecesAffected === 1 ? "" : "s"} are re-priced at the new rate{valid && delta !== 0 ? <> (<span className="num">{formatRateDelta(delta)}/g</span>)</> : null}.</p>
+          {affected.length || piecesAffected
+            ? <p className="text-ink-2"><span className="num text-ink">{affected.length}</span> {PURITY_LABEL[purity]} design{affected.length === 1 ? "" : "s"} in the catalog and <span className="num text-ink">{piecesAffected}</span> sample piece{piecesAffected === 1 ? "" : "s"} are re-priced at the new rate{valid && delta !== 0 ? <> (<span className="num">{formatRateDelta(delta)}/g</span>)</> : null}.</p>
+            : <p className="text-ink-2">No {PURITY_LABEL[purity]} designs or pieces yet — the rate applies to the first ones you add.</p>}
           {sample && current && valid && <p className="text-ink-2">For example, {sample.name}: <span className="num">{formatINR(price(current.ratePaisePerGram))}</span> → <span className="num font-medium text-gold-ink">{formatINR(price(next))}</span> before GST.</p>}
         </div>
         <div className="flex gap-2 border-t border-line bg-sunken px-3.5 py-2.5 text-ink-2">
@@ -117,9 +121,9 @@ export function GoldRateSettings() {
               const prev = prevOf(r); const d = prev ? r.ratePaisePerGram - prev.ratePaisePerGram : 0;
               return (
                 <tr key={r.goldRateId} className="hover:bg-hover">
-                  <MTd className="text-gold-ink">{PURITY_LABEL[r.purity]}</MTd>
-                  <MTd align="right" className="num font-medium text-gold-ink">{formatRate(r.ratePaisePerGram)}</MTd>
-                  <MTd align="right" className={cn("num", d === 0 && "text-ink-3")}>{prev ? (d === 0 ? "—" : formatRateDelta(d)) : <span className="text-ink-3">First</span>}</MTd>
+                  <MTd className="font-medium text-gold-ink">{PURITY_LABEL[r.purity]}</MTd>
+                  <MTd align="right" className="num font-medium text-ink">{formatRate(r.ratePaisePerGram)}</MTd>
+                  <MTd align="right" className={cn("num", d === 0 ? "text-ink-3" : "text-ink-2")}>{prev ? (d === 0 ? "—" : formatRateDelta(d)) : <span className="text-ink-3">First</span>}</MTd>
                   <MTd className="num">{fmtDayTime(r.effectiveFrom)}</MTd>
                   <MTd>{r.createdBy?.name ? <span className="flex items-center gap-2"><Avatar name={r.createdBy.name} />{r.createdBy.name}</span> : <span className="text-ink-3">System</span>}</MTd>
                 </tr>

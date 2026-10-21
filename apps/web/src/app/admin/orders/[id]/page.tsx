@@ -4,9 +4,9 @@ import * as React from "react";
 import { useParams } from "next/navigation";
 import {
   ActivityIcon, BadgeCheckIcon, CalendarIcon, CheckIcon, CircleDotIcon, CoinsIcon, FileTextIcon, HashIcon, HistoryIcon,
-  LayoutGridIcon, LockIcon, MapPinnedIcon, PackageIcon, ReceiptTextIcon, ScaleIcon, StoreIcon, UserIcon, XIcon,
+  LayoutGridIcon, LockIcon, MapPinnedIcon, PackageIcon, ReceiptTextIcon, ScaleIcon, StoreIcon, UserIcon, XIcon, WalletIcon, BanIcon, ShieldCheckIcon, ShieldAlertIcon,
 } from "lucide-react";
-import { formatGrams, formatINR, formatRate, formatRateDelta, PURITY_LABEL } from "@jewelroute/shared";
+import { formatGrams, formatINR, formatINRCompact, formatRate, formatRateDelta, PURITY_LABEL } from "@jewelroute/shared";
 import { api } from "@/lib/api";
 import type { AuditRow, Order } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -16,22 +16,40 @@ import { Timeline, type TimelineItem } from "@/components/app/timeline";
 import { OBJECT_TINT } from "@/components/app/shell";
 import { Textarea } from "@/components/ui/textarea";
 import { useGoldRates, useOrderRecord, useWrite } from "@/components/admin-v2/sales/data";
-import { ActivityTimeline } from "@/components/admin-v2/sales/activity";
+import { RejectOrderDialog, useApproveOrder } from "@/components/admin-v2/sales/order-actions";
+import { useUrlState } from "@/lib/url-state";
+import { ActivityFeed } from "@/components/app/activity-feed";
 import { auditTimelineItem } from "@/components/app/audit";
-import { ErrorState, fmtDayTime, fmtDist, MiniTable, Modal, MTd, ObjectLead, OrderStatusDot, RecLink, RecordSkeleton, Thumb, useHydrated } from "@/components/admin-v2/sales/ui";
+import { ErrorState, fmtDayTime, fmtDist, MiniTable, Modal, MTd, ObjectLead, RecLink, RecordSkeleton, Thumb, useHydrated } from "@/components/admin-v2/sales/ui";
+import { isPendingApproval, ORDER_STATUS, OrderStatusDot, reasonsText, SIMULATED_LOCATION, StatusChip } from "@/components/app/status";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ApprovalReasons, CreditFigures, ExposureBar } from "@/components/app/credit";
+import { useDocTitle } from "@/lib/title";
 
 function OrderBody() {
   const { id } = useParams<{ id: string }>();
   const rec = useOrderRecord(id);
+  useDocTitle(rec.data?.order.number);
   const rates = useGoldRates();
   const tab = useTab("overview");
+  // ?reject=1 (from a link) opens the reject dialog once for a pending order, then leaves the URL.
+  const [rejectParam, setRejectParam] = useUrlState("reject");
   const [rejecting, setRejecting] = React.useState(false);
-  const [reason, setReason] = React.useState("");
-
-  const approve = useWrite(() => api<{ order: Order }>(`/admin/orders/${id}/approve`, { method: "POST" }), { changes: ["order.decided"], success: (r) => `${r.order.number} approved` });
-  const reject = useWrite(() => api<{ order: Order }>(`/admin/orders/${id}/reject`, { body: { reason: reason.trim() } }), {
-    changes: ["order.decided"], success: (r) => `${r.order.number} rejected`, onSuccess: () => { setRejecting(false); setReason(""); },
+  const [dialog, setDialog] = React.useState<"settle" | "cancel" | null>(null);
+  const [cancelReason, setCancelReason] = React.useState("");
+  const settle = useWrite(() => api<{ order: Order }>(`/admin/orders/${id}/settle`, { method: "POST" }), {
+    changes: ["order.settled"], success: (r) => `${r.order.number} marked as settled`, onSuccess: () => setDialog(null),
   });
+  const cancel = useWrite(() => api<{ order: Order }>(`/admin/orders/${id}/cancel`, { body: { reason: cancelReason.trim() || undefined } }), {
+    changes: ["order.cancelled"], success: (r) => `${r.order.number} cancelled`, onSuccess: () => { setDialog(null); setCancelReason(""); },
+  });
+  const approve = useApproveOrder(id);
+  const status = rec.data?.order.status;
+  React.useEffect(() => {
+    if (rejectParam !== "1" || !status) return;
+    if (isPendingApproval(status)) setRejecting(true);
+    setRejectParam("");
+  }, [rejectParam, status, setRejectParam]);
 
   if (rec.error) return <ErrorState error={rec.error} retry={() => rec.refetch()} className="h-full" />;
   if (!rec.data) return <RecordSkeleton />;
@@ -39,17 +57,27 @@ function OrderBody() {
   const pieces = o.items.reduce((a, i) => a + i.quantity, 0);
   const grams = o.items.reduce((a, i) => a + i.netWeightMg * i.quantity, 0);
   const lifecycle = historyItems(o, history);
+  const pending = isPendingApproval(o.status);
+  const live = o.status === "CONFIRMED" || o.status === "APPROVED";
+  const canCancel = (o.status === "CONFIRMED" || pending) && !o.settledAt && !o.sourceMemoId;
+  const ap = o.approval;
 
   const panel = (
     <>
       <RecordHeader
         lead={<ObjectLead icon={ReceiptTextIcon} tint={OBJECT_TINT.orders} />}
         title={<span className="num">{o.number}</span>}
-        subtitle={<>{o.shop.name}{o.shop.area ? ` · ${o.shop.area}` : ""}</>}
-        primary={o.status === "SUBMITTED"
+        subtitle={<span className="flex min-w-0 items-center gap-2"><span className="truncate" title={o.shop.area ? `${o.shop.name} · ${o.shop.area}` : o.shop.name}>{o.shop.name}</span><StatusChip map={ORDER_STATUS} value={o.status} /></span>}
+        primary={pending
           ? <Btn variant="primary" icon={CheckIcon} disabled={approve.isPending} onClick={() => approve.mutate(undefined)}>{approve.isPending ? "Approving…" : "Approve order"}</Btn>
-          : <div className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-line bg-sunken px-3 text-[13px] text-ink-2"><OrderStatusDot status={o.status} />{o.decidedAt && <span className="truncate">· {o.decidedBy ? `${o.decidedBy.name.split(" ")[0]}, ` : ""}{fmtDayTime(o.decidedAt)}</span>}</div>}
-        actions={o.status === "SUBMITTED" ? <Btn variant="danger" icon={XIcon} onClick={() => setRejecting(true)}>Reject</Btn> : undefined}
+          : live && !o.settledAt ? <Btn variant="primary" icon={WalletIcon} onClick={() => setDialog("settle")}>Mark as settled</Btn>
+          : <div className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-line px-3 text-[13px] text-ink-2"><OrderStatusDot status={o.status} />{o.settledAt ? <span className="truncate">· settled {fmtDayTime(o.settledAt)}</span> : o.decidedAt ? <span className="truncate">· {o.decidedBy ? `${o.decidedBy.name.split(" ")[0]}, ` : ""}{fmtDayTime(o.decidedAt)}</span> : o.cancelledAt ? <span className="truncate">· {fmtDayTime(o.cancelledAt)}</span> : null}</div>}
+        actions={<>
+          {pending && <Btn variant="danger" icon={XIcon} onClick={() => setRejecting(true)}>Reject</Btn>}
+          {canCancel && (pending
+            ? <Tooltip><TooltipTrigger asChild><Btn icon={BanIcon} onClick={() => setDialog("cancel")} aria-label="Cancel order" /></TooltipTrigger><TooltipContent>Cancel order</TooltipContent></Tooltip>
+            : <Btn icon={BanIcon} onClick={() => setDialog("cancel")} aria-label="Cancel order">Cancel</Btn>)}
+        </>}
       />
       <PropertySection title="Order details">
         <Property icon={HashIcon} label="Order number"><span className="num">{o.number}</span></Property>
@@ -60,26 +88,23 @@ function OrderBody() {
           {o.visitId ? (
             <span className="flex min-w-0 flex-col">
               <RecLink href={`/admin/visits/${o.visitId}`}>{visit?.checkInAt ? `Visit · ${fmtDayTime(visit.checkInAt)}` : "Open visit"}</RecLink>
-              {visit?.verification && <span className="text-[13px] text-ink-3">{visit.verification === "VERIFIED" ? "GPS verified" : visit.verification === "SIMULATED" ? "Simulated check-in" : "Low GPS accuracy"}{visit.checkInDistanceM != null ? ` · ${fmtDist(visit.checkInDistanceM)} from shop` : ""}</span>}
+              {visit?.verification && <span className="text-[13px] text-ink-3">{visit.verification === "SIMULATED" ? SIMULATED_LOCATION : <>{visit.verification === "VERIFIED" ? "GPS verified" : "Low GPS accuracy"}{visit.checkInDistanceM != null ? ` · ${fmtDist(visit.checkInDistanceM)} from shop` : ""}</>}</span>}
             </span>
           ) : undefined}
         </Property>
         <Property icon={CalendarIcon} label="Created"><span className="num">{fmtDayTime(o.createdAt)}</span></Property>
-        <Property icon={BadgeCheckIcon} label="Decided by">{o.decidedBy ? <span className="flex items-center gap-2"><Avatar name={o.decidedBy.name} />{o.decidedBy.name}</span> : undefined}</Property>
-        <Property icon={CalendarIcon} label="Decided at">{o.decidedAt ? <span className="num">{fmtDayTime(o.decidedAt)}</span> : undefined}</Property>
+        <Property icon={ShieldCheckIcon} label="Approval">{ap ? (ap.required ? <span className={cn(pending ? "text-warn" : "text-ink")}>{reasonsText(ap.reasons, ap.position)}</span> : "Not needed") : undefined}</Property>
+        {(live || o.settledAt) && <Property icon={WalletIcon} label="Payment">{o.settledAt ? <span>Settled <span className="num text-ink-3">{fmtDayTime(o.settledAt)}</span></span> : "Unpaid"}</Property>}
+        {o.status === "CANCELLED" && <Property icon={BanIcon} label="Cancelled"><span className="flex flex-col"><span className="num">{fmtDayTime(o.cancelledAt)}</span>{o.cancellationReason && <span className="whitespace-pre-wrap text-[13px] text-ink-2">{o.cancellationReason}</span>}</span></Property>}
+        {(o.decidedBy || o.decidedAt) && <Property icon={BadgeCheckIcon} label="Decided by">{o.decidedBy ? <span className="flex flex-col"><span className="flex items-center gap-2"><Avatar name={o.decidedBy.name} />{o.decidedBy.name}</span>{o.decidedAt && <span className="num text-[13px] text-ink-3">{fmtDayTime(o.decidedAt)}</span>}</span> : undefined}</Property>}
         {o.status === "REJECTED" && <Property icon={FileTextIcon} label="Rejection reason"><span className="whitespace-pre-wrap text-danger">{o.rejectionReason}</span></Property>}
         <Property icon={FileTextIcon} label="Notes">{o.notes ? <span className="whitespace-pre-wrap">{o.notes}</span> : undefined}</Property>
-      </PropertySection>
-      <PropertySection title="Totals">
-        <Property label="Subtotal"><span className="num">{formatINR(o.subtotalPaise)}</span></Property>
-        <Property label="GST 3%"><span className="num">{formatINR(o.gstPaise)}</span></Property>
-        <Property label="Total"><span className="num font-medium text-gold-ink">{formatINR(o.totalPaise)}</span></Property>
       </PropertySection>
     </>
   );
 
   return (
-    <RecordLayout back={{ href: "/admin/orders", label: "Orders" }} panel={panel}>
+    <RecordLayout back={{ href: "/admin/orders", label: "Orders" }} crumb={<span className="num">{o.number}</span>} panel={panel}>
       <RecordTabs tabs={[
         { value: "overview", label: "Overview", icon: LayoutGridIcon },
         { value: "history", label: "History", icon: HistoryIcon, count: lifecycle.length },
@@ -87,9 +112,10 @@ function OrderBody() {
       ]} />
       {tab === "overview" && (
         <>
+          {ap && <ApprovalBlock order={o} />}
           <MainSection title="Highlights">
             <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
-              <Highlight label="Total incl. GST" icon={CoinsIcon} tone="gold" sub={`${formatINR(o.subtotalPaise)} + ${formatINR(o.gstPaise)} GST`}><span className="num">{formatINR(o.totalPaise)}</span></Highlight>
+              <Highlight label="Total incl. GST" icon={CoinsIcon} tone="gold" sub={`${formatINR(o.gstPaise)} GST included`}><span className="num">{formatINR(o.totalPaise)}</span></Highlight>
               <Highlight label="Items" icon={PackageIcon} sub={`${o.items.length} design${o.items.length === 1 ? "" : "s"}`}><span className="num">{pieces} piece{pieces === 1 ? "" : "s"}</span></Highlight>
               <Highlight label="Gold weight" icon={ScaleIcon} sub="Net, all lines"><span className="num">{formatGrams(grams)}</span></Highlight>
               <Highlight label="Rate used" icon={LockIcon} sub={o.goldRateSnapshot.length > 1 ? `+${o.goldRateSnapshot.length - 1} more purity` : "Frozen at booking"}>
@@ -113,20 +139,72 @@ function OrderBody() {
       )}
       {tab === "activity" && (
         <MainSection title="Activity">
-          <ActivityTimeline items={activity} selfId={o.id} empty={<Empty icon={ActivityIcon} title="No events for this order yet" hint="Webhook events such as order.created and order.approved show up here." />} />
+          <ActivityFeed filter={{ orderId: o.id }} selfId={o.id} empty={<Empty icon={ActivityIcon} title="No events for this order yet" hint="Webhook events such as order.created and order.approved show up here." />} />
         </MainSection>
       )}
+      {pending && <RejectOrderDialog order={o} open={rejecting} onOpenChange={setRejecting} />}
       <Modal
-        open={rejecting}
-        onOpenChange={setRejecting}
-        title={`Reject ${o.number}?`}
-        description={<>{o.agent.name} sees the reason in the field app. The order stays on record with its frozen prices.</>}
-        footer={<><Btn variant="ghost" onClick={() => setRejecting(false)}>Cancel</Btn><Btn variant="primary" className="bg-danger hover:bg-danger/90" disabled={reason.trim().length < 3 || reject.isPending} onClick={() => reject.mutate(undefined)}>{reject.isPending ? "Rejecting…" : "Reject order"}</Btn></>}
+        open={dialog === "settle"}
+        onOpenChange={(v) => setDialog(v ? "settle" : null)}
+        title={`Mark ${o.number} as settled?`}
+        description={<>Record that {o.shop.name} has paid <span className="num font-medium text-gold-ink">{formatINR(o.totalPaise)}</span>. It stops counting towards their outstanding and frees that much credit. Recorded with your name.</>}
+        footer={<><Btn variant="ghost" onClick={() => setDialog(null)}>Not now</Btn><Btn variant="primary" disabled={settle.isPending} onClick={() => settle.mutate(undefined)}>{settle.isPending ? "Saving…" : "Mark as settled"}</Btn></>}
+      />
+      <Modal
+        open={dialog === "cancel"}
+        onOpenChange={(v) => setDialog(v ? "cancel" : null)}
+        title={`Cancel ${o.number}?`}
+        description={<>The order stays on record as cancelled with its frozen prices{live ? ", and stops counting towards the retailer's outstanding" : ""}. {o.agent.name} sees it in the field app.</>}
+        footer={<><Btn variant="ghost" onClick={() => setDialog(null)}>Keep order</Btn><Btn variant="primary" className="bg-danger hover:bg-danger/90" disabled={cancel.isPending} onClick={() => cancel.mutate(undefined)}>{cancel.isPending ? "Cancelling…" : "Cancel order"}</Btn></>}
       >
-        <label className="block text-[13px] font-medium text-ink" htmlFor="reject-reason">Reason</label>
-        <Textarea id="reject-reason" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Retailer's credit limit exceeded; re-book after payment" className="mt-1.5 min-h-20 border-line-strong text-[14px]" maxLength={500} />
+        <label className="block text-[13px] font-medium text-ink" htmlFor="cancel-reason">Reason <span className="font-normal text-ink-3">(optional)</span></label>
+        <Textarea id="cancel-reason" value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="Retailer called to drop the order" className="mt-1.5 min-h-16 border-line-strong text-[14px]" maxLength={500} />
       </Modal>
     </RecordLayout>
+  );
+}
+
+/** The rule evaluation frozen when the order was written: why it needed approval (or didn't), with the
+ *  five figures the approver decides on. Server-authoritative — rendered, never recomputed. */
+function ApprovalBlock({ order: o }: { order: Order }) {
+  const ap = o.approval!;
+  const pending = isPendingApproval(o.status);
+  const title = !ap.required ? "Confirmed without approval"
+    : pending ? "Waiting for your approval"
+    : o.status === "APPROVED" ? `Approved${o.decidedBy ? ` by ${o.decidedBy.name}` : ""}`
+    : o.status === "REJECTED" ? `Rejected${o.decidedBy ? ` by ${o.decidedBy.name}` : ""}` : "Needed approval";
+  const p = ap.position;
+  return (
+    <MainSection title="Credit check at booking">
+      <div className={cn("grid gap-0 overflow-hidden rounded-[10px] border lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]", pending ? "border-warn/40" : "border-line")}>
+        <div className={cn("flex flex-col gap-2 border-b border-line px-4 py-3.5 lg:border-b-0 lg:border-r", pending && "bg-warn-soft/40")}>
+          <p className="flex items-center gap-2 text-[14px] font-medium text-ink">
+            {ap.required ? <ShieldAlertIcon className={cn("size-4", pending ? "text-warn" : "text-ink-3")} /> : <ShieldCheckIcon className="size-4 text-verified" />}{title}
+          </p>
+          {ap.required ? <ApprovalReasons approval={ap} /> : (
+            <p className="text-[13px] text-ink-2">
+              {p ? <>Within {p.creditLimitPaise ? `the ${formatINRCompact(p.creditLimitPaise)} credit limit` : "credit (no limit set)"}{p.approvalThresholdPaise != null ? ` and below the ${formatINRCompact(p.approvalThresholdPaise)} approval threshold` : ""}.</> : "No approval rule tripped when it was booked."}
+            </p>
+          )}
+          {o.status === "REJECTED" && o.rejectionReason && <p className="text-[13px] text-danger">{o.rejectionReason}</p>}
+          {p && p.creditLimitPaise > 0 && (
+            <div className="pt-2">
+              <ExposureBar p={p} className="h-2" />
+              <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-3">
+                <span className="inline-flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-[#55565a]" />Outstanding</span>
+                <span className="inline-flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-gold" />On memo</span>
+                <span className="inline-flex items-center gap-1.5"><span className={cn("h-1.5 w-2.5 rounded-full", p.projectedExposurePaise > p.creditLimitPaise ? "bg-danger/70" : "bg-[#9b9ca0]")} style={{ backgroundImage: "repeating-linear-gradient(135deg, rgb(255 255 255 / .55) 0 2px, transparent 2px 5px)" }} />This order</span>
+                {p.projectedExposurePaise > p.creditLimitPaise && <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-px bg-ink" />Limit</span>}
+              </p>
+            </div>
+          )}
+          <p className="pt-1 text-[12px] text-ink-3">Evaluated by the server when {o.agent.name} placed the order{p?.asOf ? `, ${fmtDayTime(p.asOf)}` : ""}.</p>
+        </div>
+        <div className="px-4 py-1.5">
+          {p ? <CreditFigures p={p} /> : <p className="py-3 text-[13px] text-ink-3">This order was booked before credit checks were recorded.</p>}
+        </div>
+      </div>
+    </MainSection>
   );
 }
 
@@ -156,7 +234,7 @@ function LineItems({ order: o }: { order: Order }) {
             {hasOther && <MTd align="right" className={cn("num", !it.otherPaise && "text-ink-3")}>{money(it.otherPaise)}</MTd>}
             <MTd align="right" className="num">{formatINR(it.unitPricePaise)}</MTd>
             <MTd align="right" className="num">{it.quantity}</MTd>
-            <MTd align="right" className="num font-medium text-gold-ink">{formatINR(it.lineTotalPaise)}</MTd>
+            <MTd align="right" className="num font-medium text-ink">{formatINR(it.lineTotalPaise)}</MTd>
           </tr>
         ))}
       </MiniTable>
@@ -185,7 +263,7 @@ function RateSnapshot({ order: o, rates }: { order: Order; rates?: { current: { 
             <div className="min-w-0 flex-1">
               <p className="text-[14px] text-ink">
                 Priced at <span className="font-medium">{PURITY_LABEL[s.purity]}</span> <span className="num font-medium text-gold-ink">{formatRate(s.ratePaisePerGram)}</span>
-                <span className="text-ink-2">, set {fmtDayTime(set?.effectiveFrom ?? s.effectiveFrom)}{set?.createdBy?.name ? ` by ${set.createdBy.name}` : ""}</span>
+                <span className="text-ink-2"> — the rate row in force at booking (effective {fmtDayTime(s.effectiveFrom)}{set?.createdBy?.name ? `, set by ${set.createdBy.name}` : ""})</span>
               </p>
               <p className="mt-0.5 text-[13px] text-ink-2">
                 {today ? (

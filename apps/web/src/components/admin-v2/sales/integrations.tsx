@@ -7,13 +7,14 @@ import * as React from "react";
 import Link from "next/link";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
-  CheckIcon, CopyIcon, EyeIcon, EyeOffIcon, InboxIcon, KeyRoundIcon, ListChecksIcon, PencilIcon, PlugIcon, PlusIcon, RadioTowerIcon, RefreshCwIcon,
+  AlertCircleIcon, CheckIcon, CopyIcon, EyeIcon, PauseCircleIcon, XIcon, EyeOffIcon, InboxIcon, KeyRoundIcon, ListChecksIcon, PencilIcon, PlugIcon, PlusIcon, RadioTowerIcon, RefreshCwIcon,
   RotateCcwIcon, SendIcon, ShieldCheckIcon, ShieldXIcon, Trash2Icon, ActivityIcon, CalendarIcon, CodeXmlIcon, GlobeIcon, HashIcon, TimerIcon, CircleDotIcon,
 } from "lucide-react";
 import { EVENT_DESCRIPTIONS, WEBHOOK_EVENT_TYPES } from "@jewelroute/shared";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { qk } from "@/lib/sync";
+import { useUrlState } from "@/lib/url-state";
 import { cn } from "@/lib/utils";
 import { Btn, Chip, Dot, Empty, RowsSkeleton, TitleBar, ViewBar, ViewTabs, type Tone } from "@/components/app/chrome";
 import { DataTable, Muted, type Col } from "@/components/app/data-table";
@@ -30,6 +31,8 @@ import { ErrorState, fmtDayTime, fmtTime, Modal, useHydrated } from "./ui";
 const mono = "font-[ui-monospace,SFMono-Regular,Menlo,monospace]";
 type Row = Delivery & { endpointUrl?: string };
 const host = (u?: string) => (u ?? "").replace(/^https?:\/\//, "");
+/** Endpoint name in the selector: its description, else the host (the built-in receiver named as such). */
+const endpointLabel = (e: WebhookEndpoint) => (e.description?.trim() || host(e.url).replace(/\/v1\/dev\/webhook-receiver\/.*/, " · built-in receiver")).slice(0, 44);
 
 /* ---------------- queries (keys from lib/sync) ---------------- */
 const PAGE = 50;
@@ -114,19 +117,34 @@ function SecretOnce({ secret, title, onClose }: { secret: string; title: string;
   );
 }
 
+/** A 4xx on create/edit is about what was typed, so it belongs under the URL field (not only in a toast).
+ *  5xx / network errors stay toasts. `WEBHOOK_URL_FORBIDDEN` (422): private, loopback, unresolvable or non-http(s) URLs. */
+const isFieldError = (e: unknown): e is ApiError => e instanceof ApiError && e.status >= 400 && e.status < 500 && e.status !== 401;
+function urlErrorText(e: ApiError) {
+  // The API says why; only add the private-address hint when that is what it refused.
+  if (e.code === "WEBHOOK_URL_FORBIDDEN") return /private|loopback|internal|localhost/i.test(e.message) ? `${e.message.replace(/\.$/, "")}. Use a public URL your server receives on.` : e.message;
+  return errMessage(e);
+}
+function UrlError({ error }: { error: unknown }) {
+  if (!isFieldError(error)) return null;
+  return <p role="alert" className="mt-1.5 text-[13px] leading-5 text-danger">{urlErrorText(error)}</p>;
+}
+
 function AddEndpoint({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: string, secret: string) => void }) {
   const events = useEventList();
   const [url, setUrl] = React.useState(""); const [description, setDescription] = React.useState(""); const [sel, setSel] = React.useState<string[]>([]);
   React.useEffect(() => { if (open) { setUrl(""); setDescription(""); setSel(events.map((e) => e.type)); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const valid = /^https?:\/\/.+/.test(url.trim()) && sel.length > 0;
   const create = useWrite(() => api<{ endpoint: WebhookEndpoint; secret: string }>("/admin/webhooks", { body: { url: url.trim(), description: description.trim() || undefined, events: sel } }), {
-    changes: ["webhook.changed"], success: "Endpoint added", onSuccess: (r) => onCreated(r.endpoint.id, r.secret),
+    changes: ["webhook.changed"], success: "Endpoint added", onSuccess: (r) => onCreated(r.endpoint.id, r.secret), quiet: isFieldError,
   });
+  const { reset } = create;
+  React.useEffect(() => { if (open) reset(); }, [open, reset]);
   return (
     <Modal open={open} onOpenChange={(o) => !o && onClose()} width={560} title="Add a webhook endpoint" description="JewelRoute sends a signed POST to this URL for every event you choose."
       footer={<><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn variant="primary" disabled={!valid || create.isPending} onClick={() => create.mutate(undefined)}>{create.isPending ? "Adding…" : "Add endpoint"}</Btn></>}>
       <div className="space-y-3.5">
-        <label className="block"><span className="mb-1.5 block text-[13px] font-medium text-ink">Endpoint URL</span><Input autoFocus value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://erp.example.in/hooks/jewelroute" className={cn("h-8 border-line-strong text-[13px]", mono)} /></label>
+        <label className="block"><span className="mb-1.5 block text-[13px] font-medium text-ink">Endpoint URL</span><Input autoFocus value={url} onChange={(e) => { setUrl(e.target.value); if (create.error) create.reset(); }} aria-invalid={isFieldError(create.error) || undefined} placeholder="https://erp.example.in/hooks/jewelroute" className={cn("h-8 border-line-strong text-[13px]", mono, isFieldError(create.error) && "border-danger")} /><UrlError error={create.error} /></label>
         <label className="block"><span className="mb-1.5 block text-[13px] font-medium text-ink">Description</span><Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Tally sync, WhatsApp alerts to the owner…" className="h-8 border-line-strong text-[14px]" /></label>
         <div><span className="mb-1.5 block text-[13px] font-medium text-ink">Events to send</span><EventChecklist value={sel} onChange={setSel} /></div>
       </div>
@@ -154,8 +172,8 @@ function SecretRow({ ep }: { ep: WebhookEndpoint }) {
       <span className="flex min-w-0 flex-wrap items-center gap-1.5">
         <code className={cn("min-w-0 truncate rounded-md bg-sunken px-1.5 py-0.5 text-[12.5px] text-ink", mono)}>{revealed ?? `whsec_${"•".repeat(12)}${ep.secretLast4}`}</code>
         {revealed && <CopyBtn text={revealed} />}
-        <Btn size="sm" icon={revealed ? EyeOffIcon : EyeIcon} onClick={reveal} disabled={loading}>{revealed ? "Hide" : "Reveal"}</Btn>
-        <Btn size="sm" icon={RefreshCwIcon} onClick={() => setConfirmRotate(true)}>Rotate</Btn>
+        <Btn size="sm" icon={revealed ? EyeOffIcon : EyeIcon} onClick={reveal} disabled={loading} aria-label={revealed ? "Hide" : "Reveal"}><span className="max-sm:sr-only">{revealed ? "Hide" : "Reveal"}</span></Btn>
+        <Btn size="sm" icon={RefreshCwIcon} onClick={() => setConfirmRotate(true)} aria-label="Rotate"><span className="max-sm:sr-only">Rotate</span></Btn>
       </span>
       <Modal open={confirmRotate} onOpenChange={setConfirmRotate} title="Rotate signing secret?" description="The current secret stops working immediately. Deliveries signed after this use the new secret, so update your receiver right away."
         footer={<><Btn variant="ghost" onClick={() => setConfirmRotate(false)}>Cancel</Btn><Btn variant="primary" className="bg-danger hover:bg-danger/90" disabled={rotate.isPending} onClick={() => rotate.mutate(undefined)}>Rotate secret</Btn></>} />
@@ -188,9 +206,12 @@ function EndpointHeader({ ep, onDeleted }: { ep: WebhookEndpoint; onDeleted: () 
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   React.useEffect(() => { setUrl(ep.url); setEvents(ep.events); setTestId(null); setEditingUrl(false); }, [ep.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const patch = useWrite((body: Partial<Pick<WebhookEndpoint, "url" | "events" | "active">>) => api(`/admin/webhooks/${ep.id}`, { method: "PATCH", body }), {
-    changes: ["webhook.changed"], success: (_r, b) => (b.active !== undefined ? (b.active ? "Endpoint enabled" : "Endpoint disabled. New deliveries are parked as dead letters.") : b.url ? "Endpoint URL saved" : "Event subscriptions saved"),
+    changes: ["webhook.changed"], success: (_r, b) => (b.active !== undefined ? (b.active ? "Endpoint enabled" : "Endpoint disabled. Events that happen while it is off are skipped, not queued.") : b.url ? "Endpoint URL saved" : "Event subscriptions saved"),
     onSuccess: () => { setEditingUrl(false); setEditEvents(false); },
+    // A rejected URL edit is shown under the field; toggles and event edits keep the toast.
+    quiet: (e, b) => b.url !== undefined && isFieldError(e),
   });
+  const urlError = patch.variables?.url !== undefined ? patch.error : null;
   const test = useWrite(() => api<{ delivery: Delivery }>(`/admin/webhooks/${ep.id}/test`, { method: "POST" }), { changes: ["webhook.changed"], onSuccess: (r) => setTestId(r.delivery.id) });
   const del = useWrite(() => api(`/admin/webhooks/${ep.id}`, { method: "DELETE" }), { changes: ["webhook.changed"], success: "Endpoint deleted", onSuccess: () => { setConfirmDelete(false); onDeleted(); } });
   const wildcard = ep.events.includes("*");
@@ -201,21 +222,24 @@ function EndpointHeader({ ep, onDeleted }: { ep: WebhookEndpoint; onDeleted: () 
         <span className="grid size-10 shrink-0 place-items-center rounded-[10px] border border-line bg-sunken text-ink-2"><RadioTowerIcon className="size-5" strokeWidth={1.6} /></span>
         <div className="min-w-0 flex-1">
           {editingUrl ? (
-            <form className="flex max-w-xl gap-1.5" onSubmit={(e) => { e.preventDefault(); if (/^https?:\/\/.+/.test(url.trim())) patch.mutate({ url: url.trim() }); }}>
-              <Input autoFocus value={url} onChange={(e) => setUrl(e.target.value)} className={cn("h-8 border-line-strong text-[13px]", mono)} />
-              <Btn type="submit" variant="primary" disabled={patch.isPending}>Save</Btn>
-              <Btn variant="ghost" onClick={() => { setUrl(ep.url); setEditingUrl(false); }}>Cancel</Btn>
+            <form className="max-w-xl" onSubmit={(e) => { e.preventDefault(); if (/^https?:\/\/.+/.test(url.trim())) patch.mutate({ url: url.trim() }); }}>
+              <div className="flex gap-1.5">
+                <Input autoFocus value={url} onChange={(e) => { setUrl(e.target.value); if (urlError) patch.reset(); }} aria-invalid={isFieldError(urlError) || undefined} className={cn("h-8 border-line-strong text-[13px]", mono, isFieldError(urlError) && "border-danger")} />
+                <Btn type="submit" variant="primary" disabled={patch.isPending}>Save</Btn>
+                <Btn variant="ghost" onClick={() => { setUrl(ep.url); setEditingUrl(false); patch.reset(); }}>Cancel</Btn>
+              </div>
+              <UrlError error={urlError} />
             </form>
           ) : (
             <h2 className={cn("truncate text-[15px] font-medium text-ink", mono)} title={ep.url}>{ep.url}</h2>
           )}
           <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-ink-2">
-            <Dot tone={ep.active ? "green" : "grey"} className="text-[13px]">{ep.active ? "Enabled" : "Disabled"}</Dot>
+            <Dot tone={!ep.active ? "grey" : ep.stats.failed24h ? "red" : "green"} className="text-[13px]">{!ep.active ? "Disabled" : ep.stats.failed24h ? `Enabled · failing (${ep.stats.failed24h} not delivered in 24 h)` : "Enabled · healthy"}</Dot>
             {ep.description && <><span className="text-ink-3">·</span><span>{ep.description}</span></>}
           </p>
         </div>
         <div className="flex items-center gap-1.5">
-          {!editingUrl && <Btn size="sm" icon={PencilIcon} onClick={() => setEditingUrl(true)}>Edit URL</Btn>}
+          {!editingUrl && <Btn size="sm" icon={PencilIcon} onClick={() => { patch.reset(); setEditingUrl(true); }}>Edit URL</Btn>}
           <Btn size="sm" variant="danger" icon={Trash2Icon} aria-label="Delete endpoint" onClick={() => setConfirmDelete(true)} />
         </div>
       </div>
@@ -225,7 +249,7 @@ function EndpointHeader({ ep, onDeleted }: { ep: WebhookEndpoint; onDeleted: () 
         <Property icon={CircleDotIcon} label="Status">
           <span className="flex flex-wrap items-center gap-2.5">
             <Switch checked={ep.active} onCheckedChange={(v) => patch.mutate({ active: v })} aria-label="Endpoint enabled" />
-            <span className="num text-[13px] text-ink-2">Last 24 h: {ep.stats.succeeded24h} delivered{ep.stats.failed24h ? <>, <span className="text-danger">{ep.stats.failed24h} failed</span></> : ", none failed"}</span>
+            <span className="num text-[13px] text-ink-2">Last 24 h: {ep.stats.succeeded24h} delivered{ep.stats.failed24h ? <>, <span className="text-danger">{ep.stats.failed24h} not delivered</span> (retrying or dead letter)</> : ""}</span>
           </span>
         </Property>
         <Property icon={ListChecksIcon} label="Events">
@@ -251,16 +275,18 @@ function EndpointHeader({ ep, onDeleted }: { ep: WebhookEndpoint; onDeleted: () 
 
 /* ---------------- deliveries ---------------- */
 function Deliveries({ endpointId, onOpen, openId }: { endpointId: string; onOpen: (id: string) => void; openId: string | null }) {
-  const [status, setStatus] = React.useState<"all" | Delivery["status"]>("all");
-  const [scope, setScope] = React.useState<"endpoint" | "all">("endpoint");
+  const [statusRaw, setStatus] = useUrlState("status", "all");
+  const status = (["all", "SUCCEEDED", "FAILED", "DEAD", "PENDING"].includes(statusRaw) ? statusRaw : "all") as "all" | Delivery["status"];
+  const [scopeRaw, setScope] = useUrlState("scope", "endpoint");
+  const scope = scopeRaw === "all" ? "all" : "endpoint";
   const q = useDeliveries(scope === "all" ? undefined : endpointId);
   const retry = useWrite((id: string) => api(`/admin/webhooks/deliveries/${id}/retry`, { method: "POST" }), { changes: ["webhook.changed"], success: "Retry sent" });
   const base = React.useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
   const rows = base.filter((d) => status === "all" || d.status === status);
   const n = (s: Delivery["status"]) => base.filter((d) => d.status === s).length;
   const cols: Col<Row>[] = [
-    { id: "event", header: "Event", accessorFn: (d) => d.eventType, meta: { icon: HashIcon, width: 190 }, cell: ({ row: { original: d } }) => <code className={cn("truncate text-[12.5px] text-ink", mono)}>{d.eventType}</code> },
-    { id: "endpoint", header: "Endpoint", accessorFn: (d) => d.endpointUrl ?? d.endpointId, meta: { icon: GlobeIcon, width: 190 }, cell: ({ row: { original: d } }) => <span className={cn("truncate text-[12.5px] text-ink-2", mono)} title={d.endpointUrl}>{host(d.endpointUrl) || d.endpointId}</span> },
+    { id: "event", header: "Event", accessorFn: (d) => d.eventType, meta: { icon: HashIcon, width: 200 }, cell: ({ row: { original: d } }) => <code className={cn("truncate text-[12.5px] text-ink", mono)}>{d.eventType}</code> },
+    ...(scope === "all" ? [{ id: "endpoint", header: "Endpoint", accessorFn: (d: Row) => d.endpointUrl ?? d.endpointId, meta: { icon: GlobeIcon, width: 220 }, cell: ({ row: { original: d } }: { row: { original: Row } }) => <span className={cn("truncate text-[12.5px] text-ink-2", mono)} title={d.endpointUrl}>{host(d.endpointUrl) || d.endpointId}</span> } as Col<Row>] : []),
     { id: "http", header: "HTTP", accessorFn: (d) => d.lastStatusCode ?? 0, meta: { icon: CodeXmlIcon, width: 76 }, cell: ({ row: { original: d } }) => (d.lastStatusCode != null ? <span className={cn("num font-medium", d.lastStatusCode < 300 ? "text-verified" : "text-danger")}>{d.lastStatusCode}</span> : d.lastError ? <span className="text-[12.5px] text-danger" title={d.lastError}>ERR</span> : <Muted />) },
     { id: "latency", header: "Latency", accessorFn: (d) => d.lastLatencyMs ?? -1, meta: { icon: TimerIcon, width: 90, align: "right" }, cell: ({ row: { original: d } }) => (d.lastLatencyMs != null ? <span className="num">{d.lastLatencyMs} ms</span> : <Muted />) },
     { id: "attempt", header: "Attempt", accessorFn: (d) => d.attempts, meta: { icon: RotateCcwIcon, width: 90, align: "right" }, cell: ({ row: { original: d } }) => <span className="num">{d.attempts}<span className="text-ink-3"> / 7</span></span> },
@@ -324,9 +350,10 @@ function DeliverySheet({ id, onClose }: { id: string; onClose: () => void }) {
   if (d && !isReal) { headers["X-JewelRoute-Timestamp"] = "<unix seconds, per attempt>"; headers["X-JewelRoute-Signature"] = "sha256=<HMAC-SHA256(secret, timestamp + \".\" + body)>"; }
   return (
     <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="gap-0 overflow-y-auto p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[620px]">
+      <SheetContent showCloseButton={false} className="gap-0 overflow-y-auto p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[620px]">
         <SheetHeader className="sticky top-0 z-10 gap-1 border-b border-line bg-white px-5 py-4">
-          <SheetTitle className={cn("text-[15px] font-medium text-ink", mono)}>{d?.eventType ?? "Delivery"}</SheetTitle>
+          <button type="button" aria-label="Close delivery" onClick={onClose} className="press absolute right-3 top-3 grid size-7 place-items-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"><XIcon className="size-4" /></button>
+          <SheetTitle className={cn("pr-8 text-[15px] font-medium text-ink", mono)}>{d?.eventType ?? "Delivery"}</SheetTitle>
           <SheetDescription className={cn("text-[12px] text-ink-3", mono)}>{id}</SheetDescription>
           {d && <div className="flex flex-wrap items-center gap-2 pt-1"><Dot tone={STATUS[d.status][0]}>{STATUS[d.status][1]}</Dot>{statusDetail(d) && <span className="text-[13px] text-ink-3">{statusDetail(d)}</span>}{(d.status === "FAILED" || d.status === "DEAD") && <Btn size="sm" variant="primary" icon={RotateCcwIcon} className="ml-auto" disabled={retry.isPending} onClick={() => retry.mutate(undefined)}>{retry.isPending ? "Retrying…" : "Retry now"}</Btn>}</div>}
         </SheetHeader>
@@ -449,10 +476,15 @@ export function IntegrationsPage() {
 
 function IntegrationsBody() {
   const q = useWebhooks();
-  const [selected, setSelected] = React.useState<string | null>(null);
+  // Endpoint, open delivery and filters live in the URL so refresh / Back keep them.
+  const [selectedRaw, setSelectedRaw] = useUrlState("endpoint");
+  const selected = selectedRaw || null;
+  const setSelected = (id: string | null) => setSelectedRaw(id ?? "");
   const [adding, setAdding] = React.useState(false);
   const [created, setCreated] = React.useState<string | null>(null);
-  const [delivery, setDelivery] = React.useState<string | null>(null);
+  const [deliveryRaw, setDeliveryRaw] = useUrlState("delivery");
+  const delivery = deliveryRaw || null;
+  const setDelivery = (id: string | null) => setDeliveryRaw(id ?? "");
   const tab = useTab("deliveries");
   const eps = q.data ?? [];
   const ep = eps.find((e) => e.id === selected) ?? eps.find((e) => e.active) ?? eps[0];
@@ -470,7 +502,7 @@ function IntegrationsBody() {
       ) : (
         <>
           <ViewBar right={<span className="hidden text-[13px] text-ink-2 md:inline">Webhooks · <span className="num">{eps.length}</span> endpoint{eps.length === 1 ? "" : "s"}</span>}>
-            <ViewTabs value={ep.id} onChange={setSelected} items={eps.map((e) => ({ value: e.id, label: host(e.url).replace(/\/v1\/dev\/webhook-receiver\/.*/, " · built-in receiver").slice(0, 44), count: e.stats.failed24h || undefined }))} />
+            <ViewTabs value={ep.id} onChange={setSelected} items={eps.map((e) => ({ value: e.id, label: endpointLabel(e), icon: !e.active ? PauseCircleIcon : e.stats.failed24h ? AlertCircleIcon : undefined, count: e.stats.failed24h || undefined }))} />
           </ViewBar>
           <EndpointHeader key={ep.id} ep={ep} onDeleted={() => setSelected(null)} />
           <RecordTabs tabs={[

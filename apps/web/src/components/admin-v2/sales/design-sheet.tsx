@@ -4,8 +4,9 @@
 import * as React from "react";
 import Link from "next/link";
 import { ArchiveRestoreIcon, PackagePlusIcon, SendIcon } from "lucide-react";
-import { formatGrams, formatINR, formatRate, priceDesign, PURITY_LABEL } from "@jewelroute/shared";
+import { formatGrams, formatINR, formatRate, parseRupeesToPaise, priceDesign, PURITY_LABEL } from "@jewelroute/shared";
 import { api } from "@/lib/api";
+import { useOpKey } from "@/lib/op-key";
 import type { Purity } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Btn } from "@/components/app/chrome";
@@ -24,6 +25,12 @@ const toF = (d?: AdminDesign | null): F => d ? {
   makingType: d.makingChargeType, making: String(d.makingChargeValue / 100), stone: String(d.stoneValuePaise / 100), image: d.imageUrls[0] ?? "", description: d.description ?? "",
 } : { sku: "", name: "", category: "Bangles", collection: "", purity: "K22", gross: "", net: "", makingType: "PER_GRAM", making: "450", stone: "0", image: "", description: "" };
 
+/** "19.25" g → 19250 mg (up to 3 decimals), else null. */
+function gramsToMg(v: string): number | null {
+  const m = /^(\d{1,6})(?:\.(\d{1,3}))?$/.exec(v.trim());
+  return m ? Number(m[1]) * 1000 + Number((m[2] ?? "").padEnd(3, "0")) : null;
+}
+
 const statusOf = (t: string): PieceStatus => (t === "VAULT" ? "IN_VAULT" : t === "AGENT" ? "WITH_AGENT" : t === "SHOP" ? "ON_MEMO" : (t as PieceStatus));
 
 function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
@@ -40,21 +47,25 @@ export function DesignSheet({ design, onClose }: { design: AdminDesign | null; o
   const [dialog, setDialog] = React.useState<"issue" | "return" | null>(null);
   const set = (k: keyof F) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
 
-  const netMg = Math.round(parseFloat(f.net) * 1000), grossMg = Math.round(parseFloat(f.gross) * 1000);
-  const makingValue = Math.round(parseFloat(f.making) * 100); // PER_GRAM: paise/g; PERCENT: basis points
+  // Integer mg / paise / basis points straight from the typed digits — no float maths on money or weight.
+  const netMg = gramsToMg(f.net) ?? NaN, grossMg = gramsToMg(f.gross) ?? NaN;
+  const makingValue = parseRupeesToPaise(f.making) ?? NaN; // PER_GRAM: paise/g; PERCENT: basis points (12.5 % → 1250)
+  const stonePaise = parseRupeesToPaise(f.stone || "0") ?? NaN;
   const rate = rates.data?.current.find((r) => r.purity === f.purity);
-  const preview = rate && netMg > 0 && Number.isFinite(makingValue) ? priceDesign({ netWeightMg: netMg, ratePaisePerGram: rate.ratePaisePerGram, makingChargeType: f.makingType, makingChargeValue: makingValue, stoneValuePaise: Math.round(parseFloat(f.stone || "0") * 100), otherComponents: design?.otherComponents }) : null;
-  const valid = !!(f.sku.trim() && f.name.trim() && f.category.trim() && netMg > 0 && grossMg >= netMg && Number.isFinite(makingValue));
+  const preview = rate && netMg > 0 && Number.isFinite(makingValue) && Number.isFinite(stonePaise) ? priceDesign({ netWeightMg: netMg, ratePaisePerGram: rate.ratePaisePerGram, makingChargeType: f.makingType, makingChargeValue: makingValue, stoneValuePaise: stonePaise, otherComponents: design?.otherComponents }) : null;
+  // The API requires a collection (1–100 chars); say so here instead of a generic validation error.
+  const valid = !!(f.sku.trim() && f.name.trim() && f.category.trim() && f.collection.trim() && netMg > 0 && grossMg >= netMg && Number.isFinite(makingValue) && Number.isFinite(stonePaise));
   const body = {
     sku: f.sku.trim(), name: f.name.trim(), category: f.category.trim(), collection: f.collection.trim(), purity: f.purity, grossWeightMg: grossMg, netWeightMg: netMg,
-    makingChargeType: f.makingType, makingChargeValue: makingValue, stoneValuePaise: Math.round(parseFloat(f.stone || "0") * 100),
+    makingChargeType: f.makingType, makingChargeValue: makingValue, stoneValuePaise: stonePaise,
     imageUrls: f.image.trim() ? [f.image.trim(), ...(design?.imageUrls.slice(1) ?? [])] : design?.imageUrls ?? [], description: f.description.trim() || undefined, otherComponents: design?.otherComponents ?? [],
   };
   const save = useWrite(() => (design ? api(`/admin/designs/${design.id}`, { method: "PATCH", body }) : api("/admin/designs", { body })), {
     changes: ["design.saved"], success: design ? `${f.name} saved` : `${f.name} added to the catalog`, onSuccess: () => { if (!design) onClose(); },
   });
-  const intake = useWrite(() => api(`/admin/designs/${design!.id}/pieces`, { body: { count: parseInt(count, 10) } }), {
-    changes: ["design.saved", "piece.moved"], success: () => `${count} piece${count === "1" ? "" : "s"} taken into the vault`,
+  const intakeOp = useOpKey();
+  const intake = useWrite(() => { const body = { count: parseInt(count, 10) }; return api(`/admin/designs/${design!.id}/pieces`, { body, idempotencyKey: intakeOp.keyFor({ design: design!.id, ...body }) }); }, {
+    changes: ["design.saved", "piece.moved"], success: () => `${count} piece${count === "1" ? "" : "s"} taken into the vault`, onSuccess: () => intakeOp.done(),
   });
   const pieces = design?.pieces ?? [];
   const selPieces = pieces.filter((p) => sel.has(p.id));
@@ -141,7 +152,7 @@ export function DesignSheet({ design, onClose }: { design: AdminDesign | null; o
                 <Select value={f.purity} onValueChange={(v) => setF({ ...f, purity: v as Purity })}><SelectTrigger className="h-8 w-full border-line-strong"><SelectValue /></SelectTrigger><SelectContent>{(["K24", "K22", "K18", "K14"] as Purity[]).map((p) => <SelectItem key={p} value={p}>{PURITY_LABEL[p]}</SelectItem>)}</SelectContent></Select>
               </Field>
               <Field label="Category"><Input value={f.category} onChange={set("category")} className={inputCls} /></Field>
-              <Field label="Collection"><Input value={f.collection} onChange={set("collection")} placeholder="Rajwada" className={inputCls} /></Field>
+              <Field label="Collection"><Input value={f.collection} onChange={set("collection")} placeholder="Rajwada" required aria-invalid={!f.collection.trim() && !!f.name.trim()} className={inputCls} /></Field>
               <Field label="Gross weight (g)"><Input inputMode="decimal" value={f.gross} onChange={set("gross")} className={inputCls} /></Field>
               <Field label="Net gold weight (g)"><Input inputMode="decimal" value={f.net} onChange={set("net")} className={inputCls} /></Field>
               <Field label="Making charge">
@@ -152,6 +163,8 @@ export function DesignSheet({ design, onClose }: { design: AdminDesign | null; o
               <Field label="Image URL"><Input value={f.image} onChange={set("image")} placeholder="https://…" className={inputCls} /></Field>
               <Field label="Description" className="col-span-2"><Textarea value={f.description} onChange={set("description")} className="min-h-16 border-line-strong text-[14px]" /></Field>
               {grossMg > 0 && netMg > grossMg && <p className="col-span-2 text-[13px] text-danger">Net gold weight can&apos;t be more than the gross weight.</p>}
+              {f.name.trim() && !f.collection.trim() && <p className="col-span-2 text-[13px] text-ink-2">Add a collection (e.g. Rajwada) — every design belongs to one.</p>}
+              {[f.gross, f.net].some((x) => x.trim() && gramsToMg(x) == null) && <p className="col-span-2 text-[13px] text-danger">Weights are grams with up to 3 decimals, e.g. 19.25.</p>}
               <div className="col-span-2 flex justify-end gap-2 pt-1">
                 <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
                 <Btn variant="primary" type="submit" disabled={!valid || save.isPending}>{save.isPending ? "Saving…" : design ? "Save design" : "Add design"}</Btn>

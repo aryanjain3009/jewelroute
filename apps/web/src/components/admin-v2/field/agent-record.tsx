@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import type { Piece, PieceRow } from "@/lib/types";
 import { Avatar, Btn, Empty } from "@/components/app/chrome";
 import { Highlight, Highlights, ListCard, MainSection, Property, PropertySection, RecordHeader, RecordLayout, RecordTabs, useTab } from "@/components/app/record";
-import { Timeline } from "@/components/app/timeline";
+import { ActivityFeed } from "@/components/app/activity-feed";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { JrMap } from "@/components/admin/map-lazy";
@@ -28,12 +28,14 @@ import { AgentActiveDialog, AssignVisitDialog, errMsg, useUnassign } from "./dia
 import { AGENT_STATE, agentState } from "./agents-list";
 import { MemoRow, OrderRow } from "./visit-record";
 import { PieceLine } from "./shop-record";
-import { LinkBtn, PROOF, QueryError, RecordSkeleton, StatusChip, StatusDot, VISIT_STATUS, fmtDist, istTime, mediaUrl, relDay, toTimeline, wallTime } from "./ui";
+import { LinkBtn, PROOF, QueryError, RecordSkeleton, StatusChip, StatusDot, VISIT_STATUS, fmtDist, istTime, mediaUrl, relDay, wallTime } from "./ui";
+import { useDocTitle } from "@/lib/title";
+import { SIMULATED_LOCATION } from "@/components/app/status";
 
 export function AgentRecord({ id }: { id: string }) {
   const q = useAgentRecord(id);
+  useDocTitle(q.data?.agent.name);
   const tab = useTab("route");
-  const router = useRouter();
   const [assignOpen, setAssignOpen] = React.useState(false);
   const [issueOpen, setIssueOpen] = React.useState(false);
   const [activeOpen, setActiveOpen] = React.useState(false);
@@ -42,16 +44,19 @@ export function AgentRecord({ id }: { id: string }) {
   const d = q.data;
   const a = d.agent;
   const done = d.today.filter((v) => v.status === "COMPLETED").length;
+  // A removed stop is CANCELLED: still listed on the route, never counted (the API's today.planned excludes it too).
+  const planned = d.today.filter((v) => v.status !== "CANCELLED").length;
   const open = d.today.find((v) => v.status === "CHECKED_IN" || v.status === "ACTIVE");
   const ordersToday = d.orders.filter((o) => istDate(new Date(o.createdAt)) === istDate() && o.status !== "REJECTED");
   const bagValue = d.bag.reduce((s, p) => s + p.valuePaise, 0);
   const memoValue = d.memos.reduce((s, m) => s + m.outstandingValuePaise, 0);
   const overdue = d.memos.filter((m) => m.displayStatus === "OVERDUE");
-  const state = agentState({ active: a.active, currentVisit: open?.shop.name, today: { planned: d.today.length, completed: done } });
+  const state = agentState({ active: a.active, currentVisit: open?.shop.name, today: { planned, completed: done } });
 
   return (
     <RecordLayout
       back={{ href: "/admin/agents", label: "Agents" }}
+      crumb={a.name}
       panel={<>
         <RecordHeader
           lead={<Avatar name={a.name} size={40} />}
@@ -70,7 +75,7 @@ export function AgentRecord({ id }: { id: string }) {
           <Property icon={PhoneIcon} label="Phone">{a.phone && <a href={`tel:${a.phone.replace(/\s/g, "")}`} className="num hover:underline">{a.phone}</a>}</Property>
           <Property icon={HomeIcon} label="Home area">{a.homeArea}</Property>
           <Property icon={CircleDotIcon} label="Account">{a.active ? <span className="text-ink">Active · can sign in</span> : <span className="text-danger">Deactivated</span>}</Property>
-          <Property icon={TrendingUpIcon} label="Today">{d.today.length > 0 && <span className="num">{done} of {d.today.length} visits done</span>}</Property>
+          <Property icon={TrendingUpIcon} label="Today">{planned > 0 && <span className="num">{done} of {planned} visits done</span>}</Property>
           <Property icon={StoreIcon} label="Current visit">{open && <Link href={`/admin/visits/${open.id}`} className="hover:underline">{open.shop.name}<span className="text-ink-3"> · since {istTime(open.checkInAt)}</span></Link>}</Property>
           <Property icon={GemIcon} label="Bag">{d.bag.length > 0 && <span className="num text-gold-ink">{d.bag.length} pieces · {formatINRCompact(bagValue)}</span>}</Property>
           <Property icon={ScrollTextIcon} label="Open memos">{d.memos.length > 0 && <span className="num"><span className="text-gold-ink">{d.memos.length} · {formatINRCompact(memoValue)}</span>{overdue.length > 0 && <span className="text-danger"> · {overdue.length} overdue</span>}</span>}</Property>
@@ -79,7 +84,7 @@ export function AgentRecord({ id }: { id: string }) {
       </>}
     >
       <RecordTabs param="tab" tabs={[
-        { value: "route", label: "Today's route", icon: RouteIcon, count: d.today.length },
+        { value: "route", label: "Today's route", icon: RouteIcon, count: planned },
         { value: "bag", label: "Bag", icon: GemIcon, count: d.bag.length },
         { value: "memos", label: "Memos", icon: ScrollTextIcon, count: d.memos.length },
         { value: "orders", label: "Orders", icon: ReceiptTextIcon, count: d.orders.length },
@@ -90,10 +95,10 @@ export function AgentRecord({ id }: { id: string }) {
         <div className="pb-10">
           <MainSection title="Highlights">
             <Highlights>
-              <Highlight label="Route progress" icon={TrendingUpIcon} sub={open ? `In visit at ${open.shop.name}` : d.today.length ? `${d.today.length - done} to go` : undefined}>
-                {d.today.length ? <span className="num">{done} / {d.today.length}</span> : <span className="text-ink-3">No route today</span>}
+              <Highlight label="Route progress" icon={TrendingUpIcon} sub={open ? `In visit at ${open.shop.name}` : planned ? `${planned - done} to go` : undefined}>
+                {planned ? <span className="num">{done} / {planned}</span> : <span className="text-ink-3">No route today</span>}
               </Highlight>
-              <Highlight label="Orders today" icon={ReceiptTextIcon} sub={`${ordersToday.length} order${ordersToday.length === 1 ? "" : "s"} · excl. rejected`}>
+              <Highlight label="Orders today" icon={ReceiptTextIcon} sub={`${ordersToday.length ? `${ordersToday.length} today · ` : ""}${d.orders.length} in total · excl. rejected`}>
                 {ordersToday.length ? formatINRCompact(ordersToday.reduce((s, o) => s + o.totalPaise, 0)) : <span className="text-ink-3">None yet</span>}
               </Highlight>
               <Highlight label="In the bag" icon={GemIcon} tone={d.bag.length ? "gold" : undefined} sub={`${d.bag.length} piece${d.bag.length === 1 ? "" : "s"} · at today's rate`}>
@@ -120,7 +125,7 @@ export function AgentRecord({ id }: { id: string }) {
       {tab === "activity" && (
         <div className="px-6 py-5">
           <h2 className="mb-4 text-[15px] font-medium text-ink">Activity</h2>
-          <Timeline items={toTimeline(d.activity, (h) => router.push(h), { proofs: true })} empty={<Empty icon={ActivityIcon} title="No activity yet" hint="Check-ins, proofs, orders and memos by this agent appear here." />} />
+          <ActivityFeed filter={{ agentId: a.id }} selfId={a.id} empty={<Empty icon={ActivityIcon} title="No activity yet" hint="Check-ins, proofs, orders and memos by this agent appear here." />} />
         </div>
       )}
       <AssignVisitDialog open={assignOpen} onOpenChange={setAssignOpen} agentId={a.id} />
@@ -158,7 +163,7 @@ function RouteView({ visits }: { visits: VRow[] }) {
                 <span className="block truncate text-[12.5px] text-ink-3">{v.shop.area}{v.plannedTime ? ` · planned ${wallTime(v.plannedTime)}` : ""}{v.checkInAt ? ` · in ${istTime(v.checkInAt)}` : ""}{v.completedAt ? ` · out ${istTime(v.completedAt)}` : ""}</span>
               </span>
               <span className="hidden w-[130px] shrink-0 md:block">{v.proofState !== "NOT_STARTED" ? <StatusDot map={PROOF} value={v.proofState} className="text-[13px]" /> : null}</span>
-              <span className="num hidden w-12 shrink-0 text-right text-[13px] text-ink-2 sm:block">{fmtDist(v.checkInDistanceM) ?? ""}</span>
+              <span className="num hidden w-12 shrink-0 text-right text-[13px] text-ink-2 sm:block">{v.verification === "SIMULATED" ? <span className="text-ink-3" title={SIMULATED_LOCATION}>—</span> : fmtDist(v.checkInDistanceM) ?? ""}</span>
               <span className="w-[100px] shrink-0"><StatusDot map={VISIT_STATUS} value={v.status} className="text-[13px]" /></span>
             </Link>
             <span className="w-8 shrink-0">

@@ -1,30 +1,36 @@
 "use client";
-/** Shop record — the living business record of a retailer: who covers it, what is outstanding,
- *  which physical samples sit there, and everything that happened at the counter. */
+/** Shop record — a real CRM record for a retailer (Attio company record): who covers it, what it owes
+ *  and how much credit is left (API CreditPosition), which physical samples sit there, and every event
+ *  at the counter from the one activity feed. Tabs: Overview · Visits · Orders · Memos · Activity. */
+import { useDocTitle } from "@/lib/title";
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  ActivityIcon, CalendarClockIcon, ClockIcon, CompassIcon, CreditCardIcon, GemIcon, LayoutGridIcon, MapPinIcon, MapPinnedIcon, NavigationIcon,
-  PencilIcon, PhoneIcon, ReceiptTextIcon, ScrollTextIcon, UserIcon, UserRoundIcon,
+  ActivityIcon, CalendarClockIcon, ClockIcon, CompassIcon, CreditCardIcon, GaugeIcon, GemIcon, LayoutGridIcon, MapPinIcon, MapPinnedIcon, NavigationIcon,
+  PencilIcon, PhoneIcon, ReceiptTextIcon, ScrollTextIcon, UserIcon, UserRoundIcon, WalletIcon,
 } from "lucide-react";
-import { formatINRCompact, istDate, PURITY_LABEL } from "@jewelroute/shared";
+import { formatINR, formatINRCompact, istDate, PURITY_LABEL } from "@jewelroute/shared";
 import { cn } from "@/lib/utils";
-import type { PieceRow } from "@/lib/types";
+import type { CreditPosition, PieceRow } from "@/lib/types";
 import { Avatar, Btn, Empty } from "@/components/app/chrome";
 import { Highlight, Highlights, ListCard, ListRow, MainSection, Property, PropertySection, RecordHeader, RecordLayout, RecordTabs, useTab } from "@/components/app/record";
-import { Timeline } from "@/components/app/timeline";
+import { ActivityFeed } from "@/components/app/activity-feed";
+import { ExposureBar } from "@/components/app/credit";
+import { isPendingApproval, ORDER_STATUS, SIMULATED_LOCATION } from "@/components/app/status";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAgentOptions, useShopRecord, type ShopRec, type VRow } from "./data";
 import { AssignVisitDialog, ShopSheet, useSetShopAgent } from "./dialogs";
 import { MemoRow, OrderRow } from "./visit-record";
+import { MiniTable, MTd } from "@/components/admin-v2/sales/ui";
 import {
-  LinkBtn, PIECE_STATUS, PROOF, QueryError, RecordSkeleton, SHOP_STATUS, StatusChip, StatusDot, VISIT_STATUS, daysAgo, fmtCoord, fmtDist,
-  istDay, istTime, mediaUrl, relDay, toTimeline, wallTime,
+  LinkBtn, PIECE_STATUS, PROOF, QueryError, RecordSkeleton, SHOP_STATUS, StatusChip, StatusDot, VISIT_STATUS, fmtCoord, fmtDist,
+  istDay, istTime, mediaUrl, relDay, wallTime,
 } from "./ui";
 
 export function ShopRecord({ id }: { id: string }) {
   const q = useShopRecord(id);
+  useDocTitle(q.data?.shop.name);
   const tab = useTab("overview");
   const router = useRouter();
   const [assignOpen, setAssignOpen] = React.useState(false);
@@ -33,13 +39,19 @@ export function ShopRecord({ id }: { id: string }) {
   if (q.error || !q.data) return <QueryError error={q.error} retry={() => q.refetch()} />;
   const d = q.data;
   const s = d.shop;
-  const go = (h: string) => router.push(h);
-  const openMemos = d.memos.filter((m) => m.status === "ACTIVE" || m.status === "PARTIALLY_RETURNED");
   const setTab = (t: string) => router.replace(`/admin/shops/${id}?tab=${t}`, { scroll: false });
+  // Open orders = waiting for a decision, or confirmed/approved and not yet settled (the API's settledAt).
+  const openOrders = d.orders.filter((o) => isPendingApproval(o.status) || ((o.status === "CONFIRMED" || o.status === "APPROVED") && !o.settledAt));
+  // Outstanding (API) = opening balance + unsettled CONFIRMED/APPROVED orders; a pending order is not owed
+  // yet. The sub-line counts exactly the orders that are summed, and names pending ones separately.
+  const unsettled = d.orders.filter((o) => (o.status === "CONFIRMED" || o.status === "APPROVED") && !o.settledAt);
+  const pendingCount = d.orders.filter((o) => isPendingApproval(o.status)).length; // listed under Open orders, not owed yet
+  const c = s.credit;
 
   return (
     <RecordLayout
       back={{ href: "/admin/shops", label: "Shops" }}
+      crumb={s.name}
       panel={<Panel d={d} onAssign={() => setAssignOpen(true)} onEdit={() => setEditOpen(true)} />}
     >
       <RecordTabs tabs={[
@@ -47,91 +59,116 @@ export function ShopRecord({ id }: { id: string }) {
         { value: "visits", label: "Visits", icon: MapPinnedIcon, count: d.visits.length },
         { value: "orders", label: "Orders", icon: ReceiptTextIcon, count: d.orders.length },
         { value: "memos", label: "Memos", icon: ScrollTextIcon, count: d.memos.length },
-        { value: "samples", label: "Samples", icon: GemIcon, count: d.pieces.length },
-        { value: "activity", label: "Activity", icon: ActivityIcon, count: d.activity.length },
+        { value: "activity", label: "Activity", icon: ActivityIcon },
       ]} />
 
       {tab === "overview" && (
         <div className="pb-10">
+          <MainSection title="Credit position" action={c?.overLimit ? <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-danger"><span className="size-1.5 rounded-full bg-danger" />Over credit limit</span> : undefined}>
+            <CreditBlock c={c} limitPaise={s.creditLimitPaise} unsettled={unsettled.length} pending={pendingCount} memoCount={s.activeMemoCount} />
+          </MainSection>
+
           <MainSection title="Highlights">
             <Highlights>
-              <Highlight label="Outstanding orders" icon={ReceiptTextIcon} sub={s.openOrdersPaise && s.creditLimitPaise ? `${Math.round((s.openOrdersPaise / s.creditLimitPaise) * 100)}% of ${formatINRCompact(s.creditLimitPaise)} credit limit` : `Credit limit ${formatINRCompact(s.creditLimitPaise)}`}
-                tone={s.creditLimitPaise && s.openOrdersPaise > s.creditLimitPaise ? "danger" : undefined}>
-                {s.openOrdersPaise ? formatINRCompact(s.openOrdersPaise) : <span className="text-ink-3">None</span>}
-              </Highlight>
-              <Highlight label="Active memos" icon={ScrollTextIcon} tone={s.status === "MEMO_OVERDUE" ? "danger" : s.activeMemoCount ? "gold" : undefined}
-                sub={s.activeMemoCount ? `${s.activeMemoCount} memo${s.activeMemoCount > 1 ? "s" : ""}${s.status === "MEMO_OVERDUE" ? " · overdue" : ""} · value at handover` : "Nothing on memo"}>
-                {s.activeMemoCount ? formatINRCompact(s.activeMemoValuePaise) : <span className="text-ink-3">None</span>}
-              </Highlight>
               <Highlight label="Samples here" icon={GemIcon} tone={s.samplesHereCount ? "gold" : undefined} sub={s.samplesHereCount ? `${s.samplesHereCount} piece${s.samplesHereCount > 1 ? "s" : ""} · at today's rate` : "No pieces at this shop"}>
                 {s.samplesHereCount ? formatINRCompact(s.samplesHereValuePaise) : <span className="text-ink-3">None</span>}
               </Highlight>
-              <Highlight label="Last visit" icon={ClockIcon} sub={s.lastVisitAgent?.name} tone={(daysAgo(s.lastVisitAt) ?? 0) > 30 ? "warn" : undefined}>
-                {relDay(s.lastVisitAt) ?? <span className="text-ink-3">Never visited</span>}
+              <Highlight label="Active memos" icon={ScrollTextIcon} tone={s.status === "MEMO_OVERDUE" ? "danger" : s.activeMemoCount ? "gold" : undefined}
+                sub={s.activeMemoCount ? `${s.activeMemoCount} memo${s.activeMemoCount > 1 ? "s" : ""}${s.status === "MEMO_OVERDUE" ? " · overdue" : ""} · at handover` : "Nothing on memo"}>
+                {s.activeMemoCount ? formatINRCompact(s.activeMemoValuePaise) : <span className="text-ink-3">None</span>}
               </Highlight>
-              <Highlight label="Next visit" icon={CalendarClockIcon} sub={s.nextVisit?.agent.name}>
-                {s.nextVisit ? <>{s.nextVisit.date === istDate() ? "Today" : istDay(s.nextVisit.date)}{s.nextVisit.plannedTime && `, ${wallTime(s.nextVisit.plannedTime)}`}</> : <span className="text-ink-3">Not planned</span>}
-              </Highlight>
-              <Highlight label="Assigned agent" icon={UserIcon} sub={s.assignedAgent ? "Covers this shop" : "Pick one in the details panel"}>
-                {s.assignedAgent ? <Link href={`/admin/agents/${s.assignedAgent.id}`} className="inline-flex items-center gap-2 hover:underline"><Avatar name={s.assignedAgent.name} size={20} />{s.assignedAgent.name}</Link> : <span className="text-ink-3">Unassigned</span>}
-              </Highlight>
+              {s.lastOrder && (
+                <Highlight label="Last order" icon={ReceiptTextIcon} sub={<span className="inline-flex items-center gap-1.5"><span className="num">{s.lastOrder.number}</span><span className="text-ink-3">·</span>{ORDER_STATUS[s.lastOrder.status]?.[1] ?? s.lastOrder.status}</span>}>
+                  <Link href={`/admin/orders/${s.lastOrder.id}`} className="num decoration-ink-3 decoration-dotted underline-offset-4 hover:underline">{formatINRCompact(s.lastOrder.totalPaise)}<span className="font-normal text-ink-3"> · {istDay(s.lastOrder.createdAt)}</span></Link>
+                </Highlight>
+              )}
             </Highlights>
           </MainSection>
 
-          <MainSection title="Activity" action={<button type="button" onClick={() => setTab("activity")} className="text-[13px] text-ink-2 hover:text-ink">View all</button>}>
-            {d.activity.length ? (
-              <ListCard className="px-3.5 py-3">
-                <Timeline grouped={false} items={toTimeline(d.activity.slice(0, 4), go)} />
-              </ListCard>
-            ) : <p className="text-[13px] text-ink-3">Nothing has happened at this shop yet.</p>}
+          <MainSection title="Recent activity" action={<button type="button" onClick={() => setTab("activity")} className="rounded-md px-1.5 py-0.5 text-[13px] text-ink-2 transition-colors hover:bg-hover hover:text-ink">View all</button>}>
+            <ActivityFeed framed filter={{ shopId: s.id }} selfId={s.id} compact max={5} empty={<p className="text-[13px] text-ink-3">Nothing has happened at this shop yet.</p>} />
           </MainSection>
 
-          <MainSection title="Memos" count={openMemos.length} action={d.memos.length > openMemos.length ? <button type="button" onClick={() => setTab("memos")} className="text-[13px] text-ink-2 hover:text-ink">All {d.memos.length}</button> : undefined}>
-            {openMemos.length ? <ListCard>{openMemos.map((m) => <MemoRow key={m.id} m={m} />)}</ListCard> : <p className="text-[13px] text-ink-3">No open memos. Samples left with this shop appear here.</p>}
+          <MainSection title="Samples here" count={d.pieces.length} action={d.pieces.length ? <Link href={`/admin/samples?shop=${s.id}`} className="rounded-md px-1.5 py-0.5 text-[13px] text-ink-2 transition-colors hover:bg-hover hover:text-ink">Open in Samples</Link> : undefined}>
+            {d.pieces.length ? <ListCard>{d.pieces.map((p) => <PieceLine key={p.id} p={p} />)}</ListCard> : <p className="text-[13px] text-ink-3">No pieces are at this shop. Pieces left on memo appear here until they come back or are sold.</p>}
           </MainSection>
 
-          <MainSection title="Orders" count={d.orders.length} action={d.orders.length > 5 ? <button type="button" onClick={() => setTab("orders")} className="text-[13px] text-ink-2 hover:text-ink">View all</button> : undefined}>
-            {d.orders.length ? <ListCard>{d.orders.slice(0, 5).map((o) => <OrderRow key={o.id} o={o} />)}</ListCard> : <p className="text-[13px] text-ink-3">No orders from this shop yet.</p>}
+          <MainSection title="Open orders" count={openOrders.length} action={d.orders.length > openOrders.length ? <button type="button" onClick={() => setTab("orders")} className="rounded-md px-1.5 py-0.5 text-[13px] text-ink-2 transition-colors hover:bg-hover hover:text-ink">All {d.orders.length}</button> : undefined}>
+            {openOrders.length ? <ListCard>{openOrders.map((o) => <OrderRow key={o.id} o={o} />)}</ListCard> : <p className="text-[13px] text-ink-3">No open orders — everything booked here is settled or decided.</p>}
           </MainSection>
         </div>
       )}
 
       {tab === "visits" && (
         <MainSection title="Visits" count={d.visits.length} action={<Btn size="sm" icon={MapPinnedIcon} onClick={() => setAssignOpen(true)}>Assign visit</Btn>}>
-          {d.visits.length ? <VisitList visits={d.visits} /> : <ListCard><Empty icon={MapPinnedIcon} title="No visits in the last 30 days" hint="Plan one so an agent drops by." action={<Btn icon={MapPinnedIcon} onClick={() => setAssignOpen(true)}>Assign visit</Btn>} /></ListCard>}
+          {d.visits.length ? <VisitList visits={d.visits} /> : <p className="text-[13px] text-ink-3">No visits in the last 30 days. Assign one so an agent drops by.</p>}
         </MainSection>
       )}
       {tab === "orders" && (
         <MainSection title="Orders" count={d.orders.length}>
-          {d.orders.length ? <ListCard>{d.orders.map((o) => <OrderRow key={o.id} o={o} />)}</ListCard> : <ListCard><Empty icon={ReceiptTextIcon} title="No orders yet" hint="Orders booked during visits to this shop appear here." /></ListCard>}
+          {d.orders.length ? <ListCard>{d.orders.map((o) => <OrderRow key={o.id} o={o} />)}</ListCard> : <p className="text-[13px] text-ink-3">No orders yet. Orders booked during visits to this shop appear here.</p>}
         </MainSection>
       )}
       {tab === "memos" && (
         <MainSection title="Memos" count={d.memos.length}>
-          {d.memos.length ? <ListCard>{d.memos.map((m) => <MemoRow key={m.id} m={m} />)}</ListCard> : <ListCard><Empty icon={ScrollTextIcon} title="No memos yet" hint="When an agent leaves samples here on memo, it shows up with its due date." /></ListCard>}
-        </MainSection>
-      )}
-      {tab === "samples" && (
-        <MainSection title="Samples here" count={d.pieces.length}>
-          {d.pieces.length ? <ListCard>{d.pieces.map((p) => <PieceLine key={p.id} p={p} />)}</ListCard> : <ListCard><Empty icon={GemIcon} title="No samples at this shop" hint="Pieces left on memo are tracked here until they come back or are sold." /></ListCard>}
+          {d.memos.length ? <ListCard>{d.memos.map((m) => <MemoRow key={m.id} m={m} />)}</ListCard> : <p className="text-[13px] text-ink-3">No memos yet. When an agent leaves samples here on memo, it shows up with its due date.</p>}
         </MainSection>
       )}
       {tab === "activity" && (
         <div className="px-6 py-5">
           <h2 className="mb-4 text-[15px] font-medium text-ink">Activity</h2>
-          <Timeline items={toTimeline(d.activity, go, { proofs: true })} empty={<Empty icon={ActivityIcon} title="No activity yet" hint="Check-ins, proofs, orders and memos at this shop appear here." />} />
+          <ActivityFeed filter={{ shopId: s.id }} selfId={s.id} empty={<Empty icon={ActivityIcon} title="No activity yet" hint="Check-ins, proofs, orders, memos and custody moves at this shop appear here." />} />
         </div>
       )}
 
       <AssignVisitDialog open={assignOpen} onOpenChange={setAssignOpen} shopId={s.id} agentId={s.assignedAgent?.id} />
-      <ShopSheet open={editOpen} onOpenChange={setEditOpen} shop={s} />
+      <ShopSheet open={editOpen} onOpenChange={setEditOpen} shop={s} openingOutstandingPaise={c?.openingOutstandingPaise ?? (c ? 0 : undefined)} />
     </RecordLayout>
+  );
+}
+
+/* ---------------- credit position (API CreditPosition only; compact figures, exact ones live in the panel) ---------------- */
+export function CreditBlock({ c, limitPaise, unsettled, pending, memoCount, compact }: { c?: CreditPosition; limitPaise: number; unsettled: number; pending: number; memoCount: number; compact?: boolean }) {
+  if (!c) return <div className="rounded-[10px] border border-line px-4 py-3.5 text-[13px] text-ink-3">No credit position for this shop.</div>;
+  const limited = c.availableCreditPaise != null && c.creditLimitPaise > 0;
+  const outSub = [unsettled ? `${unsettled} unsettled order${unsettled === 1 ? "" : "s"}` : "", c.openingOutstandingPaise ? `${formatINRCompact(c.openingOutstandingPaise)} opening` : ""].filter(Boolean).join(" + ") || (pending ? "Pending orders aren't owed yet" : "Nothing unsettled");
+  const cells: { label: string; value: React.ReactNode; sub: React.ReactNode; dot?: string }[] = [
+    { label: "Outstanding", dot: "bg-[#55565a]", value: c.outstandingPaise ? formatINR(c.outstandingPaise) : <span className="text-ink-3">Nothing owed</span>, sub: outSub },
+    { label: "On memo", dot: "bg-gold", value: c.memoExposurePaise ? <span className="text-gold-ink">{formatINR(c.memoExposurePaise)}</span> : <span className="text-ink-3">None</span>, sub: memoCount ? `${memoCount} active memo${memoCount === 1 ? "" : "s"}` : "No samples on memo" },
+    { label: "Available credit", value: limited ? <span className={cn(c.overLimit && "text-danger")}>{formatINR(c.availableCreditPaise!)}</span> : <span className="text-ink-3">No limit</span>, sub: limited ? (c.overLimit ? `Over by ${formatINRCompact(c.exposurePaise - c.creditLimitPaise)}` : "Left to book") : "Orders never trip the credit rule" },
+    { label: "Credit limit", value: limitPaise > 0 ? formatINR(limitPaise) : <span className="text-ink-3">No limit</span>, sub: c.approvalThresholdPaise != null ? `Approval from ${formatINRCompact(c.approvalThresholdPaise)}` : "Set on the shop" },
+  ];
+  return (
+    <div className="overflow-hidden rounded-[10px] border border-line">
+      <div className={cn("grid grid-cols-2 gap-px bg-line", !compact && "md:grid-cols-4")}>
+        {cells.map((x) => (
+          <div key={x.label} className="min-w-0 bg-white px-4 py-3">
+            <div className="flex items-center gap-1.5 text-[13px] text-ink-2">{x.dot && <span className={cn("size-1.5 shrink-0 rounded-full", x.dot)} />}{x.label}</div>
+            <div className="num mt-1 truncate text-[18px] font-medium leading-7 tracking-[-0.01em] text-ink">{x.value}</div>
+            <div className="truncate text-[12.5px] text-ink-3" title={typeof x.sub === "string" ? x.sub : undefined}>{x.sub}</div>
+          </div>
+        ))}
+      </div>
+      {limited && (
+        <div className="border-t border-line px-4 py-3">
+          <ExposureBar p={c} showOrder={false} className="h-2" />
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-ink-3">
+            <span className="inline-flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-[#55565a]" />Outstanding</span>
+            <span className="inline-flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-gold" />On memo</span>
+            <span className="inline-flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-[#efefef] ring-1 ring-line-strong" />Available</span>
+            <span className="num ml-auto text-ink-2"><span className={cn("font-medium", c.overLimit ? "text-danger" : "text-ink")}>{formatINRCompact(c.exposurePaise)}</span> of {formatINRCompact(c.creditLimitPaise)} used</span>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
 /* ---------------- left panel ---------------- */
 function Panel({ d, onAssign, onEdit }: { d: ShopRec; onAssign: () => void; onEdit: () => void }) {
   const s = d.shop;
+  const c = s.credit;
+  const upcoming = s.upcomingVisit ?? s.nextVisit;
   return (
     <>
       <RecordHeader
@@ -145,28 +182,29 @@ function Panel({ d, onAssign, onEdit }: { d: ShopRec; onAssign: () => void; onEd
           <Tip label="Edit shop"><Btn icon={PencilIcon} aria-label="Edit shop" onClick={onEdit} /></Tip>
         </>}
       />
-      <PropertySection title="Shop details">
+      <PropertySection title="Relationship">
+        <Property icon={UserIcon} label="Assigned agent"><AgentSelect shopId={s.id} value={s.assignedAgent} /></Property>
+        <Property icon={ClockIcon} label="Last visit">{s.lastVisitAt && <span className="flex flex-col"><span>{relDay(s.lastVisitAt)}</span>{s.lastVisitAgent && <span className="text-[13px] text-ink-3">{s.lastVisitAgent.name}</span>}</span>}</Property>
+        <Property icon={CalendarClockIcon} label="Upcoming visit">{upcoming ? <span className="flex flex-col"><Link href={`/admin/visits/${upcoming.id}`} className="decoration-ink-3 decoration-dotted underline-offset-4 hover:underline">{upcoming.date === istDate() ? "Today" : istDay(upcoming.date)}{upcoming.plannedTime ? `, ${wallTime(upcoming.plannedTime)}` : ""}</Link><span className="text-[13px] text-ink-3">{upcoming.agent.name}</span></span> : <span className="text-ink-3">Not planned</span>}</Property>
+        <Property icon={ReceiptTextIcon} label="Previous orders">{d.orders.length > 0 && <span className="num">{d.orders.length}{d.orders.length >= 50 ? "+" : ""}{s.lastOrder ? <span className="text-ink-3"> · last {istDay(s.lastOrder.createdAt)}</span> : d.orders[0] ? <span className="text-ink-3"> · last {istDay(d.orders[0].createdAt)}</span> : null}</span>}</Property>
+      </PropertySection>
+      <PropertySection title="Credit" defaultOpen={false}>
+        <Property icon={WalletIcon} label="Outstanding">{c && <span className="flex flex-col"><span className="num">{formatINR(c.outstandingPaise)}</span>{!!c.openingOutstandingPaise && <span className="num text-[13px] text-ink-3">incl. {formatINRCompact(c.openingOutstandingPaise)} opening balance</span>}</span>}</Property>
+        <Property icon={CreditCardIcon} label="Credit limit">{s.creditLimitPaise > 0 ? <span className="num">{formatINR(s.creditLimitPaise)}</span> : <span className="text-ink-3">No limit</span>}</Property>
+        <Property icon={GaugeIcon} label="Available credit">
+          {c && (c.availableCreditPaise == null ? <span className="text-ink-3">No limit</span> : (
+            <span className={cn("num", c.overLimit && "text-danger")}>{formatINR(c.availableCreditPaise)}{c.overLimit && <span className="text-[13px]"> · over by {formatINRCompact(c.exposurePaise - c.creditLimitPaise)}</span>}</span>
+          ))}
+        </Property>
+        <Property icon={ScrollTextIcon} label="Active memo value">{s.activeMemoCount > 0 && <span className={cn("num", s.status === "MEMO_OVERDUE" ? "text-danger" : "text-gold-ink")}>{formatINR(s.activeMemoValuePaise)}<span className="text-ink-3"> · {s.activeMemoCount} memo{s.activeMemoCount > 1 ? "s" : ""}</span></span>}</Property>
+        <Property icon={GemIcon} label="Current samples">{s.samplesHereCount > 0 && <span className="num text-gold-ink">{s.samplesHereCount} piece{s.samplesHereCount > 1 ? "s" : ""} · {formatINR(s.samplesHereValuePaise)}</span>}</Property>
+      </PropertySection>
+      <PropertySection title="Shop details" collapseBelowLg>
         <Property icon={UserRoundIcon} label="Owner">{s.ownerName}</Property>
         <Property icon={PhoneIcon} label="Phone">{s.phone && <a href={`tel:${s.phone.replace(/\s/g, "")}`} className="num hover:underline">{s.phone}</a>}</Property>
-        <Property icon={UserIcon} label="Assigned agent"><AgentSelect shopId={s.id} value={s.assignedAgent} /></Property>
-        <Property icon={CompassIcon} label="Geofence"><span className="num">{s.geofenceRadiusM} m</span><span className="num block text-[13px] text-ink-3">{fmtCoord(s.lat, s.lng)}</span></Property>
         <Property icon={MapPinIcon} label="Address"><span className="line-clamp-2">{s.address}</span></Property>
-        <Property icon={ClockIcon} label="Last visit">{s.lastVisitAt && <span>{relDay(s.lastVisitAt)}{s.lastVisitAgent && <span className="text-ink-3"> · {s.lastVisitAgent.name.split(" ")[0]}</span>}</span>}</Property>
-        <Property icon={CreditCardIcon} label="Credit / open">
-          <span className="num">{formatINRCompact(s.creditLimitPaise)}<span className="text-ink-3"> limit · </span>{s.openOrdersPaise ? formatINRCompact(s.openOrdersPaise) : "₹0"}<span className="text-ink-3"> open</span></span>
-        </Property>
-        <Property icon={ScrollTextIcon} label="Active memo value">{s.activeMemoCount > 0 && <span className={cn("num", s.status === "MEMO_OVERDUE" ? "text-danger" : "text-gold-ink")}>{formatINRCompact(s.activeMemoValuePaise)}<span className="text-ink-3"> · {s.activeMemoCount} memo{s.activeMemoCount > 1 ? "s" : ""}</span></span>}</Property>
-        <Property icon={GemIcon} label="Samples here">{s.samplesHereCount > 0 && <span className="num text-gold-ink">{s.samplesHereCount} · {formatINRCompact(s.samplesHereValuePaise)}</span>}</Property>
+        <Property icon={CompassIcon} label="Geofence"><span className="num">{s.geofenceRadiusM} m</span><span className="num block text-[13px] text-ink-3">{fmtCoord(s.lat, s.lng)}</span></Property>
       </PropertySection>
-      <div className="px-5 py-4">
-        <div className="mb-2 flex items-center gap-2">
-          <h3 className="text-[14px] font-medium text-ink">Samples here</h3>
-          <span className="num text-[13px] text-ink-3">{d.pieces.length}</span>
-        </div>
-        {d.pieces.length ? (
-          <ListCard>{d.pieces.slice(0, 6).map((p) => <PieceLine key={p.id} p={p} compact />)}</ListCard>
-        ) : <p className="text-[13px] text-ink-3">No pieces are at this shop right now.</p>}
-      </div>
     </>
   );
 }
@@ -215,19 +253,31 @@ export function PieceLine({ p, compact }: { p: PieceRow; compact?: boolean }) {
 
 export function VisitList({ visits, showShop, showAgent = true }: { visits: VRow[]; showShop?: boolean; showAgent?: boolean }) {
   const today = istDate();
+  const router = useRouter();
+  const head = [
+    { label: "Planned", width: 132 },
+    ...(showShop ? [{ label: "Shop" }] : []),
+    ...(showAgent ? [{ label: "Agent", ...(showShop ? { width: 140 } : {}) }] : []),
+    { label: "Status", width: 112 },
+    { label: "Proof", width: 108 },
+    { label: "Distance", align: "right" as const, width: 84 },
+    { label: "Check-in", align: "right" as const, width: 88 },
+    { label: "Order", align: "right" as const, width: 84 },
+  ];
   return (
-    <ListCard>
+    <MiniTable head={head} minWidth={720}>
       {visits.map((v) => (
-        <ListRow key={v.id} href={`/admin/visits/${v.id}`} className="group h-10 py-0">
-          <span className="num w-[88px] shrink-0 text-[13px] text-ink-2">{v.plannedDate === today ? "Today" : istDay(v.plannedDate)}{v.plannedTime ? ` ${v.plannedTime}` : ""}</span>
-          {showShop && <span className="min-w-0 flex-1 truncate font-medium text-ink decoration-ink-3 decoration-dotted underline-offset-4 group-hover:underline">{v.shop.name}</span>}
-          {showAgent && <span className={cn("flex min-w-0 items-center gap-2 truncate", !showShop && "flex-1")}><Avatar name={v.agent.name} size={18} /><span className="truncate">{v.agent.name}</span></span>}
-          <span className="hidden w-[110px] shrink-0 md:block"><StatusDot map={VISIT_STATUS} value={v.status} className="text-[13px]" /></span>
-          <span className="hidden w-[130px] shrink-0 lg:block">{v.proofState !== "NOT_STARTED" ? <StatusDot map={PROOF} value={v.proofState} className="text-[13px]" /> : <span className="text-[13px] text-ink-3">—</span>}</span>
-          <span className="num hidden w-14 shrink-0 text-right text-[13px] text-ink-2 sm:block">{fmtDist(v.checkInDistanceM) ?? "—"}</span>
-          <span className="num w-[72px] shrink-0 text-right text-[13px]">{v.outcome?.orderValuePaise ? formatINRCompact(v.outcome.orderValuePaise) : v.checkInAt ? <span className="text-ink-3">{istTime(v.checkInAt)}</span> : <span className="text-ink-3">—</span>}</span>
-        </ListRow>
+        <tr key={v.id} onClick={() => router.push(`/admin/visits/${v.id}`)} className="group cursor-pointer transition-colors hover:bg-hover">
+          <MTd className="num"><Link href={`/admin/visits/${v.id}`} onClick={(e) => e.stopPropagation()} className="text-ink decoration-ink-3 decoration-dotted underline-offset-4 group-hover:underline">{v.plannedDate === today ? "Today" : istDay(v.plannedDate)}{v.plannedTime ? `, ${wallTime(v.plannedTime)}` : ""}</Link></MTd>
+          {showShop && <MTd className="max-w-0 truncate font-medium">{v.shop.name}</MTd>}
+          {showAgent && <MTd className="max-w-0"><span className="flex min-w-0 items-center gap-2"><Avatar name={v.agent.name} size={18} /><span className="truncate">{v.agent.name}</span></span></MTd>}
+          <MTd><StatusDot map={VISIT_STATUS} value={v.status} className="text-[13px]" /></MTd>
+          <MTd>{v.proofState !== "NOT_STARTED" ? <StatusDot map={PROOF} value={v.proofState} className="text-[13px]" /> : <span className="text-ink-3">—</span>}</MTd>
+          <MTd align="right" className="num text-ink-2">{v.verification === "SIMULATED" ? <span className="text-ink-3" title={SIMULATED_LOCATION}>Simulated</span> : fmtDist(v.checkInDistanceM) ?? <span className="text-ink-3">—</span>}</MTd>
+          <MTd align="right" className="num text-ink-2">{v.checkInAt ? istTime(v.checkInAt) : <span className="text-ink-3">—</span>}</MTd>
+          <MTd align="right" className="num">{v.outcome?.orderValuePaise ? formatINRCompact(v.outcome.orderValuePaise) : <span className="text-ink-3">—</span>}</MTd>
+        </tr>
       ))}
-    </ListCard>
+    </MiniTable>
   );
 }

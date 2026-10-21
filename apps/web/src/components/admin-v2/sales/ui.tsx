@@ -6,7 +6,8 @@ import { AlertCircleIcon, CheckIcon, CopyIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Btn, Dot, type Tone } from "@/components/app/chrome";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import type { MemoDisplayStatus, OrderStatus, PieceStatus } from "@/lib/types";
+import type { MemoDisplayStatus, PieceStatus } from "@/lib/types";
+import { MEMO_STATUS, PIECE_STATUS, StatusDot } from "@/components/app/status";
 import { errMessage } from "./data";
 
 type Icon = React.ComponentType<{ className?: string; strokeWidth?: number }>;
@@ -22,17 +23,10 @@ export const fmtDayTime = (v?: string | null) => (v ? `${fmtDay(v)}, ${fmtTime(v
 export const fmtDist = (m?: number | null) => (m == null ? undefined : m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`);
 export const fmtCoord = (lat: number, lng: number) => `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 
-/* ---------- status vocabularies ---------- */
-export const ORDER_STATUS: Record<OrderStatus, [Tone, string]> = {
-  DRAFT: ["grey", "Draft"], SUBMITTED: ["amber", "Awaiting approval"], APPROVED: ["green", "Approved"], REJECTED: ["red", "Rejected"],
-};
-export const OrderStatusDot = ({ status }: { status: OrderStatus }) => <Dot tone={ORDER_STATUS[status][0]}>{ORDER_STATUS[status][1]}</Dot>;
-
-export const MEMO_STATUS: Record<MemoDisplayStatus, [Tone, string]> = {
-  ACTIVE: ["blue", "Active"], DUE_SOON: ["amber", "Due soon"], OVERDUE: ["red", "Overdue"], PARTIALLY_RETURNED: ["blue", "Partly returned"],
-  RETURNED: ["grey", "Returned"], CONVERTED_TO_ORDER: ["green", "Converted to order"],
-};
-export const MemoStatusDot = ({ status }: { status: MemoDisplayStatus }) => <Dot tone={MEMO_STATUS[status][0]}>{MEMO_STATUS[status][1]}</Dot>;
+/* ---------- status vocabularies: one module (components/app/status) ---------- */
+export { ORDER_STATUS, MEMO_STATUS, PIECE_STATUS, OrderStatusDot } from "@/components/app/status";
+export const MemoStatusDot = ({ status }: { status: MemoDisplayStatus }) => <StatusDot map={MEMO_STATUS} value={status} />;
+export const PieceStatusDot = ({ status }: { status: PieceStatus }) => <StatusDot map={PIECE_STATUS} value={status} />;
 
 /** "3 days overdue" / "Due today" / "in 4 days" — quiet text, red only when overdue. */
 export function DueText({ days, open = true, className }: { days: number; open?: boolean; className?: string }) {
@@ -41,10 +35,6 @@ export function DueText({ days, open = true, className }: { days: number; open?:
   return <span className={cn("text-[13px]", days < 0 ? "text-danger" : days <= 1 ? "text-warn" : "text-ink-3", className)}>{t}</span>;
 }
 
-export const PIECE_STATUS: Record<PieceStatus, [Tone, string]> = {
-  IN_VAULT: ["grey", "In vault"], WITH_AGENT: ["blue", "With agent"], ON_MEMO: ["gold", "On memo"], OVERDUE: ["red", "Overdue"], SOLD: ["green", "Sold"], LOST: ["red", "Lost"],
-};
-export const PieceStatusDot = ({ status }: { status: PieceStatus }) => <Dot tone={PIECE_STATUS[status][0]}>{PIECE_STATUS[status][1]}</Dot>;
 
 /* ---------- visuals ---------- */
 export function Thumb({ src, alt, size = 20, className }: { src?: string | null; alt: string; size?: number; className?: string }) {

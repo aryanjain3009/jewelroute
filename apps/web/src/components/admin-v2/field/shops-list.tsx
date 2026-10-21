@@ -1,15 +1,20 @@
 "use client";
 /** Shops — Attio list page (TitleBar → ViewBar → FilterBar → DataTable), same structure as Visits. */
 import * as React from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { useUrlPatch, useUrlState } from "@/lib/url-state";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CalendarClockIcon, CircleDotIcon, ClockIcon, GemIcon, MapPinIcon, PlusIcon, ReceiptTextIcon, ScrollTextIcon, StoreIcon, UserIcon, UserPlusIcon } from "lucide-react";
+import { CalendarClockIcon, CircleDotIcon, ClockIcon, GaugeIcon, GemIcon, MapPinIcon, PlusIcon, ReceiptTextIcon, StoreIcon, UserIcon, UserPlusIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { ExposureBar } from "@/components/app/credit";
 import { formatINRCompact, istDate } from "@jewelroute/shared";
 import { api } from "@/lib/api";
 import { useSync } from "@/lib/sync";
 import type { ShopRow } from "@/lib/types";
 import { Avatar, Btn, Empty, FilterBar, FilterChip, RowsSkeleton, SearchInput, SortChip, TitleBar, ViewBar, ViewTabs } from "@/components/app/chrome";
+import { RecordPreview, usePreview } from "@/components/app/record-preview";
+import { ShopPreview } from "@/components/admin-v2/previews";
 import { DataTable, Muted, NameCell, type Col } from "@/components/app/data-table";
 import { OBJECT_TINT } from "@/components/app/shell";
 import { useAgentOptions, useShops } from "./data";
@@ -17,22 +22,29 @@ import { ShopSheet, errMsg } from "./dialogs";
 import { QueryError, SHOP_STATUS, StatusDot, daysAgo, istDay, wallTime } from "./ui";
 
 type View = "all" | "attention" | "unassigned" | "dormant";
-type Sort = "name" | "lastVisit" | "outstanding" | "samples" | "nextVisit";
+type Sort = "name" | "lastVisit" | "outstanding" | "credit" | "samples" | "nextVisit";
 const SORTS: { value: Sort; label: string }[] = [
-  { value: "lastVisit", label: "Last visit" }, { value: "outstanding", label: "Outstanding" }, { value: "samples", label: "Samples value" },
+  { value: "lastVisit", label: "Last visit" }, { value: "outstanding", label: "Outstanding" }, { value: "credit", label: "Credit left" }, { value: "samples", label: "Samples value" },
   { value: "nextVisit", label: "Next visit" }, { value: "name", label: "Name" },
 ];
 const sum = (rows: ShopRow[], f: (r: ShopRow) => number) => rows.reduce((a, r) => a + f(r), 0);
 
 export function ShopsList() {
-  const sp = useSearchParams(); const router = useRouter();
-  const view = (sp.get("view") as View) ?? "all";
-  const [q, setQ] = React.useState("");
-  const [agent, setAgent] = React.useState("all");
-  const [status, setStatus] = React.useState("all");
-  const [area, setArea] = React.useState("all");
-  const [sort, setSort] = React.useState<Sort>("lastVisit");
+  const router = useRouter();
+  const preview = usePreview();
+  const [viewRaw, setView] = useUrlState("view", "all");
+  const view = (["all", "attention", "unassigned", "dormant"].includes(viewRaw) ? viewRaw : "all") as View;
+  const [q, setQ] = useUrlState("q");
+  const [agent, setAgent] = useUrlState("agent", "all");
+  const [status, setStatus] = useUrlState("status", "all");
+  const [area, setArea] = useUrlState("area", "all");
+  const [sortRaw, setSort] = useUrlState("sort", "lastVisit");
+  const sort = (SORTS.some((x) => x.value === sortRaw) ? sortRaw : "lastVisit") as Sort;
+  const patch = useUrlPatch();
   const [creating, setCreating] = React.useState(false);
+  // ?new=1 (⌘K "New shop") opens the sheet once, then leaves the URL.
+  const [newParam, setNewParam] = useUrlState("new");
+  React.useEffect(() => { if (newParam === "1") { setCreating(true); setNewParam(""); } }, [newParam, setNewParam]);
   const shops = useShops();
   const agents = useAgentOptions();
   const all = shops.data ?? [];
@@ -52,7 +64,8 @@ export function ShopsList() {
     switch (sort) {
       case "name": return a.name.localeCompare(b.name);
       case "lastVisit": return (b.lastVisitAt ?? "").localeCompare(a.lastVisitAt ?? "");
-      case "outstanding": return b.openOrdersPaise - a.openOrdersPaise;
+      case "outstanding": return (b.credit?.outstandingPaise ?? 0) - (a.credit?.outstandingPaise ?? 0);
+      case "credit": return (a.credit?.availableCreditPaise ?? Number.MAX_SAFE_INTEGER) - (b.credit?.availableCreditPaise ?? Number.MAX_SAFE_INTEGER);
       case "samples": return b.samplesHereValuePaise - a.samplesHereValuePaise;
       case "nextVisit": return (a.nextVisit ? `${a.nextVisit.date} ${a.nextVisit.plannedTime ?? ""}` : "9").localeCompare(b.nextVisit ? `${b.nextVisit.date} ${b.nextVisit.plannedTime ?? ""}` : "9");
     }
@@ -61,12 +74,12 @@ export function ShopsList() {
 
   const columns: Col<ShopRow>[] = [
     {
-      id: "shop", header: "Shop", accessorFn: (r) => r.name, meta: { icon: StoreIcon, width: 190 },
+      id: "shop", header: "Shop", accessorFn: (r) => r.name, meta: { icon: StoreIcon, width: 196 },
       cell: ({ row: { original: r } }) => <span className="block min-w-0" title={r.name}><NameCell lead={<Avatar name={r.name} size={20} square />} name={r.name} /></span>,
     },
-    { id: "area", header: "Area", accessorFn: (r) => r.area, meta: { icon: MapPinIcon, width: 100 }, cell: ({ row: { original: r } }) => <span className="block min-w-0 truncate" title={r.area}>{r.area}</span> },
+    { id: "area", header: "Area", accessorFn: (r) => r.area, meta: { icon: MapPinIcon, width: 132 }, cell: ({ row: { original: r } }) => <span className="block min-w-0 truncate" title={r.area}>{r.area}</span> },
     {
-      id: "agent", header: "Assigned agent", accessorFn: (r) => r.assignedAgent?.name ?? "", meta: { icon: UserIcon, width: 146 },
+      id: "agent", header: "Assigned agent", accessorFn: (r) => r.assignedAgent?.name ?? "", meta: { icon: UserIcon, width: 140 },
       cell: ({ row: { original: r } }) => (r.assignedAgent ? <span className="flex min-w-0 items-center gap-2"><Avatar name={r.assignedAgent.name} /><span className="truncate">{r.assignedAgent.name}</span></span> : <Muted>Unassigned</Muted>),
     },
     {
@@ -78,25 +91,42 @@ export function ShopsList() {
       },
     },
     {
-      id: "outstanding", header: "Open orders", accessorFn: (r) => r.openOrdersPaise, meta: { icon: ReceiptTextIcon, width: 124, align: "right", footer: <FooterSum v={sum(rows, (r) => r.openOrdersPaise)} /> },
-      cell: ({ row: { original: r } }) => (r.openOrdersPaise ? <span className="num">{formatINRCompact(r.openOrdersPaise)}</span> : <Muted />),
+      // The API's CreditPosition: opening balance + unsettled confirmed/approved orders. Settling or
+      // cancelling an order lowers it here as on the shop record.
+      id: "outstanding", header: "Outstanding", accessorFn: (r) => r.credit?.outstandingPaise ?? -1, meta: { icon: ReceiptTextIcon, width: 116, align: "right", footer: <FooterSum v={sum(rows, (r) => r.credit?.outstandingPaise ?? 0)} /> },
+      cell: ({ row: { original: r } }) => (r.credit ? (r.credit.outstandingPaise ? <span className={r.credit.overLimit ? "num text-danger" : "num"}>{formatINRCompact(r.credit.outstandingPaise)}</span> : <Muted>Nothing owed</Muted>) : <Muted />),
     },
     {
-      id: "memos", header: "Memos", accessorFn: (r) => r.activeMemoValuePaise, meta: { icon: ScrollTextIcon, width: 104, align: "right", footer: <FooterSum v={sum(rows, (r) => r.activeMemoValuePaise)} gold /> },
-      cell: ({ row: { original: r } }) => (r.activeMemoCount ? <span className="num"><span className="text-ink-3">{r.activeMemoCount} · </span><span className="text-gold-ink">{formatINRCompact(r.activeMemoValuePaise)}</span></span> : <Muted />),
+      // Exposure (outstanding + memo) against the limit, and what is left — the API's figures, drawn.
+      id: "credit", header: "Credit left", accessorFn: (r) => r.credit?.availableCreditPaise ?? Number.MAX_SAFE_INTEGER, meta: { icon: GaugeIcon, width: 136 },
+      cell: ({ row: { original: r } }) => {
+        const c = r.credit;
+        if (!c) return <Muted />;
+        if (c.availableCreditPaise == null || !c.creditLimitPaise) return <Muted>No limit</Muted>;
+        return (
+          <span className="flex min-w-0 items-center gap-2.5" title={`${formatINRCompact(c.exposurePaise)} of ${formatINRCompact(c.creditLimitPaise)} limit in use (outstanding + memo)`}>
+            <ExposureBar p={c} showOrder={false} className="w-12 shrink-0" />
+            <span className={cn("num truncate", c.overLimit ? "font-medium text-danger" : c.availableCreditPaise === 0 ? "text-warn" : "text-ink")}>{c.overLimit ? `Over ${formatINRCompact(c.exposurePaise - c.creditLimitPaise)}` : formatINRCompact(c.availableCreditPaise)}</span>
+          </span>
+        );
+      },
     },
     {
-      id: "samples", header: "Samples", accessorFn: (r) => r.samplesHereValuePaise, meta: { icon: GemIcon, width: 108, align: "right", footer: <FooterSum v={sum(rows, (r) => r.samplesHereValuePaise)} gold /> },
-      cell: ({ row: { original: r } }) => (r.samplesHereCount ? <span className="num"><span className="text-ink-3">{r.samplesHereCount} · </span><span className="text-gold-ink">{formatINRCompact(r.samplesHereValuePaise)}</span></span> : <Muted />),
+      id: "samples", header: "Samples", accessorFn: (r) => r.samplesHereValuePaise, meta: { icon: GemIcon, width: 112, align: "right", footer: <FooterSum v={sum(rows, (r) => r.samplesHereValuePaise)} gold /> },
+      cell: ({ row: { original: r } }) => (r.samplesHereCount
+        ? <span className="num" title={`${r.samplesHereCount} piece${r.samplesHereCount === 1 ? "" : "s"} at today's rate · ${r.activeMemoCount} memo${r.activeMemoCount === 1 ? "" : "s"} worth ${formatINRCompact(r.activeMemoValuePaise)} at handover`}>
+            {r.status === "MEMO_OVERDUE" && <span className="mr-1.5 inline-block size-1.5 rounded-full bg-danger align-middle" />}
+            <span className="text-ink-3">{r.samplesHereCount} · </span><span className="font-medium text-gold-ink">{formatINRCompact(r.samplesHereValuePaise)}</span>
+          </span>
+        : <Muted />),
     },
     {
-      id: "nextVisit", header: "Next visit", accessorFn: (r) => r.nextVisit ? `${r.nextVisit.date} ${r.nextVisit.plannedTime ?? ""}` : "~", meta: { icon: CalendarClockIcon, width: 136 },
-      cell: ({ row: { original: r } }) => (r.nextVisit ? <span className="num truncate" title={`${r.nextVisit.agent.name}`}>{r.nextVisit.date === today ? "Today" : istDay(r.nextVisit.date)}{r.nextVisit.plannedTime ? `, ${wallTime(r.nextVisit.plannedTime)}` : ""}</span> : <Muted>Not planned</Muted>),
+      id: "nextVisit", header: "Next visit", accessorFn: (r) => r.nextVisit ? `${r.nextVisit.date} ${r.nextVisit.plannedTime ?? ""}` : "~", meta: { icon: CalendarClockIcon, width: 112 },
+      cell: ({ row: { original: r } }) => (r.nextVisit ? <span className="num truncate" title={`${r.nextVisit.agent.name}`}>{r.nextVisit.date === today ? (r.nextVisit.plannedTime ? wallTime(r.nextVisit.plannedTime) : "Today") : `${istDay(r.nextVisit.date)}${r.nextVisit.plannedTime ? `, ${wallTime(r.nextVisit.plannedTime)}` : ""}`}</span> : <Muted>Not planned</Muted>),
     },
-    { id: "status", header: "Status", accessorFn: (r) => r.status, meta: { icon: CircleDotIcon, width: 140 }, cell: ({ row: { original: r } }) => <StatusDot map={SHOP_STATUS} value={r.status} /> },
+    { id: "status", header: "Status", accessorFn: (r) => r.status, meta: { icon: CircleDotIcon, width: 136 }, cell: ({ row: { original: r } }) => <StatusDot map={SHOP_STATUS} value={r.status} /> },
   ];
 
-  const setView = (v: string) => { const p = new URLSearchParams(sp.toString()); p.set("view", v); router.replace(`/admin/shops?${p}`); };
   const count = (v: View) => all.filter((r) => (v === "attention" ? r.status === "MEMO_OVERDUE" : v === "unassigned" ? !r.assignedAgent : v === "dormant" ? r.status === "DORMANT" || r.status === "NEW" : true)).length;
 
   return (
@@ -127,14 +157,20 @@ export function ShopsList() {
           fit
           getRowId={(r) => r.id}
           onOpen={(r) => router.push(`/admin/shops/${r.id}`)}
+          onPreview={(r) => preview.open(r.id)}
+          activeId={preview.id}
+          onOrderChange={preview.setOrder}
           countLabel="shops"
           empty={all.length
-            ? <Empty icon={StoreIcon} title="No shops match" hint="Change the view or clear a filter." action={<Btn onClick={() => { setQ(""); setAgent("all"); setStatus("all"); setArea("all"); setView("all"); }}>Clear filters</Btn>} />
+            ? <Empty icon={StoreIcon} title="No shops match" hint="Change the view or clear a filter." action={<Btn onClick={() => patch({ q: null, agent: null, status: null, area: null, view: null })}>Clear filters</Btn>} />
             : <Empty icon={StoreIcon} title="No shops yet" hint="Add your first retailer with its location so agents can check in there." action={<Btn icon={PlusIcon} onClick={() => setCreating(true)}>New shop</Btn>} />}
           bulkActions={(sel, clear) => <BulkAssign shops={sel} agents={(agents.data ?? []).filter((a) => a.active)} onDone={clear} />}
         />
       )}
       <ShopSheet open={creating} onOpenChange={setCreating} onSaved={(id) => router.push(`/admin/shops/${id}`)} />
+      <RecordPreview state={preview} viewLabel="Shops" href={preview.id ? `/admin/shops/${preview.id}` : undefined}>
+        {preview.id && <ShopPreview id={preview.id} />}
+      </RecordPreview>
     </div>
   );
 }

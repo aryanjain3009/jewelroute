@@ -2,14 +2,17 @@
 /** Agents — Attio list page; same structure as Visits/Shops. */
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { useUrlSort, useUrlState } from "@/lib/url-state";
 import { CircleDotIcon, ClockIcon, GemIcon, MapPinnedIcon, PlusIcon, ReceiptTextIcon, ScrollTextIcon, TrendingUpIcon, UserPlusIcon, UsersIcon } from "lucide-react";
 import { formatINRCompact, istDate } from "@jewelroute/shared";
 import { Avatar, Btn, Empty, FilterBar, RowsSkeleton, SearchInput, TitleBar, ViewBar, ViewTabs, type Tone } from "@/components/app/chrome";
+import { RecordPreview, usePreview } from "@/components/app/record-preview";
+import { AgentPreview } from "@/components/admin-v2/previews";
 import { DataTable, Muted, NameCell, type Col } from "@/components/app/data-table";
 import { OBJECT_TINT } from "@/components/app/shell";
 import { useAgentRows, type AgentRow } from "./data";
 import { AddAgentDialog, AssignVisitDialog } from "./dialogs";
-import { QueryError, StatusDot, istTime, relDay } from "./ui";
+import { QueryError, StatusDot, istTime, relDay, wallTime } from "./ui";
 
 type AgentState = "IN_VISIT" | "ON_ROUTE" | "DONE" | "NO_ROUTE" | "INACTIVE";
 export const AGENT_STATE: Record<AgentState, [Tone, string]> = {
@@ -27,8 +30,11 @@ const sum = (rows: AgentRow[], f: (r: AgentRow) => number) => rows.reduce((a, r)
 
 export function AgentsList() {
   const router = useRouter();
-  const [view, setView] = React.useState<"all" | "field" | "inactive">("all");
-  const [q, setQ] = React.useState("");
+  const preview = usePreview();
+  const [viewRaw, setView] = useUrlState("view", "all");
+  const view = (["all", "field", "inactive"].includes(viewRaw) ? viewRaw : "all") as "all" | "field" | "inactive";
+  const [q, setQ] = useUrlState("q");
+  const [sorting, setSorting] = useUrlSort([{ id: "status", desc: false }]);
   const [assign, setAssign] = React.useState<string | undefined>();
   const [adding, setAdding] = React.useState(false);
   const agents = useAgentRows();
@@ -39,9 +45,9 @@ export function AgentsList() {
   );
 
   const columns: Col<AgentRow>[] = [
-    { id: "agent", header: "Agent", accessorFn: (r) => r.name, meta: { icon: UsersIcon, width: 170 }, cell: ({ row: { original: r } }) => <NameCell lead={<Avatar name={r.name} size={20} />} name={r.name} /> },
+    { id: "agent", header: "Agent", accessorFn: (r) => r.name, meta: { icon: UsersIcon, width: 150 }, cell: ({ row: { original: r } }) => <NameCell lead={<Avatar name={r.name} size={20} />} name={r.name} /> },
     {
-      id: "progress", header: "Today progress", accessorFn: (r) => (r.today.planned ? r.today.completed / r.today.planned : -1), meta: { icon: TrendingUpIcon, width: 150 },
+      id: "progress", header: "Today progress", accessorFn: (r) => (r.today.planned ? r.today.completed / r.today.planned : -1), meta: { icon: TrendingUpIcon, width: 140 },
       cell: ({ row: { original: r } }) => r.today.planned ? (
         <span className="flex w-full items-center gap-2.5">
           <span className="num w-9 shrink-0">{r.today.completed}/{r.today.planned}</span>
@@ -50,10 +56,10 @@ export function AgentsList() {
       ) : <Muted>No route</Muted>,
     },
     {
-      id: "current", header: "Current visit", accessorFn: (r) => r.currentVisit?.shopName ?? "", meta: { icon: MapPinnedIcon, width: 210 },
+      id: "current", header: "Current visit", accessorFn: (r) => r.currentVisit?.shopName ?? "", meta: { icon: MapPinnedIcon, width: 248 },
       cell: ({ row: { original: r } }) => (r.currentVisit
         ? <span className="flex min-w-0 items-baseline gap-1.5"><span className="truncate">{r.currentVisit.shopName}</span><span className="num shrink-0 text-[12.5px] text-ink-3">since {sinceLabel(r.currentVisit.since)}</span></span>
-        : r.nextVisit ? <span className="truncate text-ink-3">Next: {r.nextVisit.shopName}{r.nextVisit.plannedTime ? ` · ${r.nextVisit.plannedTime}` : ""}</span> : <Muted />),
+        : r.nextVisit ? <span className="truncate text-ink-3">Next: {r.nextVisit.shopName}{r.nextVisit.plannedTime ? ` · ${wallTime(r.nextVisit.plannedTime)}` : ""}</span> : <Muted />),
     },
     {
       id: "bag", header: "Bag value", accessorFn: (r) => r.bag.valuePaise, meta: { icon: GemIcon, width: 120, align: "right", footer: <Sum v={sum(rows, (r) => r.bag.valuePaise)} gold /> },
@@ -67,7 +73,7 @@ export function AgentsList() {
       id: "orders", header: "Orders today", accessorFn: (r) => r.ordersToday.valuePaise, meta: { icon: ReceiptTextIcon, width: 130, align: "right", footer: <Sum v={sum(rows, (r) => r.ordersToday.valuePaise)} /> },
       cell: ({ row: { original: r } }) => (r.ordersToday.count ? <span className="num"><span className="text-ink-3">{r.ordersToday.count} · </span>{formatINRCompact(r.ordersToday.valuePaise)}</span> : <Muted />),
     },
-    { id: "lastCheckIn", header: "Last check-in", accessorFn: (r) => r.lastCheckInAt ?? "", meta: { icon: ClockIcon, width: 140 }, cell: ({ row: { original: r } }) => (r.lastCheckInAt ? <span className="num">{relDay(r.lastCheckInAt)}</span> : <Muted>Never</Muted>) },
+    { id: "lastCheckIn", header: "Last check-in", accessorFn: (r) => r.lastCheckInAt ?? "", meta: { icon: ClockIcon, width: 144 }, cell: ({ row: { original: r } }) => (r.lastCheckInAt ? <span className="num">{relDay(r.lastCheckInAt)}</span> : <Muted>Never</Muted>) },
     { id: "status", header: "Status", accessorFn: (r) => agentState(r), meta: { icon: CircleDotIcon, width: 124 }, cell: ({ row: { original: r } }) => <StatusDot map={AGENT_STATE} value={agentState(r)} /> },
   ];
 
@@ -92,14 +98,21 @@ export function AgentsList() {
           columns={columns}
           getRowId={(r) => r.id}
           onOpen={(r) => router.push(`/admin/agents/${r.id}`)}
+          onPreview={(r) => preview.open(r.id)}
+          activeId={preview.id}
+          onOrderChange={preview.setOrder}
           countLabel="agents"
           fit
           selectable={false}
-          initialSort={[{ id: "status", desc: false }]}
+          sorting={sorting}
+          onSortingChange={setSorting}
           empty={<Empty icon={UsersIcon} title={view === "inactive" ? "No inactive agents" : "No agents match"} hint={view === "inactive" ? "Deactivated agents keep their history and show up here." : "Clear the search, or add an agent."} />}
         />
       )}
       <AddAgentDialog open={adding} onOpenChange={setAdding} onCreated={(id) => router.push(`/admin/agents/${id}`)} />
+      <RecordPreview state={preview} viewLabel="Agents" href={preview.id ? `/admin/agents/${preview.id}` : undefined}>
+        {preview.id && <AgentPreview id={preview.id} />}
+      </RecordPreview>
       <AssignVisitDialog open={assign !== undefined} onOpenChange={(o) => !o && setAssign(undefined)} agentId={assign || undefined} />
     </div>
   );

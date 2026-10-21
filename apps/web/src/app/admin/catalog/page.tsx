@@ -1,7 +1,8 @@
 "use client";
 /** Catalog — designs as an Attio table or a premium photo grid; a design opens in a side panel. */
 import * as React from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { useUrlPatch, useUrlSort, useUrlState } from "@/lib/url-state";
 import { BoxesIcon, CoinsIcon, GemIcon, HashIcon, LayersIcon, LayoutGridIcon, PercentIcon, PlusIcon, ScaleIcon, TableIcon, TagIcon } from "lucide-react";
 import { formatGrams, formatINR, formatRate, PURITY_LABEL } from "@jewelroute/shared";
 import { cn } from "@/lib/utils";
@@ -23,20 +24,22 @@ function Pieces({ d }: { d: AdminDesign }) {
 }
 
 function CatalogBody() {
-  const sp = useSearchParams(); const router = useRouter();
+  const sp = useSearchParams();
   const designs = useDesigns();
   const rates = useGoldRates();
   const all = React.useMemo(() => designs.data ?? [], [designs.data]);
   const cats = [...new Set(all.map((d) => d.category))].sort();
   const cat = sp.get("category") && cats.includes(sp.get("category")!) ? sp.get("category")! : "all";
   const layout = sp.get("layout") === "grid" ? "grid" : "table";
-  const [q, setQ] = React.useState("");
-  const [purity, setPurity] = React.useState("all");
-  const [collection, setCollection] = React.useState("all");
+  const [q, setQ] = useUrlState("q");
+  const [purity, setPurity] = useUrlState("purity", "all");
+  const [collection, setCollection] = useUrlState("collection", "all");
+  const [sorting, setSorting] = useUrlSort([{ id: "sku", desc: false }]);
   const [creating, setCreating] = React.useState(false);
   const openId = sp.get("design");
   const open = openId ? all.find((d) => d.id === openId) ?? null : null;
-  const setParam = (k: string, v: string | null) => { const p = new URLSearchParams(sp.toString()); if (v === null) p.delete(k); else p.set(k, v); router.replace(`/admin/catalog?${p}`, { scroll: false }); };
+  const patch = useUrlPatch();
+  const setParam = (k: string, v: string | null) => patch({ [k]: v });
 
   const s = q.trim().toLowerCase();
   const rows = all.filter((d) => (cat === "all" || d.category === cat) && (purity === "all" || d.purity === purity) && (collection === "all" || d.collection === collection) &&
@@ -47,11 +50,11 @@ function CatalogBody() {
     { id: "sku", header: "SKU", accessorFn: (d) => d.sku, meta: { icon: HashIcon, width: 120 }, cell: ({ row: { original: d } }) => <span className="num text-ink-2">{d.sku}</span> },
     { id: "category", header: "Category", accessorFn: (d) => d.category, meta: { icon: TagIcon, width: 110 } },
     { id: "collection", header: "Collection", accessorFn: (d) => d.collection, meta: { icon: LayersIcon, width: 125 }, cell: ({ row: { original: d } }) => (d.collection ? d.collection : <Muted />) },
-    { id: "purity", header: "Purity", accessorFn: (d) => d.purity, meta: { width: 70 }, cell: ({ row: { original: d } }) => <span className="text-gold-ink">{PURITY_LABEL[d.purity]}</span> },
+    { id: "purity", header: "Purity", accessorFn: (d) => d.purity, meta: { width: 70 }, cell: ({ row: { original: d } }) => <span className="font-medium text-gold-ink">{PURITY_LABEL[d.purity]}</span> },
     { id: "net", header: "Net wt", accessorFn: (d) => d.netWeightMg, meta: { icon: ScaleIcon, width: 90, align: "right" }, cell: ({ row: { original: d } }) => <span className="num">{formatGrams(d.netWeightMg)}</span> },
-    { id: "making", header: "Making", accessorFn: (d) => d.makingChargeValue, meta: { icon: PercentIcon, width: 100, align: "right" }, cell: ({ row: { original: d } }) => <span className="num text-ink-2">{making(d)}</span> },
-    { id: "price", header: "Today's price", accessorFn: (d) => d.price?.unitPricePaise ?? -1, meta: { icon: CoinsIcon, width: 130, align: "right" }, cell: ({ row: { original: d } }) => (d.price ? <span className="num font-medium text-gold-ink" title="Before 3% GST">{formatINR(d.price.unitPricePaise)}</span> : <Muted>No rate</Muted>) },
-    { id: "pieces", header: "Samples", accessorFn: (d) => d.pieces.length, meta: { icon: BoxesIcon, width: 150 }, cell: ({ row: { original: d } }) => <Pieces d={d} /> },
+    { id: "making", header: () => <span title="Making charge: a % of the gold value, or ₹ per gram of net weight">Making</span>, accessorFn: (d) => d.makingChargeValue, meta: { icon: PercentIcon, width: 100, align: "right" }, cell: ({ row: { original: d } }) => <span className="num text-ink-2">{making(d)}</span> },
+    { id: "price", header: "Today's price", accessorFn: (d) => d.price?.unitPricePaise ?? -1, meta: { icon: CoinsIcon, width: 130, align: "right" }, cell: ({ row: { original: d } }) => (d.price ? <span className="num font-medium text-ink" title="Before 3% GST">{formatINR(d.price.unitPricePaise)}</span> : <Muted>No rate</Muted>) },
+    { id: "pieces", header: "Samples", accessorFn: (d) => d.pieces.length, meta: { icon: BoxesIcon, width: 150, footer: rows.length ? <span className="num"><span className="text-ink">{rows.reduce((n, d) => n + vault(d), 0)}</span> in vault · <span className="text-gold-ink">{rows.reduce((n, d) => n + out(d), 0)}</span> out</span> : undefined }, cell: ({ row: { original: d } }) => <Pieces d={d} /> },
   ];
 
   const ratesLine = rates.data?.current.filter((r) => ["K22", "K18"].includes(r.purity)).map((r) => `${PURITY_LABEL[r.purity]} ${formatRate(r.ratePaisePerGram)}`).join(" · ");
@@ -66,7 +69,7 @@ function CatalogBody() {
           {ratesLine && <span className="hidden text-[13px] text-ink-2 lg:inline">Priced at <span className="num text-gold-ink">{ratesLine}</span></span>}
           <div className="flex items-center rounded-lg border border-line-strong bg-white p-0.5" role="group" aria-label="Layout">
             {([["table", TableIcon], ["grid", LayoutGridIcon]] as const).map(([v, I]) => (
-              <button key={v} type="button" aria-label={`${v} layout`} aria-pressed={layout === v} onClick={() => setParam("layout", v === "table" ? null : v)} className={cn("grid size-7 place-items-center rounded-md", layout === v ? "bg-active text-ink" : "text-ink-3 hover:text-ink")}><I className="size-4" strokeWidth={1.75} /></button>
+              <button key={v} type="button" aria-label={`${v} layout`} aria-pressed={layout === v} onClick={() => setParam("layout", v === "table" ? null : v)} className={cn("press grid size-7 place-items-center rounded-md", layout === v ? "bg-active text-ink" : "text-ink-3 hover:bg-hover hover:text-ink")}><I className="size-4" strokeWidth={1.75} /></button>
             ))}
           </div>
         </div>
@@ -86,7 +89,8 @@ function CatalogBody() {
           activeId={openId}
           selectable={false}
           countLabel="designs"
-          initialSort={[{ id: "sku", desc: false }]}
+          sorting={sorting}
+          onSortingChange={setSorting}
           empty={<Empty icon={GemIcon} title={all.length ? "No designs match" : "No designs yet"} hint={all.length ? "Change the category or clear the filters." : "Add your first design, then take sample pieces into the vault."} action={<Btn icon={PlusIcon} onClick={() => setCreating(true)}>New design</Btn>} />}
         />
       ) : (
