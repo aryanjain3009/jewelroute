@@ -5,6 +5,9 @@ import { PrismaService } from '../prisma.service';
 import { decryptSecret, signWebhook } from '../common/crypto';
 import { OutboxService } from '../core/outbox';
 import { dateOf } from '../core/views';
+import { env } from '../env';
+import { demoReceiverEnabled } from './demo-receiver';
+import { allowPrivateFor, isOwnReceiver, postWebhook } from './egress';
 
 /** Delay before retry N (after attempt N fails). 1 immediate attempt + 6 retries = 7 attempts, then DEAD. */
 export const BACKOFF_SECONDS = [30, 120, 600, 1800, 7200, 21600];
@@ -30,6 +33,8 @@ export interface RunStats {
   attempted: number;
   succeeded: number;
   failed: number;
+  tokensPurged: number;
+  evidenceCleared: number;
 }
 
 @Injectable()
@@ -37,6 +42,7 @@ export class Dispatcher implements DispatchQueue {
   private readonly log = new Logger('Dispatcher');
   private running: Promise<RunStats> | null = null;
   private rerun = false;
+  private forceNext = false;
   private lastOpportunistic = 0;
   private lastOverdueScan = 0;
 
@@ -67,16 +73,20 @@ export class Dispatcher implements DispatchQueue {
 
   async runOnce(opts: { forceOverdue?: boolean; limit?: number } = {}): Promise<RunStats> {
     if (this.running) {
+      // A forced sweep (cron / internal dispatch) must not be lost because a post-commit run is in flight.
       this.rerun = true;
+      if (opts.forceOverdue) this.forceNext = true;
       return this.running;
     }
     this.running = (async () => {
-      const total: RunStats = { overdueEmitted: 0, visitsMissed: 0, fannedOut: 0, deliveriesCreated: 0, attempted: 0, succeeded: 0, failed: 0 };
+      const total: RunStats = { overdueEmitted: 0, visitsMissed: 0, fannedOut: 0, deliveriesCreated: 0, attempted: 0, succeeded: 0, failed: 0, tokensPurged: 0, evidenceCleared: 0 };
       try {
         let rounds = 0;
         do {
           this.rerun = false;
-          const s = await this.cycle(opts);
+          const force = !!opts.forceOverdue || this.forceNext;
+          this.forceNext = false;
+          const s = await this.cycle({ ...opts, forceOverdue: force });
           for (const k of Object.keys(total) as (keyof RunStats)[]) total[k] += s[k];
           opts = { ...opts, forceOverdue: false };
         } while (this.rerun && ++rounds < 5);
@@ -89,11 +99,12 @@ export class Dispatcher implements DispatchQueue {
   }
 
   private async cycle(opts: { forceOverdue?: boolean; limit?: number }): Promise<RunStats> {
-    const s: RunStats = { overdueEmitted: 0, visitsMissed: 0, fannedOut: 0, deliveriesCreated: 0, attempted: 0, succeeded: 0, failed: 0 };
+    const s: RunStats = { overdueEmitted: 0, visitsMissed: 0, fannedOut: 0, deliveriesCreated: 0, attempted: 0, succeeded: 0, failed: 0, tokensPurged: 0, evidenceCleared: 0 };
     if (opts.forceOverdue || Date.now() - this.lastOverdueScan > 60_000) {
       this.lastOverdueScan = Date.now();
       s.overdueEmitted = await this.emitOverdue();
       s.visitsMissed = await this.markMissed();
+      Object.assign(s, await this.retention());
     }
     const f = await this.fanOut();
     s.fannedOut = f.events;
@@ -150,6 +161,28 @@ export class Dispatcher implements DispatchQueue {
     return r.count;
   }
 
+  /**
+   * Retention (audit review m6, m7), with the overdue sweep (≤ 1/min and on every cron run):
+   *  - refresh tokens that expired or were revoked more than 30 days ago are deleted (they can no longer be
+   *    presented: a token revoked 30 days ago is also past its 30-day expiry); their device hashes go with them;
+   *  - retailer-ack evidence (Memo.ackIp / ackUserAgent) is cleared 90 days after the ack — or 90 days after the
+   *    memo for a link that was only viewed — keeping selfAckSuspected / selfAckReason (the finding, not personal data);
+   *  - legacy agent last-seen device data (no longer written) is cleared after 90 days.
+   */
+  async retention(): Promise<{ tokensPurged: number; evidenceCleared: number }> {
+    const now = Date.now();
+    const d30 = new Date(now - 30 * 86_400_000);
+    const d90 = new Date(now - 90 * 86_400_000);
+    const db = this.prisma.db;
+    const tokens = await db.refreshToken.deleteMany({ where: { OR: [{ expiresAt: { lt: d30 } }, { revokedAt: { lt: d30 } }] } });
+    const evidence = await db.memo.updateMany({
+      where: { OR: [{ ackIp: { not: null } }, { ackUserAgent: { not: null } }], AND: [{ OR: [{ ackAt: { lt: d90 } }, { ackAt: null, createdAt: { lt: d90 } }] }] },
+      data: { ackIp: null, ackUserAgent: null },
+    });
+    await db.user.updateMany({ where: { lastSeenAt: { lt: d90 } }, data: { lastSeenAt: null, lastSeenIp: null, lastSeenUa: null } });
+    return { tokensPurged: tokens.count, evidenceCleared: evidence.count };
+  }
+
   /** Outbox → one WebhookDelivery per subscribed active endpoint (unique endpointId+eventId). */
   async fanOut(): Promise<{ events: number; deliveries: number }> {
     return this.prisma.tx(async (tx) => {
@@ -191,7 +224,7 @@ export class Dispatcher implements DispatchQueue {
 
   /** One signed HTTP attempt for a claimed delivery; records a WebhookAttempt and advances the state. */
   async deliver(deliveryId: string): Promise<string> {
-    const d = await this.prisma.db.webhookDelivery.findUnique({ where: { id: deliveryId }, include: { endpoint: true, event: true } });
+    const d = await this.prisma.db.webhookDelivery.findUnique({ where: { id: deliveryId }, include: { endpoint: { include: { tenant: { select: { demoMode: true } } } }, event: true } });
     if (!d) return 'MISSING';
     const attemptNo = d.attempts + 1;
     const rawBody = JSON.stringify(d.event.payload);
@@ -217,9 +250,16 @@ export class Dispatcher implements DispatchQueue {
         'X-JewelRoute-Timestamp': String(ts),
         'X-JewelRoute-Signature': signWebhook(secret, ts, rawBody),
       };
-      const res = await fetch(d.endpoint.url, { method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(TIMEOUT_MS), headers: requestHeaders, body: rawBody });
+      // SSRF guard at connect time (every attempt): private/loopback/link-local targets are refused even if the
+      // host re-resolved after validation (DNS rebinding). No redirects are followed.
+      const e = env();
+      const policy = {
+        allowPrivate: allowPrivateFor(e, d.endpoint.tenant.demoMode),
+        ownReceiver: isOwnReceiver(d.endpoint.url, e.API_PUBLIC_URL) && demoReceiverEnabled({ flag: e.ENABLE_DEMO_RECEIVER, nodeEnv: e.NODE_ENV, demoMode: d.endpoint.tenant.demoMode }),
+      };
+      const res = await postWebhook(d.endpoint.url, requestHeaders, rawBody, { timeoutMs: TIMEOUT_MS, policy, maxResponseChars: 2000 });
       statusCode = res.status;
-      responseBody = (await res.text().catch(() => '')).slice(0, 2000);
+      responseBody = res.text;
       if (res.status < 200 || res.status >= 300) error = `HTTP ${res.status}`;
     } catch (e) {
       error = (e as Error).name === 'TimeoutError' ? `Timed out after ${TIMEOUT_MS / 1000}s` : String((e as Error).message ?? e).slice(0, 500);

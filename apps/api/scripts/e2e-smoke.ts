@@ -1,4 +1,6 @@
-/* End-to-end scenario — the brief's 28 steps with sample AJ-S-000123 — over real HTTP.
+/* End-to-end scenario — the brief's 28 steps with sample AJ-S-000123, plus the v3 credit flow
+ * (normal order confirms directly; an over-limit order waits for approval, is approved and its
+ * `order.approved` webhook delivered; settling reduces the outstanding) — over real HTTP.
  *   BASE_URL=http://localhost:4000 pnpm --filter @jewelroute/api e2e
  *   BASE_URL=https://api.example.com CRON_SECRET=... pnpm --filter @jewelroute/api e2e
  * Re-runnable: if Sharma's visit today was already completed by an earlier run, a fresh test shop
@@ -6,7 +8,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { addDays, distanceM, istDate, priceDesign } from '@jewelroute/shared';
+import { addDays, distanceM, istDate, orderTotals, priceDesign } from '@jewelroute/shared';
 
 const BASE = (process.env.BASE_URL ?? 'http://localhost:4000').replace(/\/$/, '');
 const API = BASE.endsWith('/api') ? BASE : BASE; // works against the API origin or the web origin's /api
@@ -114,7 +116,8 @@ async function main() {
   if (!assigned || assigned.status !== 'PLANNED') {
     // An earlier run already used Sharma today → twin shop next door so the scenario can repeat.
     const stamp = new Date().toISOString().slice(11, 19).replace(/:/g, '');
-    shop = (await must(A, 'POST', '/v1/admin/shops', { name: `Sharma Jewellers (E2E ${stamp})`, address: sharma.address, area: sharma.area, city: sharma.city, lat: north(sharma.lat, 5), lng: sharma.lng, geofenceRadiusM: 100, assignedAgentId: rahul.id })).shop;
+    // Same receivables as Sharma (limit + opening balance) so the credit steps behave the same.
+    shop = (await must(A, 'POST', '/v1/admin/shops', { name: `Sharma Jewellers (E2E ${stamp})`, address: sharma.address, area: sharma.area, city: sharma.city, lat: north(sharma.lat, 5), lng: sharma.lng, geofenceRadiusM: 100, assignedAgentId: rahul.id, creditLimitPaise: sharma.creditLimitPaise || 25_00_000_00, openingOutstandingPaise: sharma.openingOutstandingPaise ?? 8_00_000_00 })).shop;
     assigned = (await must(A, 'POST', '/v1/admin/assignments', { agentId: rahul.id, shopId: shop.id, date: today, plannedTime: '10:30' })).visit;
   }
   const visitId: string = assigned.id;
@@ -193,15 +196,21 @@ async function main() {
   assert(d22.price.unitPricePaise === expect.unitPricePaise, 'price recomputes with shared priceDesign');
   ok(`Prices use 22K ₹${newRate / 100}/g — ${d22.sku} = ₹${(d22.price.unitPricePaise / 100).toLocaleString('en-IN')} (+3% GST)`);
 
-  // ---- 13. Creates an order (idempotent)
+  // ---- 13. Creates an order (idempotent) — a normal order: the credit preview says no approval, and it confirms directly
   const oKey = randomUUID();
-  const items = [{ designId: d22.id, quantity: 2 }, { designId: cat.designs.find((d: J) => d.purity !== 'K22').id, quantity: 1 }];
+  const dOther = cat.designs.find((d: J) => d.purity !== 'K22');
+  const items = [{ designId: d22.id, quantity: 2 }, { designId: dOther.id, quantity: 1 }];
+  const expectTotal = orderTotals([d22.price.unitPricePaise * 2, dOther.price.unitPricePaise]).totalPaise;
+  const preview = await must(R, 'GET', `/v1/visits/${visitId}/credit?amountPaise=${expectTotal}`);
+  assert(preview.requiresApproval === false && preview.reasons.length === 0 && preview.availableCreditPaise >= expectTotal, `normal order fits (${JSON.stringify(preview)})`);
   const [o1, o2] = await Promise.all([
     must(R, 'POST', '/v1/orders', { visitId, items, notes: 'E2E order' }, { 'Idempotency-Key': oKey }),
     must(R, 'POST', '/v1/orders', { visitId, items, notes: 'E2E order' }, { 'Idempotency-Key': oKey }),
   ]);
   assert(o1.order.id === o2.order.id, 'concurrent same-key orders → one order');
-  ok(`Creates ${o1.order.number} ₹${(o1.order.totalPaise / 100).toLocaleString('en-IN')} (2 concurrent retries → 1 order)`);
+  assert(o1.order.totalPaise === expectTotal, `total ${o1.order.totalPaise} = previewed ${expectTotal}`);
+  assert(o1.order.status === 'CONFIRMED' && o1.order.approval.required === false && o1.order.approval.position.projectedExposurePaise === preview.projectedExposurePaise, `confirmed directly (${o1.order.status})`);
+  ok(`Creates ${o1.order.number} ₹${(o1.order.totalPaise / 100).toLocaleString('en-IN')} → ${o1.order.status} (no approval: ₹${(preview.availableCreditPaise / 100).toLocaleString('en-IN')} available); 2 concurrent retries → 1 order`);
 
   // ---- 14. Order freezes the rate snapshot
   const snap = o1.order.goldRateSnapshot.find((s: J) => s.purity === 'K22');
@@ -262,6 +271,31 @@ async function main() {
   const acked = await must(R, 'POST', `/v1/memos/${mm.memo.id}/ack/verify`, { code: pub.code });
   assert(acked.memo.ackStatus === 'ACKNOWLEDGED', 'acknowledged');
 
+  // ---- v3: an order over the credit limit waits for the manager, is approved, and settles
+  const kada = cat.designs.find((d: J) => d.sku === 'AJ-BNG-2201') ?? d22;
+  const before = await must(R, 'GET', `/v1/visits/${visitId}/credit`);
+  const unitWithGst = orderTotals([kada.price.unitPricePaise]).totalPaise;
+  const qty = Math.floor((before.availableCreditPaise ?? 0) / unitWithGst) + 1;
+  const bigTotal = orderTotals([kada.price.unitPricePaise * qty]).totalPaise;
+  const bigPreview = await must(R, 'GET', `/v1/visits/${visitId}/credit?amountPaise=${bigTotal}`);
+  assert(bigPreview.requiresApproval && bigPreview.reasons.includes('CREDIT_LIMIT') && bigPreview.projectedExposurePaise > bigPreview.creditLimitPaise, `preview trips CREDIT_LIMIT (${JSON.stringify(bigPreview)})`);
+  const big = (await must(R, 'POST', '/v1/orders', { visitId, items: [{ designId: kada.id, quantity: qty }], notes: 'E2E over-limit order' }, key())).order;
+  assert(big.status === 'PENDING_APPROVAL' && big.approval.required && big.approval.reasons.includes('CREDIT_LIMIT'), `pending (${big.status} ${JSON.stringify(big.approval.reasons)})`);
+  assert(big.approval.position.exposurePaise === before.exposurePaise && big.approval.position.projectedExposurePaise === bigPreview.projectedExposurePaise, 'credit snapshot frozen on the order');
+  ok(`${qty}× ${kada.name} = ₹${(big.totalPaise / 100).toLocaleString('en-IN')} → ${big.status} (${big.approval.reasons.join(' + ')}; projected ₹${(big.approval.position.projectedExposurePaise / 100).toLocaleString('en-IN')} > limit ₹${(big.approval.position.creditLimitPaise / 100).toLocaleString('en-IN')})`);
+  const queue = await must(A, 'GET', '/v1/admin/orders?status=PENDING_APPROVAL');
+  assert(queue.some((o: J) => o.id === big.id) && !queue.some((o: J) => o.id === o1.order.id), 'approval queue has only the pending order');
+  const approved = (await must(A, 'POST', `/v1/admin/orders/${big.id}/approve`)).order;
+  assert(approved.status === 'APPROVED' && approved.decidedBy?.name, 'approved');
+  const afterApprove = await must(A, 'GET', `/v1/admin/shops/${shop.id}/credit`);
+  assert(afterApprove.outstandingPaise === before.outstandingPaise + big.totalPaise, 'approved order counts towards outstanding');
+  ok(`${adminLogin.user.name} approves ${big.number}; outstanding ₹${(before.outstandingPaise / 100).toLocaleString('en-IN')} → ₹${(afterApprove.outstandingPaise / 100).toLocaleString('en-IN')}`);
+  const settled = await must(A, 'POST', `/v1/admin/orders/${big.id}/settle`);
+  assert(settled.order.settledAt && settled.credit.outstandingPaise === afterApprove.outstandingPaise - big.totalPaise, `settle reduces outstanding (${settled.credit.outstandingPaise})`);
+  const again = await call(A, 'POST', `/v1/admin/orders/${big.id}/settle`);
+  assert(again.status === 409 && again.error.code === 'ORDER_ALREADY_SETTLED', 'settle once');
+  ok(`Settles ${big.number}: outstanding back to ₹${(settled.credit.outstandingPaise / 100).toLocaleString('en-IN')}; second settle → ${again.error.code}`);
+
   // ---- 21. Manager dashboard / Home updates
   const home = await must(A, 'GET', `/v1/admin/home?date=${today}`);
   const homeMemo = home.activity.find((a: J) => a.type === 'memo.created' && a.entity.id === mm.memo.id);
@@ -281,6 +315,10 @@ async function main() {
   assert(handover.visit?.id === visitId && handover.proof?.id === pr.proof.id && handover.location?.label === shop.name && handover.location.verification === 'VERIFIED' && /^evt_/.test(handover.eventId), `transfer context ${JSON.stringify(handover)}`);
   ok(`Sample record: ${handover.from.label} → ${handover.to.label} at ${handover.location.distanceM} m (${handover.location.verification}), proof ${handover.proof.id}, ${handover.eventId}`);
 
+  const orderRec = await must(A, 'GET', `/v1/admin/orders/${big.id}`);
+  const types = orderRec.activity.map((a: J) => a.type);
+  assert(['order.created', 'order.pending_approval', 'order.approved', 'order.settled'].every((t) => types.includes(t)) && orderRec.activity.every((a: J) => a.refs.order?.id === big.id && a.refs.shop?.id === shop.id && a.kind === 'order'), `order activity ${types}`);
+
   // ---- 24. Visit record links order + memo + proof
   const visitRec = await must(A, 'GET', `/v1/admin/visits/${visitId}`);
   assert(visitRec.orders.some((o: J) => o.id === o1.order.id) && visitRec.memosCreated.some((m: J) => m.id === mm.memo.id) && visitRec.proofs.some((p: J) => p.id === pr.proof.id), 'visit links');
@@ -289,7 +327,7 @@ async function main() {
 
   // ---- 25. Webhook event is created (the same evt_ id as the custody event)
   const cron = process.env.CRON_SECRET;
-  const want = ['visit.checked_in', 'visit.proof_uploaded', 'order.created', 'memo.created', 'sample.custody_changed'];
+  const want = ['visit.checked_in', 'visit.proof_uploaded', 'order.created', 'order.confirmed', 'order.pending_approval', 'order.approved', 'order.settled', 'memo.created', 'memo.acknowledged', 'sample.custody_changed'];
   let ours: J[] = [];
   for (let i = 0; i < 30; i++) {
     if (cron && i % 3 === 0) await call(null, 'POST', '/v1/internal/dispatch', {}, { 'x-cron-secret': cron });
@@ -300,6 +338,10 @@ async function main() {
   }
   const custodyDelivery = ours.find((d) => d.eventId === handover.eventId);
   assert(custodyDelivery, `delivery for ${handover.eventId}`);
+  // the approval webhook reached the receiver, signed, for this order
+  const rcv = await must(A, 'GET', '/v1/admin/webhooks/received');
+  const approvedHook = rcv.find((r: J) => r.eventType === 'order.approved' && r.body?.data?.orderId === big.id);
+  assert(approvedHook && approvedHook.signatureOk && approvedHook.body.data.reasons.includes('CREDIT_LIMIT'), 'order.approved delivered + verified');
   ok(`Outbox events created: ${[...new Set(ours.map((d) => d.eventType))].join(', ')} (custody ${handover.eventId})`);
 
   // ---- 26. Worker delivers the webhook

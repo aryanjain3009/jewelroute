@@ -5,7 +5,8 @@
 import { createCipheriv, createHash, randomBytes } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { ulid } from 'ulid';
-import { addDays, istDate, orderTotals, priceDesign, WEBHOOK_EVENT_TYPES, distanceM } from '@jewelroute/shared';
+import { addDays, creditPosition, istDate, orderTotals, priceDesign, WEBHOOK_EVENT_TYPES, distanceM } from '@jewelroute/shared';
+import { eventRefs } from '../core/event-refs';
 import { Prisma, PrismaClient, Purity } from '../../generated/prisma';
 import DESIGN_IMAGES from './design-images.json';
 
@@ -38,11 +39,7 @@ function encryptSecret(plain: string, keyB64: string) {
   return ['v1', iv.toString('base64url'), c.getAuthTag().toString('base64url'), ct.toString('base64url')].join('.');
 }
 
-const PLACEHOLDER = [
-  'https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?w=1200&q=80',
-  'https://images.unsplash.com/photo-1611591437281-460bfbe1220a?w=1200&q=80',
-  'https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=1200&q=80',
-];
+const PLACEHOLDER = ['/catalog/1758995116383-f51775896add.jpg', '/catalog/1611107683227-e9060eccd846.jpg'];
 const IMAGES: Record<string, string[]> = DESIGN_IMAGES as Record<string, string[]>;
 let imgCursor: Record<string, number> = {};
 function imagesFor(category: string, n = 2): string[] {
@@ -108,16 +105,16 @@ async function wipe(prisma: PrismaClient) {
 }
 
 const SHOPS = [
-  { code: 'DL-KB-001', name: 'Sharma Jewellers', ownerName: 'Rakesh Sharma', phone: '+91 98110 21456', address: '2654, Bank Street, Karol Bagh', area: 'Karol Bagh', lat: 28.6519, lng: 77.1907, creditLimitPaise: 2_500_000_00 },
-  { code: 'DL-CC-002', name: 'Mehta Jewellers', ownerName: 'Suresh Mehta', phone: '+91 98100 33412', address: '1185, Dariba Kalan, Chandni Chowk', area: 'Chandni Chowk', lat: 28.6556, lng: 77.2316, creditLimitPaise: 4_000_000_00 },
-  { code: 'DL-LN-003', name: 'Royal Gems', ownerName: 'Imran Qureshi', phone: '+91 98731 55120', address: 'G-14, Central Market, Lajpat Nagar II', area: 'Lajpat Nagar', lat: 28.5677, lng: 77.2433, creditLimitPaise: 1_800_000_00 },
-  { code: 'DL-SX-004', name: 'Kapoor & Sons', ownerName: 'Vikram Kapoor', phone: '+91 98990 47781', address: 'E-12, South Extension Part II', area: 'South Extension', lat: 28.5684, lng: 77.2196, creditLimitPaise: 3_000_000_00 },
-  { code: 'DL-RG-005', name: 'Gupta Gold House', ownerName: 'Anil Gupta', phone: '+91 98111 90034', address: 'J-2/14, Main Market, Rajouri Garden', area: 'Rajouri Garden', lat: 28.6448, lng: 77.1222, creditLimitPaise: 2_000_000_00 },
-  { code: 'DL-CP-006', name: 'Malhotra Diamonds', ownerName: 'Neha Malhotra', phone: '+91 98186 11209', address: 'N-21, Inner Circle, Connaught Place', area: 'Connaught Place', lat: 28.6315, lng: 77.2167, creditLimitPaise: 5_000_000_00 },
-  { code: 'DL-KN-007', name: 'Jain Ornaments', ownerName: 'Mahavir Jain', phone: '+91 98913 70452', address: '22-A, Kamla Nagar Market', area: 'Kamla Nagar', lat: 28.6814, lng: 77.2046, creditLimitPaise: 1_500_000_00 },
-  { code: 'DL-JP-008', name: 'Bansal Jewellers', ownerName: 'Pooja Bansal', phone: '+91 98104 66231', address: 'C-1/17, District Centre, Janakpuri', area: 'Janakpuri', lat: 28.6289, lng: 77.0806, creditLimitPaise: 1_200_000_00 },
-  { code: 'DL-GK-009', name: 'Sethi Jewellers', ownerName: 'Harpreet Sethi', phone: '+91 98715 28890', address: 'M-31, M-Block Market, Greater Kailash I', area: 'Greater Kailash', lat: 28.549, lng: 77.234, creditLimitPaise: 2_200_000_00 },
-  { code: 'DL-PP-010', name: 'Batra Gold & Diamonds', ownerName: 'Rohit Batra', phone: '+91 98112 80917', address: 'Kohat Enclave Market, Pitampura', area: 'Pitampura', lat: 28.699, lng: 77.138, creditLimitPaise: 1_600_000_00 },
+  { code: 'DL-KB-001', name: 'Sharma Jewellers', ownerName: 'Rakesh Sharma', phone: '+91 98110 21456', address: '2654, Bank Street, Karol Bagh', area: 'Karol Bagh', lat: 28.6519, lng: 77.1907, creditLimitPaise: 2_500_000_00, openingOutstandingPaise: 80_000_000 },
+  { code: 'DL-CC-002', name: 'Mehta Jewellers', ownerName: 'Suresh Mehta', phone: '+91 98100 33412', address: '1185, Dariba Kalan, Chandni Chowk', area: 'Chandni Chowk', lat: 28.6556, lng: 77.2316, creditLimitPaise: 4_000_000_00, openingOutstandingPaise: 120_000_000 },
+  { code: 'DL-LN-003', name: 'Royal Gems', ownerName: 'Imran Qureshi', phone: '+91 98731 55120', address: 'G-14, Central Market, Lajpat Nagar II', area: 'Lajpat Nagar', lat: 28.5677, lng: 77.2433, creditLimitPaise: 1_800_000_00, openingOutstandingPaise: 20_000_000 },
+  { code: 'DL-SX-004', name: 'Kapoor & Sons', ownerName: 'Vikram Kapoor', phone: '+91 98990 47781', address: 'E-12, South Extension Part II', area: 'South Extension', lat: 28.5684, lng: 77.2196, creditLimitPaise: 3_000_000_00, openingOutstandingPaise: 90_000_000 },
+  { code: 'DL-RG-005', name: 'Gupta Gold House', ownerName: 'Anil Gupta', phone: '+91 98111 90034', address: 'J-2/14, Main Market, Rajouri Garden', area: 'Rajouri Garden', lat: 28.6448, lng: 77.1222, creditLimitPaise: 2_000_000_00, openingOutstandingPaise: 55_000_000 },
+  { code: 'DL-CP-006', name: 'Malhotra Diamonds', ownerName: 'Neha Malhotra', phone: '+91 98186 11209', address: 'N-21, Inner Circle, Connaught Place', area: 'Connaught Place', lat: 28.6315, lng: 77.2167, creditLimitPaise: 5_000_000_00, openingOutstandingPaise: 180_000_000 },
+  { code: 'DL-KN-007', name: 'Jain Ornaments', ownerName: 'Mahavir Jain', phone: '+91 98913 70452', address: '22-A, Kamla Nagar Market', area: 'Kamla Nagar', lat: 28.6814, lng: 77.2046, creditLimitPaise: 1_500_000_00, openingOutstandingPaise: 135_000_000 },
+  { code: 'DL-JP-008', name: 'Bansal Jewellers', ownerName: 'Pooja Bansal', phone: '+91 98104 66231', address: 'C-1/17, District Centre, Janakpuri', area: 'Janakpuri', lat: 28.6289, lng: 77.0806, creditLimitPaise: 1_200_000_00, openingOutstandingPaise: 30_000_000 },
+  { code: 'DL-GK-009', name: 'Sethi Jewellers', ownerName: 'Harpreet Sethi', phone: '+91 98715 28890', address: 'M-31, M-Block Market, Greater Kailash I', area: 'Greater Kailash', lat: 28.549, lng: 77.234, creditLimitPaise: 2_200_000_00, openingOutstandingPaise: 40_000_000 },
+  { code: 'DL-PP-010', name: 'Batra Gold & Diamonds', ownerName: 'Rohit Batra', phone: '+91 98112 80917', address: 'Kohat Enclave Market, Pitampura', area: 'Pitampura', lat: 28.699, lng: 77.138, creditLimitPaise: 1_600_000_00, openingOutstandingPaise: 0 },
 ];
 
 type D = { sku: string; name: string; category: string; collection: string; purity: Purity; gross: number; net: number; mType: 'PER_GRAM' | 'PERCENT'; mVal: number; stone: number; other?: { label: string; valuePaise: number }[]; desc: string; pieces: number };
@@ -145,6 +142,7 @@ const BASE: Record<'K24' | 'K22' | 'K18', number> = { K24: 11_500_00, K22: 10_54
 // Day -9 … day 0 multipliers (gentle drift ending at the base rate).
 const DRIFT = [0.982, 0.986, 0.984, 0.99, 0.993, 0.989, 0.994, 0.997, 0.995, 1.0];
 const round = (p: number) => Math.round(p / 500) * 500; // nearest ₹5
+const APPROVAL_THRESHOLD = 10_00_000_00; // ₹10L in paise
 
 export async function runSeed(prisma: PrismaClient, opts: SeedOptions): Promise<SeedSummary> {
   const t0 = Date.now();
@@ -152,7 +150,8 @@ export async function runSeed(prisma: PrismaClient, opts: SeedOptions): Promise<
   imgCursor = {};
   const API_PUBLIC_URL = opts.apiPublicUrl.replace(/\/$/, '');
   await wipe(prisma);
-  const tenant = await prisma.tenant.create({ data: { slug: SLUG, name: 'Aurum Jewels', demoMode: true } });
+  // v3: orders at or above ₹10,00,000 need a manager's approval (ORDER_THRESHOLD).
+  const tenant = await prisma.tenant.create({ data: { slug: SLUG, name: 'Aurum Jewels', demoMode: true, approvalThresholdPaise: BigInt(APPROVAL_THRESHOLD) } });
   const tenantId = tenant.id;
 
   const mkUser = async (name: string, email: string, password: string, role: 'ADMIN' | 'FIELD_AGENT', phone: string, homeArea?: string) =>
@@ -171,7 +170,7 @@ export async function runSeed(prisma: PrismaClient, opts: SeedOptions): Promise<
     'Jain Ornaments': kavya.id, 'Batra Gold & Diamonds': kavya.id,
   };
   const shopsCreatedAt = at(addDays(TODAY, -120), '11:00');
-  const shops = await prisma.shop.createManyAndReturn({ data: SHOPS.map((s) => ({ ...s, tenantId, city: 'New Delhi', geofenceRadiusM: 100, creditLimitPaise: BigInt(s.creditLimitPaise), assignedAgentId: OWNER[s.name] ?? null, createdAt: shopsCreatedAt })) });
+  const shops = await prisma.shop.createManyAndReturn({ data: SHOPS.map((s) => ({ ...s, tenantId, city: 'New Delhi', geofenceRadiusM: 100, creditLimitPaise: BigInt(s.creditLimitPaise), openingOutstandingPaise: BigInt(s.openingOutstandingPaise), assignedAgentId: OWNER[s.name] ?? null, createdAt: shopsCreatedAt })) });
   const shop = (name: string) => shops.find((s) => s.name === name)!;
 
   // ---- gold rates: 10 days of history, 10:00 IST each day ----
@@ -228,7 +227,8 @@ export async function runSeed(prisma: PrismaClient, opts: SeedOptions): Promise<
 
   // ---- outbox helper: history is feed-visible but already fanned out (won't fire webhooks) ----
   const feed = async (type: string, aggregateType: string, aggregateId: string, createdAt: Date, actorId: string | null, data: Record<string, unknown>, id = `evt_${ulid(createdAt.getTime())}`) => {
-    await prisma.outboxEvent.create({ data: { id, tenantId, type, aggregateType, aggregateId, actorId, createdAt, fannedOutAt: createdAt, payload: { id, type, tenantId: SLUG, createdAt: createdAt.toISOString(), data } as Prisma.InputJsonValue } });
+    // Same refs helper as OutboxService.emit — seeded history is filterable exactly like live events.
+    await prisma.outboxEvent.create({ data: { id, tenantId, type, aggregateType, aggregateId, actorId, createdAt, fannedOutAt: createdAt, payload: { id, type, tenantId: SLUG, createdAt: createdAt.toISOString(), data } as Prisma.InputJsonValue, ...eventRefs(aggregateType, aggregateId, data) } });
   };
   const ref = (u: { id: string; name: string }) => ({ id: u.id, name: u.name });
 
@@ -281,9 +281,13 @@ export async function runSeed(prisma: PrismaClient, opts: SeedOptions): Promise<
     return v;
   };
 
-  // ---- orders ----
+  // ---- orders: status decided by the v3 credit rule (shared creditPosition), exactly like POST /orders ----
+  // Exposure state the rule needs, kept as the seed writes history in time order.
+  const unsettled = new Map<string, number>(); // shopId → Σ live (CONFIRMED/APPROVED, unsettled) orders
+  const memoOut = new Map<string, number>(); // shopId → Σ OUT memo item value
   let ordN = 0;
-  const order = async (agent: { id: string; name: string }, s: Prisma.ShopGetPayload<object>, visitId: string, ymd: string, when: Date, lines: [string, number][], status: 'SUBMITTED' | 'APPROVED' | 'REJECTED') => {
+  type Outcome = { expect: 'CONFIRMED' | 'PENDING_APPROVAL'; decide?: 'APPROVED' | 'REJECTED'; settleAt?: Date; reason?: string };
+  const order = async (agent: { id: string; name: string }, s: Prisma.ShopGetPayload<object>, visitId: string, ymd: string, when: Date, lines: [string, number][], out: Outcome) => {
     const year = Number(ymd.slice(0, 4));
     const number = `ORD-${year}-${String(++ordN + 30).padStart(5, '0')}`;
     const priced = lines.map(([sku, qty]) => {
@@ -293,6 +297,19 @@ export async function runSeed(prisma: PrismaClient, opts: SeedOptions): Promise<
       return { d, r, p, qty };
     });
     const t = orderTotals(priced.map((x) => x.p.unitPricePaise * x.qty));
+    const position = creditPosition({
+      creditLimitPaise: Number(s.creditLimitPaise),
+      openingOutstandingPaise: Number(s.openingOutstandingPaise),
+      unsettledOrdersPaise: unsettled.get(s.id) ?? 0,
+      memoExposurePaise: memoOut.get(s.id) ?? 0,
+      approvalThresholdPaise: APPROVAL_THRESHOLD,
+      orderAmountPaise: t.totalPaise,
+    });
+    const initial = position.requiresApproval ? 'PENDING_APPROVAL' : 'CONFIRMED';
+    // Guard the story: if prices or balances drift, fail the seed instead of silently changing the demo.
+    if (initial !== out.expect) throw new Error(`seed: ${number} at ${s.name} would be ${initial} (${position.reasons.join(',') || 'no rule'}), expected ${out.expect}`);
+    const status = out.decide ?? initial;
+    const decidedAt = out.decide ? new Date(when.getTime() + 2 * 3600_000 > Date.now() ? Date.now() - 30_000 : when.getTime() + 2 * 3600_000) : null;
     const purities = [...new Set(priced.map((x) => x.d.purity))];
     const o = await prisma.order.create({
       data: {
@@ -302,14 +319,18 @@ export async function runSeed(prisma: PrismaClient, opts: SeedOptions): Promise<
         agentId: agent.id,
         visitId,
         status,
+        approvalRequired: position.requiresApproval,
+        approvalReasons: position.reasons,
+        creditSnapshot: { shopId: s.id, ...position, asOf: when.toISOString() } as unknown as Prisma.InputJsonValue,
+        settledAt: out.settleAt ?? null,
         clientOpId: `seed-${ulid()}`,
         subtotalPaise: BigInt(t.subtotalPaise),
         gstPaise: BigInt(t.gstPaise),
         totalPaise: BigInt(t.totalPaise),
         goldRateSnapshot: purities.map((pu) => ({ purity: pu, goldRateId: rateOn(pu, ymd).id, ratePaisePerGram: rateOn(pu, ymd).rate, effectiveFrom: rateOn(pu, ymd).at.toISOString() })),
-        decidedById: status === 'SUBMITTED' ? null : admin.id,
-        decidedAt: status === 'SUBMITTED' ? null : new Date(when.getTime() + 2 * 3600_000 > Date.now() ? Date.now() - 30_000 : when.getTime() + 2 * 3600_000),
-        rejectionReason: status === 'REJECTED' ? 'Exceeds credit limit this month' : null,
+        decidedById: out.decide ? admin.id : null,
+        decidedAt,
+        rejectionReason: out.decide === 'REJECTED' ? (out.reason ?? 'Over the credit limit this month') : null,
         createdAt: when,
         items: {
           create: priced.map(({ d, r, p, qty }) => ({
@@ -332,8 +353,19 @@ export async function runSeed(prisma: PrismaClient, opts: SeedOptions): Promise<
         },
       },
     });
-    await feed('order.created', 'Order', o.id, when, agent.id, { orderId: o.id, number, agent: ref(agent), shop: ref(s), visitId, totalPaise: t.totalPaise, status: 'SUBMITTED' });
-    if (status !== 'SUBMITTED') await feed(status === 'APPROVED' ? 'order.approved' : 'order.rejected', 'Order', o.id, o.decidedAt!, admin.id, { orderId: o.id, number, shop: ref(s), actor: ref(admin), totalPaise: t.totalPaise, status });
+    if ((status === 'CONFIRMED' || status === 'APPROVED') && !out.settleAt) unsettled.set(s.id, (unsettled.get(s.id) ?? 0) + t.totalPaise);
+    const base = { orderId: o.id, number, agent: ref(agent), shop: ref(s), visitId, totalPaise: t.totalPaise };
+    await prisma.auditLog.create({ data: { tenantId, actorId: agent.id, action: 'order.create', entityType: 'Order', entityId: o.id, after: { number, status: initial, approvalReasons: position.reasons, visitId, totalPaise: t.totalPaise }, createdAt: when } });
+    await feed('order.created', 'Order', o.id, when, agent.id, { ...base, status: initial, approval: { required: position.requiresApproval, reasons: position.reasons } });
+    await feed(initial === 'CONFIRMED' ? 'order.confirmed' : 'order.pending_approval', 'Order', o.id, new Date(when.getTime() + 1), agent.id, { ...base, status: initial, reasons: position.reasons, credit: position });
+    if (out.decide) {
+      await prisma.auditLog.create({ data: { tenantId, actorId: admin.id, action: out.decide === 'APPROVED' ? 'order.approve' : 'order.reject', entityType: 'Order', entityId: o.id, before: { status: initial }, after: { status: out.decide, reason: out.decide === 'REJECTED' ? o.rejectionReason : undefined }, createdAt: decidedAt! } });
+      await feed(out.decide === 'APPROVED' ? 'order.approved' : 'order.rejected', 'Order', o.id, decidedAt!, admin.id, { ...base, agentRef: ref(agent), actor: ref(admin), status: out.decide, reasons: position.reasons, rejectionReason: o.rejectionReason ?? undefined });
+    }
+    if (out.settleAt) {
+      await prisma.auditLog.create({ data: { tenantId, actorId: admin.id, action: 'order.settle', entityType: 'Order', entityId: o.id, before: { status, settledAt: null }, after: { status, settledAt: out.settleAt.toISOString(), totalPaise: t.totalPaise }, createdAt: out.settleAt } });
+      await feed('order.settled', 'Order', o.id, out.settleAt, admin.id, { ...base, status, settledAt: out.settleAt.toISOString(), actor: ref(admin) });
+    }
     return o;
   };
 
@@ -348,7 +380,10 @@ export async function runSeed(prisma: PrismaClient, opts: SeedOptions): Promise<
     });
     await prisma.memoItem.createMany({ data: ps.map((p, i) => ({ tenantId, memoId: m.id, pieceId: p.id, valuePaise: BigInt(values[i]), status: 'OUT' as const, createdAt: when })) });
     await move(ps, { type: 'AGENT', agentId: agent.id }, { type: 'SHOP', shopId: s.id }, 'MEMO_HANDOVER', when, agent, { id: m.id, number, visitId }, agent.name, s.name);
-    await feed('memo.created', 'Memo', m.id, when, agent.id, { memoId: m.id, number, agent: ref(agent), shop: ref(s), dueDate: dueYmd, pieceCount: ps.length, totalValuePaise: total });
+    memoOut.set(s.id, (memoOut.get(s.id) ?? 0) + total);
+    const pieceRefs = ps.map((p) => ({ id: p.id, tagCode: p.tagCode }));
+    await feed('memo.created', 'Memo', m.id, when, agent.id, { memoId: m.id, number, visitId, agent: ref(agent), shop: ref(s), dueDate: dueYmd, pieceCount: ps.length, totalValuePaise: total, pieces: pieceRefs });
+    await feed('memo.acknowledged', 'Memo', m.id, m.ackAt!, null, { memoId: m.id, number, method: 'QR_CONFIRM', ackAt: m.ackAt!.toISOString(), by: 'retailer', visitId, agent: ref(agent), shop: ref(s), pieceCount: ps.length, totalValuePaise: total, pieces: pieceRefs });
     await prisma.auditLog.create({ data: { tenantId, actorId: agent.id, action: 'memo.create', entityType: 'Memo', entityId: m.id, after: { number, shopId: s.id, visitId, dueDate: dueYmd, pieceIds: ps.map((p) => p.id), totalValuePaise: total }, createdAt: when } });
     return m;
   };
@@ -359,21 +394,23 @@ export async function runSeed(prisma: PrismaClient, opts: SeedOptions): Promise<
   const d4 = addDays(TODAY, -4);
   const d1 = addDays(TODAY, -1);
   const v1 = await visit(rahul, shop('Mehta Jewellers'), d9, 1, 'COMPLETED', { in: at(d9, '11:05'), out: at(d9, '12:10') });
-  await order(rahul, shop('Mehta Jewellers'), v1.id, d9, at(d9, '11:40'), [['AJ-BNG-2201', 2], ['AJ-EAR-2231', 3]], 'APPROVED');
+  // ≥ ₹10L → pending (ORDER_THRESHOLD) → Priya approved it; paid 3 days later.
+  await order(rahul, shop('Mehta Jewellers'), v1.id, d9, at(d9, '11:40'), [['AJ-BNG-2201', 2], ['AJ-EAR-2231', 3]], { expect: 'PENDING_APPROVAL', decide: 'APPROVED', settleAt: at(addDays(TODAY, -6), '16:00') });
   // OVERDUE memo at Mehta (due 2 days ago)
   await memo(rahul, shop('Mehta Jewellers'), v1.id, d9, at(d9, '11:55'), [rahulBag[3], rahulBag[9]], addDays(TODAY, -2));
 
   const v2 = await visit(arjun, shop('Royal Gems'), d6, 1, 'COMPLETED', { in: at(d6, '12:20'), out: at(d6, '13:05') });
-  await order(arjun, shop('Royal Gems'), v2.id, d6, at(d6, '12:50'), [['AJ-NCK-1813', 4], ['AJ-RNG-1822', 2]], 'APPROVED');
+  await order(arjun, shop('Royal Gems'), v2.id, d6, at(d6, '12:50'), [['AJ-NCK-1813', 4], ['AJ-RNG-1822', 2]], { expect: 'CONFIRMED', settleAt: at(addDays(TODAY, -2), '15:30') });
   const v3 = await visit(kavya, shop('Jain Ornaments'), d4, 1, 'COMPLETED', { in: at(d4, '15:10'), out: at(d4, '15:55'), offM: 61, verification: 'LOW_ACCURACY' });
-  await order(kavya, shop('Jain Ornaments'), v3.id, d4, at(d4, '15:40'), [['AJ-PND-2241', 6]], 'REJECTED');
+  // Jain is near its limit (₹13.5L of ₹15L outstanding) → CREDIT_LIMIT → rejected.
+  await order(kavya, shop('Jain Ornaments'), v3.id, d4, at(d4, '15:40'), [['AJ-PND-2241', 6]], { expect: 'PENDING_APPROVAL', decide: 'REJECTED', reason: 'Over the credit limit this month — clear the old balance first' });
   const v4 = await visit(arjun, shop('Kapoor & Sons'), d1, 1, 'COMPLETED', { in: at(d1, '11:30'), out: at(d1, '12:25') });
   // DUE_SOON memo at Kapoor & Sons (due tomorrow)
   await memo(arjun, shop('Kapoor & Sons'), v4.id, d1, at(d1, '12:05'), [arjunBag[0], arjunBag[2]], addDays(TODAY, 1));
   const v5 = await visit(rahul, shop('Gupta Gold House'), d1, 1, 'COMPLETED', { in: at(d1, '11:15'), out: at(d1, '12:00') });
-  await order(rahul, shop('Gupta Gold House'), v5.id, d1, at(d1, '11:45'), [['AJ-RNG-2221', 5], ['AJ-BNG-2202', 1]], 'APPROVED');
+  await order(rahul, shop('Gupta Gold House'), v5.id, d1, at(d1, '11:45'), [['AJ-RNG-2221', 5], ['AJ-BNG-2202', 1]], { expect: 'CONFIRMED' });
   const v6 = await visit(rahul, shop('Bansal Jewellers'), d1, 2, 'COMPLETED', { in: at(d1, '14:20'), out: at(d1, '15:05') });
-  await order(rahul, shop('Bansal Jewellers'), v6.id, d1, at(d1, '14:50'), [['AJ-EAR-1832', 6], ['AJ-PND-1842', 4]], 'SUBMITTED');
+  await order(rahul, shop('Bansal Jewellers'), v6.id, d1, at(d1, '14:50'), [['AJ-EAR-1832', 6], ['AJ-PND-1842', 4]], { expect: 'CONFIRMED' });
   await visit(kavya, shop('Batra Gold & Diamonds'), d1, 1, 'MISSED');
 
   // Today: Rahul has 4 PLANNED visits, Sharma Jewellers first.
@@ -381,14 +418,18 @@ export async function runSeed(prisma: PrismaClient, opts: SeedOptions): Promise<
   await visit(rahul, shop('Gupta Gold House'), TODAY, 2, 'PLANNED');
   await visit(rahul, shop('Bansal Jewellers'), TODAY, 3, 'PLANNED');
   await visit(rahul, shop('Malhotra Diamonds'), TODAY, 4, 'PLANNED');
-  // Arjun: one completed with an order awaiting approval, one checked in right now.
+  // Arjun: a normal order confirmed directly at Sethi; now at Royal Gems with a bridal set above the
+  // ₹10L approval threshold (ORDER_THRESHOLD only — Royal Gems has room on its limit).
   const a1 = await visit(arjun, shop('Sethi Jewellers'), TODAY, 1, 'COMPLETED', { in: minsAgo(95), out: minsAgo(50) });
-  await order(arjun, shop('Sethi Jewellers'), a1.id, TODAY, minsAgo(70), [['AJ-NCK-2211', 1], ['AJ-RNG-2223', 2]], 'SUBMITTED');
-  await visit(arjun, shop('Royal Gems'), TODAY, 2, 'CHECKED_IN', { in: minsAgo(12), offM: 18 });
+  await order(arjun, shop('Sethi Jewellers'), a1.id, TODAY, minsAgo(70), [['AJ-NCK-2211', 1], ['AJ-RNG-2223', 2]], { expect: 'CONFIRMED' });
+  const a2 = await visit(arjun, shop('Royal Gems'), TODAY, 2, 'ACTIVE', { in: minsAgo(30), offM: 18 });
+  await order(arjun, shop('Royal Gems'), a2.id, TODAY, minsAgo(18), [['AJ-BRD-2252', 1]], { expect: 'PENDING_APPROVAL' });
   await visit(arjun, shop('Kapoor & Sons'), TODAY, 3, 'PLANNED');
   // Kavya: one in progress (proof uploaded), two planned.
   // Simulated GPS (demo mode) at the shop's own coordinates — shows the PROOF_SIMULATED state end to end.
-  await visit(kavya, shop('Jain Ornaments'), TODAY, 1, 'ACTIVE', { in: minsAgo(25), offM: 0, verification: 'SIMULATED' });
+  const k1 = await visit(kavya, shop('Jain Ornaments'), TODAY, 1, 'ACTIVE', { in: minsAgo(25), offM: 0, verification: 'SIMULATED' });
+  // Jain is still near its limit: a modest pendant order trips CREDIT_LIMIT (not the threshold).
+  await order(kavya, shop('Jain Ornaments'), k1.id, TODAY, minsAgo(15), [['AJ-PND-2241', 4]], { expect: 'PENDING_APPROVAL' });
   await visit(kavya, shop('Batra Gold & Diamonds'), TODAY, 2, 'PLANNED');
   await visit(kavya, shop('Mehta Jewellers'), TODAY, 3, 'PLANNED');
 

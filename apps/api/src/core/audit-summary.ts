@@ -13,7 +13,7 @@ export type RefMap = Record<string, { type: RefKind; name: string }>;
 const ID_KEYS: Record<string, RefKind> = { shopId: 'shop', agentId: 'user', assignedAgentId: 'user', orderId: 'order', memoId: 'memo', visitId: 'visit', designId: 'design' };
 const ENTITY_KIND: Record<string, RefKind> = { Order: 'order', Memo: 'memo', Shop: 'shop', User: 'user', Visit: 'visit', JewelryDesign: 'design', SamplePiece: 'piece', WebhookEndpoint: 'webhook' };
 const FIELD_LABEL: Record<string, string> = {
-  assignedAgentId: 'assigned agent', creditLimitPaise: 'credit limit', geofenceRadiusM: 'geofence', ownerName: 'owner', active: 'active',
+  assignedAgentId: 'assigned agent', creditLimitPaise: 'credit limit', openingOutstandingPaise: 'opening outstanding', geofenceRadiusM: 'geofence', ownerName: 'owner', active: 'active',
   makingChargeValue: 'making charge', stoneValuePaise: 'stone value', netWeightMg: 'net weight', grossWeightMg: 'gross weight', events: 'events', url: 'URL',
 };
 const SKIP_DIFF = new Set(['id', 'code', 'price', 'otherComponents', 'imageUrls', 'description', 'lat', 'lng', 'notes']);
@@ -101,8 +101,23 @@ export function auditSummary(r: AuditLogRow, refs: RefMap): string {
   const self = name(r.entityId, r.entityType);
   const n = (x: unknown) => (Array.isArray(x) ? x.length : 0);
   switch (r.action) {
-    case 'order.create':
-      return `Created ${a.number ?? self}${typeof a.totalPaise === 'number' ? ` · ${formatINR(a.totalPaise)}` : ''}${a.sourceMemoId ? ` from ${name(a.sourceMemoId, 'a memo')}` : ''}`;
+    case 'order.create': {
+      const why = Array.isArray(a.approvalReasons) && a.approvalReasons.length ? ` · needs approval (${(a.approvalReasons as string[]).map((x) => (x === 'CREDIT_LIMIT' ? 'over credit limit' : x === 'ORDER_THRESHOLD' ? 'above threshold' : x)).join(', ')})` : a.status === 'CONFIRMED' ? ' · confirmed' : '';
+      return `Created ${a.number ?? self}${typeof a.totalPaise === 'number' ? ` · ${formatINR(a.totalPaise)}` : ''}${a.sourceMemoId ? ` from ${name(a.sourceMemoId, 'a memo')}` : ''}${why}`;
+    }
+    case 'memo.sale_rejected':
+      return `Sale on ${self} rejected with ${name(a.orderId, 'its order')}: ${plural(n(a.pieceIds), 'piece')} (${(a.pieceIds as string[] | undefined)?.map((p) => name(p, '?')).join(', ') ?? ''}) back on memo · ${b.status} → ${a.status}`;
+    case 'order.settle':
+      return `Marked ${self} settled${typeof a.totalPaise === 'number' ? ` · ${formatINR(a.totalPaise)}` : ''}`;
+    case 'order.cancel':
+      return `Cancelled ${self} (${b.status ?? '?'} → CANCELLED)${a.reason ? ` — “${a.reason}”` : ''}`;
+    case 'tenant.settings': {
+      const t = (v: unknown) => (typeof v === 'number' ? formatINR(v) : 'none');
+      const parts: string[] = [];
+      if ('approvalThresholdPaise' in a) parts.push(`approval threshold ${t(b.approvalThresholdPaise)} → ${t(a.approvalThresholdPaise)}`);
+      if ('demoMode' in a) parts.push(`demo mode ${b.demoMode ? 'on' : 'off'} → ${a.demoMode ? 'on' : 'off'}`);
+      return `Updated settings: ${parts.join(', ') || 'no change'}`;
+    }
     case 'order.approve':
       return `Approved ${self}`;
     case 'order.reject':

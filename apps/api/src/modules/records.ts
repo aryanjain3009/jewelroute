@@ -12,8 +12,9 @@ import { Requires } from '../common/auth';
 import { Ctx, ReqCtx } from '../common/context';
 import { badRequest, notFound } from '../common/errors';
 import { parse, ymd } from '../common/http';
+import { ActivityFilter, ActivityService } from '../core/activity';
 import { auditSummary, resolveAuditRefs } from '../core/audit-summary';
-import { activityTitle } from '../core/outbox';
+import { CreditService } from '../core/credit';
 import { RateMap, RatesService, valueOrZero } from '../core/rates';
 import { dateOf, pieceInclude, toDesign, toPiece, toShop, ViewsService, visitInclude, VisitRow, VisitSummaryView } from '../core/views';
 import { CatalogQuery, VisitsService } from './visits';
@@ -23,7 +24,7 @@ export type Ref = { id: string; name: string };
 export type ProofState = 'VERIFIED' | 'LOW_ACCURACY' | 'SIMULATED' | 'MISSING' | 'NOT_STARTED';
 export type PieceStatus = 'IN_VAULT' | 'WITH_AGENT' | 'ON_MEMO' | 'OVERDUE' | 'SOLD' | 'LOST';
 export type ShopStatus = 'ACTIVE' | 'MEMO_OVERDUE' | 'DORMANT' | 'NEW';
-export type AttentionKind = 'MEMO_OVERDUE' | 'MEMO_DUE_TODAY' | 'VISIT_MISSED' | 'PROOF_MISSING' | 'PROOF_SIMULATED' | 'ORDER_PENDING' | 'WEBHOOK_FAILING';
+export type AttentionKind = 'MEMO_OVERDUE' | 'MEMO_DUE_TODAY' | 'VISIT_MISSED' | 'PROOF_MISSING' | 'PROOF_SIMULATED' | 'ORDER_PENDING' | 'WEBHOOK_FAILING' | 'ACK_SELF_SUSPECTED';
 export interface AttentionItem {
   id: string;
   kind: AttentionKind;
@@ -83,15 +84,9 @@ export function proofStateOf(v: { checkInAt?: string; proofCount: number; verifi
   return 'VERIFIED';
 }
 
-type OutboxRow = Prisma.OutboxEventGetPayload<object>;
-export function toActivityItems(rows: OutboxRow[]) {
-  return rows.map((e) => {
-    const data = ((e.payload as { data?: Record<string, unknown> })?.data ?? {}) as Record<string, never>;
-    const t = activityTitle(e.type, data);
-    const d = data as { agent?: Ref; actor?: Ref; shop?: Ref };
-    return { id: e.id, type: e.type, title: t.title, amountPaise: t.amountPaise, actor: d.actor ?? d.agent, shop: d.shop, entity: { type: e.aggregateType, id: e.aggregateId }, createdAt: e.createdAt.toISOString() };
-  });
-}
+/** Orders that are real business — everything except REJECTED and CANCELLED. */
+const NOT_DEAD = { notIn: ['REJECTED', 'CANCELLED'] as OrderStatus[] };
+const ORDER_STATUSES = ['DRAFT', 'PENDING_APPROVAL', 'CONFIRMED', 'APPROVED', 'REJECTED', 'CANCELLED', 'SUBMITTED'] as const;
 
 // ---------------------------------------------------------------- query schemas
 const VisitsQuery = z.object({
@@ -124,6 +119,8 @@ export class RecordsService {
     private readonly views: ViewsService,
     private readonly rates: RatesService,
     private readonly visits: VisitsService,
+    private readonly activityFeed: ActivityService,
+    private readonly credit: CreditService,
   ) {}
 
   private get db() {
@@ -136,7 +133,7 @@ export class RecordsService {
     const ids = rows.map((r) => r.id);
     const [summaries, orders, memos, returns] = await Promise.all([
       this.views.visitSummaries(tid, rows),
-      this.db.order.groupBy({ by: ['visitId'], where: { tenantId: tid, visitId: { in: ids }, status: { not: 'REJECTED' } }, _count: { _all: true }, _sum: { totalPaise: true } }),
+      this.db.order.groupBy({ by: ['visitId'], where: { tenantId: tid, visitId: { in: ids }, status: NOT_DEAD }, _count: { _all: true }, _sum: { totalPaise: true } }),
       this.db.memo.groupBy({ by: ['visitId'], where: { tenantId: tid, visitId: { in: ids } }, _count: { _all: true }, _sum: { totalValuePaise: true } }),
       this.db.custodyEvent.groupBy({ by: ['visitId'], where: { tenantId: tid, visitId: { in: ids }, reason: 'MEMO_RETURN' }, _count: { _all: true } }),
     ]);
@@ -268,17 +265,26 @@ export class RecordsService {
     const uniq = (xs: (string | null | undefined)[]) => [...new Set(xs.filter(Boolean) as string[])];
     const userIds = uniq(events.flatMap((e) => [e.fromAgentId, e.toAgentId, e.actorId]));
     const visitIds = uniq(events.map((e) => e.visitId));
-    const [users, shops, memos, visits, proofs, pieces] = await Promise.all([
+    const conv = events.filter((e) => e.reason === 'CONVERTED_TO_SALE' && e.memoId);
+    const [users, shops, memos, visits, proofs, pieces, convLines] = await Promise.all([
       this.db.user.findMany({ where: { tenantId: tid, id: { in: userIds } }, select: { id: true, name: true } }),
       this.db.shop.findMany({ where: { tenantId: tid, id: { in: uniq(events.flatMap((e) => [e.fromShopId, e.toShopId])) } }, select: { id: true, name: true } }),
-      this.db.memo.findMany({ where: { tenantId: tid, id: { in: uniq(events.map((e) => e.memoId)) } }, select: { id: true, number: true } }),
+      this.db.memo.findMany({ where: { tenantId: tid, id: { in: uniq(events.map((e) => e.memoId)) } }, select: { id: true, number: true, ackStatus: true, ackMethod: true, ackAt: true, selfAckSuspected: true } }),
       this.db.visit.findMany({ where: { tenantId: tid, id: { in: visitIds } }, select: { id: true, checkInLat: true, checkInLng: true, checkInDistanceM: true, verification: true, shop: { select: { name: true } } } }),
       this.db.visitProof.findMany({ where: { tenantId: tid, visitId: { in: visitIds } }, select: { id: true, visitId: true, url: true }, orderBy: [{ visitId: 'asc' }, { uploadedAt: 'asc' }, { id: 'asc' }], distinct: ['visitId'] }),
       this.db.samplePiece.findMany({ where: { tenantId: tid, id: { in: uniq(events.map((e) => e.pieceId)) } }, select: { id: true, tagCode: true, design: { select: { name: true } } } }),
+      // v3: the order a memo conversion created for each sold piece (OrderItem.pieceId on an order sourced from that memo)
+      conv.length
+        ? this.db.orderItem.findMany({
+            where: { tenantId: tid, pieceId: { in: uniq(conv.map((e) => e.pieceId)) }, order: { sourceMemoId: { in: uniq(conv.map((e) => e.memoId)) } } },
+            select: { pieceId: true, order: { select: { id: true, number: true, sourceMemoId: true } } },
+          })
+        : Promise.resolve([]),
     ]);
     const U = new Map(users.map((u) => [u.id, u.name]));
     const S = new Map(shops.map((s) => [s.id, s.name]));
-    const M = new Map(memos.map((m) => [m.id, m.number]));
+    const M = new Map(memos.map((m) => [m.id, m]));
+    const CO = new Map(convLines.map((l) => [`${l.pieceId}|${l.order.sourceMemoId}`, { id: l.order.id, number: l.order.number }]));
     const V = new Map(visits.map((v) => [v.id, v]));
     const P = new Map(proofs.map((p) => [p.visitId, p]));
     const PC = new Map(pieces.map((p) => [p.id, p]));
@@ -309,18 +315,36 @@ export class RecordsService {
             : undefined,
         visit: v ? { id: v.id, shopName: v.shop.name } : undefined,
         proof: proof ? { id: proof.id, url: proof.url } : undefined,
-        memo: e.memoId ? { id: e.memoId, number: M.get(e.memoId) ?? '' } : undefined,
+        memo: e.memoId ? { id: e.memoId, number: M.get(e.memoId)?.number ?? '' } : undefined,
+        // v3: "who acknowledged receiving it" — the retailer's acknowledgement of the memo hand-over.
+        ack:
+          e.reason === 'MEMO_HANDOVER' && e.memoId && M.get(e.memoId)
+            ? (() => {
+                const m = M.get(e.memoId!)!;
+                return m.ackStatus === 'ACKNOWLEDGED'
+                  ? {
+                      status: m.ackStatus,
+                      method: (m.ackMethod ?? undefined) as 'QR_CONFIRM' | 'OTP' | undefined,
+                      at: iso(m.ackAt),
+                      by: 'retailer' as const,
+                      ...(m.selfAckSuspected ? { selfAckSuspected: true as const, note: "Acknowledged from the agent's device" } : {}),
+                    }
+                  : { status: m.ackStatus, by: 'retailer' as const };
+              })()
+            : undefined,
+        order: e.reason === 'CONVERTED_TO_SALE' && e.memoId ? CO.get(`${e.pieceId}|${e.memoId}`) : undefined,
         eventId: e.outboxEventId ?? undefined,
       };
     });
   }
 
+  /** ShopRow[] — v2 fields + v3 `credit` (CreditPosition, no prospective order), `upcomingVisit`, `lastOrder`. */
   async shopRows(tid: string, shops: Prisma.ShopGetPayload<{ include: { assignedAgent: { select: { id: true; name: true } } } }>[], rates?: RateMap) {
     if (!shops.length) return [];
     const ids = shops.map((s) => s.id);
     const today = istDate();
     const since30 = new Date(Date.now() - 30 * DAY_MS);
-    const [r, exposure, lastVisits, openOrders, here, next] = await Promise.all([
+    const [r, exposure, lastVisits, openOrders, here, next, lastOrders] = await Promise.all([
       rates ? Promise.resolve(rates) : this.rates.current(tid),
       this.db.$queryRaw<{ shopId: string; count: bigint; value: bigint | null; overdue: boolean }[]>`
         SELECT m."shopId", count(DISTINCT m.id) AS count, sum(mi."valuePaise") AS value, bool_or(m."dueDate" < ${today}::date) AS overdue
@@ -331,18 +355,24 @@ export class RecordsService {
         FROM "Visit" v JOIN "User" u ON u.id = v."agentId"
         WHERE v."tenantId" = ${tid} AND v.status = 'COMPLETED' AND v."completedAt" IS NOT NULL AND v."shopId" = ANY(${ids})
         ORDER BY v."shopId", v."completedAt" DESC`,
-      this.db.order.groupBy({ by: ['shopId'], where: { tenantId: tid, shopId: { in: ids }, status: { in: ['SUBMITTED', 'APPROVED'] }, createdAt: { gte: since30 } }, _sum: { totalPaise: true } }),
+      this.db.order.groupBy({ by: ['shopId'], where: { tenantId: tid, shopId: { in: ids }, status: { in: ['PENDING_APPROVAL', 'CONFIRMED', 'APPROVED'] }, createdAt: { gte: since30 } }, _sum: { totalPaise: true } }),
       this.db.samplePiece.findMany({ where: { tenantId: tid, custodianType: 'SHOP', custodianShopId: { in: ids } }, select: { custodianShopId: true, netWeightMg: true, design: true } }),
       this.db.$queryRaw<{ id: string; shopId: string; plannedDate: Date; plannedTime: string | null; agentId: string; agentName: string }[]>`
         SELECT DISTINCT ON (v."shopId") v.id, v."shopId", v."plannedDate", v."plannedTime", v."agentId", u.name AS "agentName"
         FROM "Visit" v JOIN "User" u ON u.id = v."agentId"
         WHERE v."tenantId" = ${tid} AND v.status = 'PLANNED' AND v."plannedDate" >= ${today}::date AND v."shopId" = ANY(${ids})
         ORDER BY v."shopId", v."plannedDate", v."plannedTime" NULLS LAST, v.sequence`,
+      this.db.$queryRaw<{ id: string; shopId: string; number: string; status: OrderStatus; totalPaise: bigint; createdAt: Date; settledAt: Date | null }[]>`
+        SELECT DISTINCT ON (o."shopId") o.id, o."shopId", o.number, o.status, o."totalPaise", o."createdAt", o."settledAt"
+        FROM "Order" o WHERE o."tenantId" = ${tid} AND o."shopId" = ANY(${ids})
+        ORDER BY o."shopId", o."createdAt" DESC, o.id DESC`,
     ]);
     const E = new Map(exposure.map((e) => [e.shopId, e]));
     const L = new Map(lastVisits.map((l) => [l.shopId, l]));
     const O = new Map(openOrders.map((o) => [o.shopId, num(o._sum.totalPaise)]));
     const N = new Map(next.map((n) => [n.shopId, n]));
+    const LO = new Map(lastOrders.map((o) => [o.shopId, o]));
+    const C = await this.credit.positions(tid, shops, new Map(exposure.map((e) => [e.shopId, num(e.value)])));
     const H = new Map<string, { count: number; value: number }>();
     for (const p of here) {
       const h = H.get(p.custodianShopId!) ?? { count: 0, value: 0 };
@@ -356,6 +386,8 @@ export class RecordsService {
       const l = L.get(s.id);
       const n = N.get(s.id);
       const h = H.get(s.id);
+      const lo = LO.get(s.id);
+      const nextVisit = n ? { id: n.id, date: ymdOf(n.plannedDate), plannedTime: n.plannedTime ?? undefined, agent: { id: n.agentId, name: n.agentName } } : undefined;
       const engaged = (l && now - l.completedAt.getTime() <= 30 * DAY_MS) || Number(e?.count ?? 0) > 0 || (O.get(s.id) ?? 0) > 0;
       const status: ShopStatus = e?.overdue ? 'MEMO_OVERDUE' : engaged ? 'ACTIVE' : !l && now - s.createdAt.getTime() <= 30 * DAY_MS ? 'NEW' : 'DORMANT';
       return {
@@ -369,7 +401,10 @@ export class RecordsService {
         samplesHereCount: h?.count ?? 0,
         samplesHereValuePaise: h?.value ?? 0,
         piecesHere: h?.count ?? 0, // v1 alias
-        nextVisit: n ? { id: n.id, date: ymdOf(n.plannedDate), plannedTime: n.plannedTime ?? undefined, agent: { id: n.agentId, name: n.agentName } } : undefined,
+        nextVisit,
+        upcomingVisit: nextVisit, // v3 name; same object as nextVisit
+        lastOrder: lo ? { id: lo.id, number: lo.number, status: lo.status, totalPaise: num(lo.totalPaise), createdAt: lo.createdAt.toISOString(), settledAt: iso(lo.settledAt) } : undefined,
+        credit: C.get(s.id)!,
         status,
       };
     });
@@ -398,9 +433,9 @@ export class RecordsService {
     });
   }
 
-  async activityWhere(tid: string, where: Prisma.OutboxEventWhereInput, take = 40) {
-    const rows = await this.db.outboxEvent.findMany({ where: { AND: [{ tenantId: tid, type: { not: 'ping' } }, where] }, orderBy: { createdAt: 'desc' }, take });
-    return toActivityItems(rows);
+  /** Every record's `activity` — the one projection, filtered by an indexed ref. */
+  activity(tid: string, f: ActivityFilter, take = 40) {
+    return this.activityFeed.list(tid, f, take);
   }
 
   /** v1 Memo + `pieceCount` + `issuedAt`. */
@@ -414,7 +449,7 @@ export class RecordsService {
     const today = istDate();
     const nowIstHour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', hour12: false }).format(new Date()));
     const since24h = new Date(Date.now() - DAY_MS);
-    const [memos, missed, noProof, simulated, pending, failing] = await Promise.all([
+    const [memos, missed, noProof, simulated, pending, failing, selfAcks] = await Promise.all([
       this.views.memos(tid, { status: { in: OPEN_MEMO }, dueDate: { lte: dateOf(day) } }, { orderBy: { dueDate: 'asc' }, take: 100 }),
       this.db.visit.findMany({
         where: {
@@ -434,8 +469,15 @@ export class RecordsService {
         take: 50,
       }),
       this.db.visit.findMany({ where: { tenantId: tid, verification: 'SIMULATED', plannedDate: dateOf(day) }, include: { shop: { select: { id: true, name: true } }, agent: { select: { id: true, name: true } } }, take: 50 }),
-      this.db.order.findMany({ where: { tenantId: tid, status: 'SUBMITTED' }, include: { shop: { select: { name: true } }, agent: { select: { name: true } } }, orderBy: { createdAt: 'asc' }, take: 50 }),
+      this.db.order.findMany({ where: { tenantId: tid, status: 'PENDING_APPROVAL' }, include: { shop: { select: { name: true } }, agent: { select: { name: true } } }, orderBy: { createdAt: 'asc' }, take: 50 }),
       this.db.webhookDelivery.groupBy({ by: ['endpointId'], where: { tenantId: tid, status: { in: ['FAILED', 'DEAD'] }, createdAt: { gte: since24h } }, _count: { _all: true }, _max: { createdAt: true } }),
+      // Audit B8: open memos acknowledged from the agent's own session/device in the last 7 days.
+      this.db.memo.findMany({
+        where: { tenantId: tid, selfAckSuspected: true, status: { in: OPEN_MEMO }, ackAt: { gte: new Date(Date.now() - 7 * DAY_MS) } },
+        include: { shop: { select: { name: true } }, agent: { select: { name: true } } },
+        orderBy: { ackAt: 'desc' },
+        take: 50,
+      }),
     ]);
     const items: AttentionItem[] = [];
     for (const m of memos) {
@@ -453,13 +495,18 @@ export class RecordsService {
       });
     }
     for (const v of missed) {
+      // Worded from the stored status, so Home never says "missed" for a visit every other screen shows
+      // as planned (a PLANNED visit after 18:00 IST can still be checked in today). Timed at the planned
+      // slot (IST) when there is one, else the start of the planned day.
+      const ymd = ymdOf(v.plannedDate);
+      const isMissed = v.status === 'MISSED';
       items.push({
         id: `visit_missed:${v.id}`,
         kind: 'VISIT_MISSED',
         severity: 'medium',
-        title: `${v.agent.name} missed ${v.shop.name}`,
-        subtitle: `Planned ${ymdOf(v.plannedDate)}${v.plannedTime ? ` ${v.plannedTime}` : ''} · ${v.status === 'MISSED' ? 'marked missed' : 'never checked in'}`,
-        at: istStart(ymdOf(v.plannedDate)).toISOString(),
+        title: isMissed ? `${v.agent.name} missed ${v.shop.name}` : `${v.agent.name} has not checked in at ${v.shop.name}`,
+        subtitle: `Planned ${ymd}${v.plannedTime ? ` ${v.plannedTime}` : ''} · ${isMissed ? 'marked missed' : 'still planned, not checked in'}`,
+        at: (v.plannedTime ? new Date(`${ymd}T${v.plannedTime}:00+05:30`) : istStart(ymd)).toISOString(),
         entity: { type: 'visit', id: v.id },
       });
     }
@@ -491,10 +538,22 @@ export class RecordsService {
         kind: 'ORDER_PENDING',
         severity: 'medium',
         title: `${o.number} awaiting approval`,
-        subtitle: `${o.shop.name} · ${o.agent.name}`,
+        subtitle: `${o.shop.name} · ${o.agent.name}${o.approvalReasons.length ? ` · ${o.approvalReasons.map((x) => (x === 'CREDIT_LIMIT' ? 'over credit limit' : x === 'ORDER_THRESHOLD' ? 'above approval threshold' : x)).join(', ')}` : ''}`,
         amountPaise: num(o.totalPaise),
         at: o.createdAt.toISOString(),
         entity: { type: 'order', id: o.id },
+      });
+    }
+    for (const m of selfAcks) {
+      items.push({
+        id: `ack_self_suspected:${m.id}`,
+        kind: 'ACK_SELF_SUSPECTED',
+        severity: 'medium',
+        title: `${m.number} acknowledged from the agent's device`,
+        subtitle: `${m.shop.name} · ${m.agent.name} · confirm receipt with the retailer`,
+        amountPaise: num(m.totalValuePaise),
+        at: (m.ackAt ?? m.createdAt).toISOString(),
+        entity: { type: 'memo', id: m.id },
       });
     }
     if (failing.length) {
@@ -572,13 +631,7 @@ export class RecordsService {
       this.views.orders(tid, { shopId: id }, { take: 50 }),
       this.views.memos(tid, { shopId: id }, { take: 50 }),
       this.pieceRows(tid, { custodianType: 'SHOP', custodianShopId: id }, rates),
-      this.activityWhere(tid, {
-        OR: [
-          { payload: { path: ['data', 'shop', 'id'], equals: id } },
-          { payload: { path: ['data', 'to', 'shopId'], equals: id } },
-          { payload: { path: ['data', 'from', 'shopId'], equals: id } },
-        ],
-      }),
+      this.activity(tid, { shopId: id }),
     ]);
     return { shop: row, visits: await this.adminVisitRows(tid, visitRows), orders, memos, pieces, activity };
   }
@@ -606,7 +659,7 @@ export class RecordsService {
     const [row, audit, activity, events] = await Promise.all([
       this.adminVisitRow(tid, id),
       this.auditRows(tid, { entityId: { in: entityIds } }),
-      this.activityWhere(tid, { OR: [{ aggregateType: 'Visit', aggregateId: id }, { payload: { path: ['data', 'visitId'], equals: id } }] }, 100),
+      this.activity(tid, { visitId: id }, 100),
       this.db.custodyEvent.findMany({ where: { tenantId: tid, visitId: id }, orderBy: [{ occurredAt: 'asc' }, { seq: 'asc' }] }),
     ]);
     return { ...detail, row, audit, activity, custody: await this.custodyRows(tid, events) };
@@ -623,7 +676,7 @@ export class RecordsService {
       this.pieceRows(tid, { custodianType: 'AGENT', custodianAgentId: id }, rates),
       this.views.memos(tid, { agentId: id, status: { in: OPEN_MEMO } }, { orderBy: { dueDate: 'asc' } }),
       this.views.orders(tid, { agentId: id }, { take: 30 }),
-      this.activityWhere(tid, { OR: [{ actorId: id }, { payload: { path: ['data', 'agent', 'id'], equals: id } }, { payload: { path: ['data', 'to', 'agentId'], equals: id } }] }),
+      this.activity(tid, { agentId: id }),
       this.db.visit.aggregate({ where: { tenantId: tid, agentId: id, checkInAt: { not: null } }, _max: { checkInAt: true } }),
     ]);
     return {
@@ -637,7 +690,9 @@ export class RecordsService {
   }
 
   async listOrders(ctx: ReqCtx, q: z.infer<typeof OrdersQuery>) {
-    const statuses = csv(q.status, ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED'] as const, 'status') as OrderStatus[] | undefined;
+    // v3 statuses; legacy `SUBMITTED` is accepted as an alias of PENDING_APPROVAL for v2 clients.
+    const raw = csv(q.status, ORDER_STATUSES, 'status');
+    const statuses = raw ? ([...new Set(raw.map((x) => (x === 'SUBMITTED' ? 'PENDING_APPROVAL' : x)))] as OrderStatus[]) : undefined;
     const where: Prisma.OrderWhereInput = {};
     if (statuses) where.status = { in: statuses };
     if (q.agentId) where.agentId = q.agentId;
@@ -653,7 +708,7 @@ export class RecordsService {
     const [visit, history, activity] = await Promise.all([
       order.visitId ? this.adminVisitRow(tid, order.visitId) : undefined,
       this.auditRows(tid, { entityType: 'Order', entityId: id }),
-      this.activityWhere(tid, { OR: [{ aggregateType: 'Order', aggregateId: id }, { payload: { path: ['data', 'orderId'], equals: id } }] }, 100),
+      this.activity(tid, { orderId: id }, 100),
     ]);
     return { order, visit, history, activity };
   }
@@ -692,17 +747,7 @@ export class RecordsService {
       this.custodyRows(tid, kept),
       memo.visitId ? this.adminVisitRow(tid, memo.visitId) : undefined,
       this.auditRows(tid, { entityType: 'Memo', entityId: id }),
-      this.activityWhere(
-        tid,
-        {
-          OR: [
-            { aggregateType: 'Memo', aggregateId: id },
-            { payload: { path: ['data', 'memoId'], equals: id } },
-            { payload: { path: ['data', 'sourceMemoId'], equals: id } },
-          ],
-        },
-        100,
-      ),
+      this.activity(tid, { memoId: id }, 100),
     ]);
     return { memo: { ...memo, pieceCount: memo.items.length, issuedAt: memo.createdAt }, custody, visit, history, activity };
   }
@@ -732,21 +777,7 @@ export class RecordsService {
       this.db.jewelryDesign.findFirstOrThrow({ where: { id: piece.designId, tenantId: tid } }),
       this.db.custodyEvent.findMany({ where: { tenantId: tid, pieceId: id }, orderBy: { seq: 'asc' } }),
     ]);
-    const eventIds = [...new Set(events.map((e) => e.outboxEventId).filter(Boolean) as string[])];
-    const [rows, activity] = await Promise.all([
-      this.custodyRows(tid, events),
-      this.activityWhere(
-        tid,
-        {
-          OR: [
-            ...(eventIds.length ? [{ id: { in: eventIds } }] : []),
-            { aggregateType: 'SamplePiece', aggregateId: id },
-            { payload: { path: ['data', 'pieces'], array_contains: [{ id }] } },
-          ],
-        },
-        100,
-      ),
-    ]);
+    const [rows, activity] = await Promise.all([this.custodyRows(tid, events), this.activity(tid, { pieceId: id }, 100)]);
     return { piece, design: toDesign(design, rates), events: rows, activity };
   }
 
@@ -783,7 +814,7 @@ export class RecordsService {
       this.pieceRows(tid, { custodianType: 'AGENT', custodianAgentId: me }, rates),
       this.views.memos(tid, { agentId: me, status: { in: OPEN_MEMO } }, { orderBy: { dueDate: 'asc' } }),
       this.db.visit.count({ where: { tenantId: tid, agentId: me, status: 'COMPLETED', plannedDate: { gte: dateOf(weekStart), lte: dateOf(today) } } }),
-      this.db.order.aggregate({ where: { tenantId: tid, agentId: me, status: { not: 'REJECTED' }, createdAt: { gte: istStart(weekStart) } }, _sum: { totalPaise: true } }),
+      this.db.order.aggregate({ where: { tenantId: tid, agentId: me, status: NOT_DEAD, createdAt: { gte: istStart(weekStart) } }, _sum: { totalPaise: true } }),
     ]);
     return {
       user: { id: u.id, name: u.name, email: u.email, phone: u.phone ?? undefined, homeArea: u.homeArea ?? undefined },

@@ -1,10 +1,21 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '../../generated/prisma';
 import { ulid } from 'ulid';
 import { PrismaService, Tx } from '../prisma.service';
 import type { ReqCtx } from '../common/context';
 import { sha256 } from '../common/crypto';
 import { AppError, badRequest, unprocessable } from '../common/errors';
 import { toJson } from './outbox';
+
+/**
+ * How a response is kept at rest. A create whose response carries a bearer capability (the memo ack
+ * link) seals it before it is stored and unseals it on replay, so the replay stays identical while the
+ * table never holds the capability in plain text.
+ */
+export interface StoredForm {
+  seal: (response: Prisma.InputJsonValue) => Prisma.InputJsonValue;
+  unseal: (stored: unknown) => unknown;
+}
 
 function stable(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`;
@@ -25,6 +36,11 @@ function stable(v: unknown): string {
  *  3. Loser sees the committed row: same fingerprint → returns stored response; different body → 422.
  *  Failed operations roll the key row back too, so a retry after an error re-executes.
  */
+/** Request fingerprint stored with a key: method, path (no query) and the canonical JSON body. */
+export function fingerprintOf(method: string, path: string, body: unknown): string {
+  return sha256(`${method} ${path} ${stable(body)}`);
+}
+
 @Injectable()
 export class IdempotencyService {
   constructor(private readonly prisma: PrismaService) {}
@@ -35,10 +51,10 @@ export class IdempotencyService {
   }
 
   fingerprint(ctx: ReqCtx) {
-    return sha256(`${ctx.method} ${ctx.path} ${stable(ctx.body)}`);
+    return fingerprintOf(ctx.method, ctx.path, ctx.body);
   }
 
-  async run<T>(ctx: ReqCtx, fn: (tx: Tx, clientOpId: string) => Promise<T>): Promise<T> {
+  async run<T>(ctx: ReqCtx, fn: (tx: Tx, clientOpId: string) => Promise<T>, stored?: StoredForm): Promise<T> {
     const key = ctx.idempotencyKey;
     if (!key) return this.prisma.tx((tx) => fn(tx, ulid()));
     const fp = this.fingerprint(ctx);
@@ -53,7 +69,7 @@ export class IdempotencyService {
         return { replay: existing };
       }
       const result = toJson(await fn(tx, key));
-      await tx.idempotencyKey.update({ where: { tenantId_key: { tenantId, key } }, data: { responseStatus: 200, responseBody: result } });
+      await tx.idempotencyKey.update({ where: { tenantId_key: { tenantId, key } }, data: { responseStatus: 200, responseBody: stored ? stored.seal(result) : result } });
       return { result };
     });
     if ('result' in out) return out.result as T;
@@ -63,6 +79,6 @@ export class IdempotencyService {
       throw unprocessable('IDEMPOTENCY_KEY_REUSED', 'This Idempotency-Key was already used with a different request');
     }
     if (existing.responseBody == null) throw new AppError(409, 'IDEMPOTENCY_IN_PROGRESS', 'The original request is still in progress');
-    return existing.responseBody as T;
+    return (stored ? stored.unseal(existing.responseBody) : existing.responseBody) as T;
   }
 }

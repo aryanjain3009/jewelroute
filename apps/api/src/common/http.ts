@@ -14,6 +14,7 @@ import type { Request, Response } from 'express';
 import { map, Observable } from 'rxjs';
 import { z, ZodError, ZodType } from 'zod';
 import { AppError, badRequest } from './errors';
+import { redactUrl } from './redact';
 
 /** Parse + validate a request part with zod; throws 400 VALIDATION_FAILED. */
 export function parse<T extends ZodType>(schema: T, value: unknown): z.infer<T> {
@@ -89,7 +90,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       code = 'INVALID_JSON';
       message = 'Malformed JSON body';
     }
-    if (status >= 500) this.log.error({ err: exception, path: req.url }, String(e?.message ?? exception));
+    if (status >= 500) this.log.error({ err: exception, path: redactUrl(req.url) }, String(e?.message ?? exception));
     const requestId = requestIdOf(req);
     if (!res.headersSent) {
       res.status(status).json({ ok: false, error: { code, message, ...(details !== undefined ? { details } : {}) }, requestId });

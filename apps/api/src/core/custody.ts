@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { CustodianType, CustodyReason } from '../../generated/prisma';
+import type { CustodianType, CustodyReason, MemoItemStatus, MemoStatus } from '../../generated/prisma';
 import type { Tx } from '../prisma.service';
 import type { ReqCtx } from '../common/context';
 import { conflict, notFound } from '../common/errors';
@@ -141,3 +141,11 @@ export async function nextDocNumber(tx: Tx, tenantId: string, kind: 'ORD' | 'MEM
   return Number(rows[0].n);
 }
 export const fmtDoc = (kind: string, year: number, n: number) => `${kind}-${year}-${String(n).padStart(5, '0')}`;
+
+/** Memo status from its items (shared by memo return/convert and the reject-un-sell path). */
+export function nextMemoStatus(items: { status: MemoItemStatus }[]): MemoStatus {
+  const out = items.filter((i) => i.status === 'OUT').length;
+  if (out === items.length) return 'ACTIVE';
+  if (out > 0) return 'PARTIALLY_RETURNED';
+  return items.every((i) => i.status === 'CONVERTED') ? 'CONVERTED_TO_ORDER' : 'RETURNED';
+}

@@ -318,10 +318,13 @@ export class VisitsService {
     });
   }
 
+  /** Optional Idempotency-Key: a retried save replays the original note instead of storing it twice. */
   async addNote(ctx: ReqCtx, id: string, body: z.infer<typeof NoteBody>) {
     const v = await this.readable(ctx, id);
-    const note = await this.prisma.db.visitNote.create({ data: { tenantId: ctx.user.tid, visitId: v.id, authorId: ctx.user.sub, body: body.body } });
-    return { note: { id: note.id, body: note.body, author: { id: ctx.user.sub, name: ctx.user.name ?? '' }, createdAt: note.createdAt.toISOString() } };
+    return this.idem.run(ctx, async (tx) => {
+      const note = await tx.visitNote.create({ data: { tenantId: ctx.user.tid, visitId: v.id, authorId: ctx.user.sub, body: body.body } });
+      return { note: { id: note.id, body: note.body, author: { id: ctx.user.sub, name: ctx.user.name ?? '' }, createdAt: note.createdAt.toISOString() } };
+    });
   }
 
   async complete(ctx: ReqCtx, id: string, body: z.infer<typeof CompleteBody>) {
@@ -490,6 +493,7 @@ export class VisitsController {
   }
 
   @Post('visits/:id/notes')
+  @ApiHeader({ name: 'Idempotency-Key', required: false })
   note(@Ctx() ctx: ReqCtx, @Param('id') id: string, @Body() body: unknown) {
     return this.visits.addNote(ctx, id, parse(NoteBody, body));
   }

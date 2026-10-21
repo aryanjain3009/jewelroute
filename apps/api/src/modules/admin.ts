@@ -9,34 +9,49 @@ import { Requires } from '../common/auth';
 import { Ctx, ReqCtx } from '../common/context';
 import { badRequest, conflict, isUniqueViolation, notFound } from '../common/errors';
 import { parse, ymd } from '../common/http';
+import { ActivityService } from '../core/activity';
 import { AuditService } from '../core/audit';
 import { CustodyService, nextDocNumber } from '../core/custody';
+import { IdempotencyService } from '../core/idempotency';
 import { RatesService, valueOrZero } from '../core/rates';
 import { dateOf, toDesign, toShop, ViewsService, visitInclude } from '../core/views';
 import { Dispatcher } from '../webhooks/dispatcher';
-import { RecordsController, RecordsService, toActivityItems } from './records';
+import { lockFamily } from './auth';
+import { RecordsController, RecordsService } from './records';
 import { VisitsModule, VisitsService } from './visits';
 
 const Purity = z.enum(['K24', 'K22', 'K18', 'K14']);
 const AssignBody = z.object({ agentId: z.string().min(1), shopId: z.string().min(1), date: ymd, sequence: z.number().int().min(1).max(100).optional(), plannedTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'expected HH:MM').optional() });
 const RateBody = z.object({ purity: Purity, ratePaisePerGram: z.number().int().positive().max(10_000_000) });
-const ShopBody = z.object({
+const ShopFields = z.object({
   code: z.string().trim().min(1).max(32).optional(),
   name: z.string().trim().min(1).max(200),
-  ownerName: z.string().max(200).optional(),
-  phone: z.string().max(32).optional(),
+  // null clears the field on PATCH (an empty owner/phone in the form means "none").
+  // Empty or blank means "none" on create and PATCH alike (review m10); null clears on PATCH.
+  ownerName: z.string().trim().max(200).nullable().optional().transform((v) => (v === '' ? null : v)),
+  phone: z.string().trim().max(32).nullable().optional().transform((v) => (v === '' ? null : v)),
   address: z.string().trim().min(1).max(500),
   area: z.string().trim().min(1).max(100),
-  city: z.string().trim().min(1).max(100).default('New Delhi'),
+  city: z.string().trim().min(1).max(100),
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
-  geofenceRadiusM: z.number().int().min(10).max(2000).default(100),
-  creditLimitPaise: z.number().int().min(0).default(0),
+  geofenceRadiusM: z.number().int().min(10).max(2000),
+  creditLimitPaise: z.number().int().min(0).max(1_000_000_000_000),
+  openingOutstandingPaise: z.number().int().min(0).max(1_000_000_000_000),
   notes: z.string().max(2000).optional(),
   assignedAgentId: z.string().min(1).max(64).nullable().optional(),
 });
+// Create fills defaults. PATCH must NOT: zod 4 keeps `.default()` through `.partial()`, which used to
+// reset an omitted creditLimitPaise to 0 (switching the credit rule off), city and geofence on every PATCH.
+const ShopBody = ShopFields.extend({
+  city: ShopFields.shape.city.default('New Delhi'),
+  geofenceRadiusM: ShopFields.shape.geofenceRadiusM.default(100),
+  creditLimitPaise: ShopFields.shape.creditLimitPaise.default(0),
+  openingOutstandingPaise: ShopFields.shape.openingOutstandingPaise.default(0),
+});
+const ShopPatch = ShopFields.omit({ code: true }).partial();
 const OtherComp = z.object({ label: z.string().min(1).max(100), valuePaise: z.number().int().min(0) });
-const DesignBody = z.object({
+const DesignFields = z.object({
   sku: z.string().trim().min(1).max(64),
   name: z.string().trim().min(1).max(200),
   category: z.string().trim().min(1).max(100),
@@ -44,21 +59,46 @@ const DesignBody = z.object({
   purity: Purity,
   grossWeightMg: z.number().int().positive(),
   netWeightMg: z.number().int().positive(),
-  makingChargeType: z.enum(['PER_GRAM', 'PERCENT']).default('PER_GRAM'),
+  makingChargeType: z.enum(['PER_GRAM', 'PERCENT']),
   makingChargeValue: z.number().int().min(0),
-  stoneValuePaise: z.number().int().min(0).default(0),
-  otherComponents: z.array(OtherComp).max(20).default([]),
-  imageUrls: z.array(z.string().url()).max(10).default([]),
+  stoneValuePaise: z.number().int().min(0),
+  otherComponents: z.array(OtherComp).max(20),
+  imageUrls: z.array(z.string().url()).max(10),
   description: z.string().max(4000).optional(),
   active: z.boolean().optional(),
 });
+const DesignBody = DesignFields.extend({
+  makingChargeType: DesignFields.shape.makingChargeType.default('PER_GRAM'),
+  stoneValuePaise: DesignFields.shape.stoneValuePaise.default(0),
+  otherComponents: DesignFields.shape.otherComponents.default([]),
+  imageUrls: DesignFields.shape.imageUrls.default([]),
+});
+// No defaults on PATCH (zod 4 keeps them through .partial(); they used to wipe stone value/images).
+const DesignPatch = DesignFields.partial();
 const IntakeBody = z.object({ count: z.number().int().min(1).max(50), grossWeightMg: z.number().int().positive().optional(), netWeightMg: z.number().int().positive().optional() });
 const IssueBody = z.object({ pieceIds: z.array(z.string().min(1)).min(1).max(200), agentId: z.string().min(1) });
 const PiecesOnly = z.object({ pieceIds: z.array(z.string().min(1)).min(1).max(200) });
 const AgentBody = z.object({ name: z.string().trim().min(1).max(200), email: z.string().email().max(200), phone: z.string().max(32).optional(), password: z.string().min(8).max(200), homeArea: z.string().max(100).optional() });
 const AgentPatch = z.object({ name: z.string().trim().min(1).max(200).optional(), phone: z.string().max(32).optional(), active: z.boolean().optional(), password: z.string().min(8).max(200).optional(), homeArea: z.string().max(100).optional() });
 
+const SettingsPatch = z
+  .object({ approvalThresholdPaise: z.number().int().positive().max(1_000_000_000_000).nullable().optional(), demoMode: z.boolean().optional() })
+  .strict()
+  .refine((b) => Object.keys(b).length > 0, 'nothing to update');
+const ActivityQuery = z.object({
+  shopId: z.string().max(64).optional(),
+  agentId: z.string().max(64).optional(),
+  visitId: z.string().max(64).optional(),
+  orderId: z.string().max(64).optional(),
+  memoId: z.string().max(64).optional(),
+  pieceId: z.string().max(64).optional(),
+  before: z.string().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+});
+
 const OPEN: VisitStatus[] = ['CHECKED_IN', 'ACTIVE'];
+/** Orders that are real business (not rejected or cancelled). */
+const NOT_DEAD = { notIn: ['REJECTED', 'CANCELLED'] as ('REJECTED' | 'CANCELLED')[] };
 
 @Injectable()
 export class AdminService {
@@ -70,6 +110,8 @@ export class AdminService {
     private readonly custody: CustodyService,
     private readonly visits: VisitsService,
     private readonly records: RecordsService,
+    private readonly activityFeed: ActivityService,
+    private readonly idem: IdempotencyService,
   ) {}
 
   // ---------------- dashboard ----------------
@@ -82,13 +124,13 @@ export class AdminService {
     const rates = await this.rates.current(tid);
     const [visitsRaw, ordersToday, pendingOrders, openMemos, shops, piecesOut, agents, events, missedPast] = await Promise.all([
       db.visit.findMany({ where: { tenantId: tid, plannedDate: dateOf(day), status: { not: 'CANCELLED' } }, include: visitInclude, orderBy: [{ agentId: 'asc' }, { sequence: 'asc' }] }),
-      db.order.findMany({ where: { tenantId: tid, createdAt: { gte: dayStartUtc, lt: dayEndUtc }, status: { not: 'REJECTED' } }, select: { totalPaise: true, agentId: true } }),
-      this.views.orders(tid, { status: 'SUBMITTED' }, { take: 50 }),
+      db.order.findMany({ where: { tenantId: tid, createdAt: { gte: dayStartUtc, lt: dayEndUtc }, status: NOT_DEAD }, select: { totalPaise: true, agentId: true } }),
+      this.views.orders(tid, { status: 'PENDING_APPROVAL' }, { take: 50 }),
       this.views.memos(tid, { status: { in: ['ACTIVE', 'PARTIALLY_RETURNED'] } }, { orderBy: { dueDate: 'asc' } }),
       db.shop.findMany({ where: { tenantId: tid }, orderBy: { name: 'asc' } }),
       this.views.pieces(tid, { custodianType: { in: ['SHOP', 'AGENT'] } }, undefined, rates),
       db.user.findMany({ where: { tenantId: tid, role: 'FIELD_AGENT', active: true }, orderBy: { name: 'asc' } }),
-      db.outboxEvent.findMany({ where: { tenantId: tid, type: { not: 'ping' } }, orderBy: { createdAt: 'desc' }, take: 40 }),
+      this.activityFeed.list(tid, {}, 40),
       db.visit.findMany({ where: { tenantId: tid, plannedDate: { lt: dateOf(day), gte: dateOf(new Date(dayStartUtc.getTime() - 7 * 86400000).toISOString().slice(0, 10)) }, status: { in: ['PLANNED', 'MISSED'] } }, include: visitInclude, take: 20 }),
     ]);
     const visits = await this.views.visitSummaries(tid, visitsRaw);
@@ -119,7 +161,7 @@ export class AdminService {
           .filter((v) => v.checkInAt)
           .map((v) => ({ visitId: v.id, agentName: v.agent.name, shopName: v.shop.name, lat: v.checkInLat, lng: v.checkInLng, at: v.checkInAt, verification: v.verification, distanceM: v.checkInDistanceM, status: v.status })),
       },
-      activity: await this.activity(tid, events),
+      activity: events,
       exceptions: { pendingOrders, overdueMemos: overdue, missedVisits: [...missedToday, ...pastSummaries.filter((v) => v.status !== 'PLANNED' || true)] },
       visits,
       agents: agents.map((a) => {
@@ -140,9 +182,29 @@ export class AdminService {
     };
   }
 
-  async activity(tid: string, events?: Prisma.OutboxEventGetPayload<object>[], take = 40) {
-    const rows = events ?? (await this.prisma.db.outboxEvent.findMany({ where: { tenantId: tid, type: { not: 'ping' } }, orderBy: { createdAt: 'desc' }, take }));
-    return toActivityItems(rows);
+  // ---------------- tenant settings (v3) ----------------
+  async settings(ctx: ReqCtx) {
+    const t = await this.prisma.db.tenant.findUniqueOrThrow({ where: { id: ctx.user.tid }, select: { approvalThresholdPaise: true, demoMode: true } });
+    return { approvalThresholdPaise: t.approvalThresholdPaise == null ? null : Number(t.approvalThresholdPaise), demoMode: t.demoMode };
+  }
+
+  async patchSettings(ctx: ReqCtx, body: z.infer<typeof SettingsPatch>) {
+    return this.prisma.tx(async (tx) => {
+      const before = await tx.tenant.findUniqueOrThrow({ where: { id: ctx.user.tid }, select: { approvalThresholdPaise: true, demoMode: true } });
+      const t = await tx.tenant.update({
+        where: { id: ctx.user.tid },
+        data: {
+          ...(body.approvalThresholdPaise !== undefined ? { approvalThresholdPaise: body.approvalThresholdPaise == null ? null : BigInt(body.approvalThresholdPaise) } : {}),
+          ...(body.demoMode !== undefined ? { demoMode: body.demoMode } : {}),
+        },
+        select: { approvalThresholdPaise: true, demoMode: true },
+      });
+      const out = { approvalThresholdPaise: t.approvalThresholdPaise == null ? null : Number(t.approvalThresholdPaise), demoMode: t.demoMode };
+      const prev = { approvalThresholdPaise: before.approvalThresholdPaise == null ? null : Number(before.approvalThresholdPaise), demoMode: before.demoMode };
+      const pick = (o: typeof out) => Object.fromEntries(Object.keys(body).map((k) => [k, o[k as keyof typeof out]]));
+      await this.audit.log(tx, ctx, 'tenant.settings', 'Tenant', ctx.user.tid, pick(prev), pick(out));
+      return out;
+    });
   }
 
   // ---------------- visits & assignments ----------------
@@ -200,8 +262,9 @@ export class AdminService {
     };
   }
 
+  /** Optional Idempotency-Key: a retried submit replays instead of appending a second rate row. */
   async setRate(ctx: ReqCtx, body: z.infer<typeof RateBody>) {
-    return this.prisma.tx(async (tx) => {
+    return this.idem.run(ctx, async (tx) => {
       const before = (await this.rates.current(ctx.user.tid, tx))[body.purity];
       const r = await tx.goldRate.create({ data: { tenantId: ctx.user.tid, purity: body.purity, ratePaisePerGram: BigInt(body.ratePaisePerGram), createdById: ctx.user.sub, source: 'MANUAL' } });
       await this.audit.log(tx, ctx, 'gold_rate.set', 'GoldRate', r.id, before ? { purity: body.purity, ratePaisePerGram: before.ratePaisePerGram, goldRateId: before.goldRateId } : null, { purity: body.purity, ratePaisePerGram: body.ratePaisePerGram });
@@ -216,13 +279,14 @@ export class AdminService {
     if (!a) throw notFound('Agent');
   }
 
+  /** Optional Idempotency-Key: the body carries money (credit limit, opening balance), so a retried submit replays instead of creating a twin shop. */
   async createShop(ctx: ReqCtx, body: z.infer<typeof ShopBody>) {
     const tid = ctx.user.tid;
     await this.checkAgent(tid, body.assignedAgentId);
     try {
-      return await this.prisma.tx(async (tx) => {
+      return await this.idem.run(ctx, async (tx) => {
         const code = body.code ?? `SH-${String(await nextDocNumber(tx, tid, 'TAG', 1)).padStart(4, '0')}`;
-        const s = await tx.shop.create({ data: { ...body, code, tenantId: tid, creditLimitPaise: BigInt(body.creditLimitPaise) } });
+        const s = await tx.shop.create({ data: { ...body, code, tenantId: tid, creditLimitPaise: BigInt(body.creditLimitPaise), openingOutstandingPaise: BigInt(body.openingOutstandingPaise) } });
         await this.audit.log(tx, ctx, 'shop.create', 'Shop', s.id, null, toShop(s));
         return { shop: toShop(s) };
       });
@@ -232,12 +296,21 @@ export class AdminService {
     }
   }
 
-  async patchShop(ctx: ReqCtx, id: string, body: Partial<z.infer<typeof ShopBody>>) {
+  async patchShop(ctx: ReqCtx, id: string, body: z.infer<typeof ShopPatch>) {
     await this.checkAgent(ctx.user.tid, body.assignedAgentId);
     return this.prisma.tx(async (tx) => {
       const before = await tx.shop.findFirst({ where: { id, tenantId: ctx.user.tid } });
       if (!before) throw notFound('Shop');
-      const s = await tx.shop.update({ where: { id }, data: { ...body, creditLimitPaise: body.creditLimitPaise == null ? undefined : BigInt(body.creditLimitPaise) } });
+      // Lock like the order create does: a limit change and an order at this shop serialise.
+      await tx.$queryRaw`SELECT id FROM "Shop" WHERE id = ${id} AND "tenantId" = ${ctx.user.tid} FOR UPDATE`;
+      const s = await tx.shop.update({
+        where: { id },
+        data: {
+          ...body,
+          creditLimitPaise: body.creditLimitPaise == null ? undefined : BigInt(body.creditLimitPaise),
+          openingOutstandingPaise: body.openingOutstandingPaise == null ? undefined : BigInt(body.openingOutstandingPaise),
+        },
+      });
       await this.audit.log(tx, ctx, 'shop.update', 'Shop', id, toShop(before), toShop(s));
       return { shop: toShop(s) };
     });
@@ -268,7 +341,7 @@ export class AdminService {
     }
   }
 
-  async patchDesign(ctx: ReqCtx, id: string, body: Partial<z.infer<typeof DesignBody>>) {
+  async patchDesign(ctx: ReqCtx, id: string, body: z.infer<typeof DesignPatch>) {
     const tid = ctx.user.tid;
     return this.prisma.tx(async (tx) => {
       const before = await tx.jewelryDesign.findFirst({ where: { id, tenantId: tid } });
@@ -283,9 +356,10 @@ export class AdminService {
     });
   }
 
+  /** Creates custody state (new VAULT pieces), so an optional Idempotency-Key makes a retried submit replay, not duplicate. */
   async intake(ctx: ReqCtx, designId: string, body: z.infer<typeof IntakeBody>) {
     const tid = ctx.user.tid;
-    return this.prisma.tx(async (tx) => {
+    return this.idem.run(ctx, async (tx) => {
       const d = await tx.jewelryDesign.findFirst({ where: { id: designId, tenantId: tid } });
       if (!d) throw notFound('Design');
       const ids: string[] = [];
@@ -375,7 +449,7 @@ export class AdminService {
                count(DISTINCT m.id) FILTER (WHERE m."dueDate" < ${day}::date) AS overdue
         FROM "Memo" m JOIN "MemoItem" mi ON mi."memoId" = m.id AND mi.status = 'OUT'
         WHERE m."tenantId" = ${tid} GROUP BY m."agentId"`,
-      db.order.groupBy({ by: ['agentId'], where: { tenantId: tid, status: { not: 'REJECTED' }, createdAt: { gte: dayStart, lt: new Date(dayStart.getTime() + 86_400_000) } }, _count: { _all: true }, _sum: { totalPaise: true } }),
+      db.order.groupBy({ by: ['agentId'], where: { tenantId: tid, status: NOT_DEAD, createdAt: { gte: dayStart, lt: new Date(dayStart.getTime() + 86_400_000) } }, _count: { _all: true }, _sum: { totalPaise: true } }),
       db.visit.groupBy({ by: ['agentId'], where: { tenantId: tid, checkInAt: { not: null } }, _max: { checkInAt: true } }),
     ]);
     const bagBy = new Map<string, { count: number; valuePaise: number }>();
@@ -433,7 +507,10 @@ export class AdminService {
       if (!before) throw notFound('Agent');
       const { password, ...rest } = body;
       const u = await tx.user.update({ where: { id }, data: { ...rest, ...(password ? { passwordHash: await bcrypt.hash(password, 10) } : {}) } });
-      if (body.active === false) await tx.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+      if (body.active === false) {
+        await lockFamily(tx, id);
+        await tx.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+      }
       await this.audit.log(tx, ctx, 'agent.update', 'User', id, { name: before.name, phone: before.phone, active: before.active }, { name: u.name, phone: u.phone, active: u.active, passwordChanged: !!password });
       return { agent: { id: u.id, name: u.name, email: u.email, phone: u.phone ?? undefined, active: u.active } };
     });
@@ -453,6 +530,7 @@ export class AdminController {
     private readonly admin: AdminService,
     private readonly dispatcher: Dispatcher,
     private readonly records: RecordsService,
+    private readonly activityFeed: ActivityService,
   ) {}
 
   @Get('dashboard')
@@ -469,9 +547,26 @@ export class AdminController {
     return { user: { id: ctx.user.sub, name: ctx.user.name ?? '' }, date: d.date, metrics: d.metrics, map: d.map, attention, activity: d.activity, agents: d.agents, rates: d.rates };
   }
 
+  /**
+   * v3 — the one activity stream. Filters are the indexed refs. Without `limit`/`before` → bare
+   * ActivityItem[] (latest 100, v1 shape); with either → `{ items, nextCursor? }` (keyset on createdAt+id).
+   */
   @Get('activity')
-  activity(@Ctx() ctx: ReqCtx) {
-    return this.admin.activity(ctx.user.tid, undefined, 100);
+  async activity(@Ctx() ctx: ReqCtx, @Query() raw: unknown) {
+    const q = parse(ActivityQuery, raw);
+    const { before, limit, ...f } = q;
+    if (before === undefined && limit === undefined) return this.activityFeed.list(ctx.user.tid, f, 100);
+    return this.activityFeed.page(ctx.user.tid, f, { before, limit: limit ?? 50 });
+  }
+
+  @Get('settings')
+  settings(@Ctx() ctx: ReqCtx) {
+    return this.admin.settings(ctx);
+  }
+
+  @Patch('settings')
+  patchSettings(@Ctx() ctx: ReqCtx, @Body() body: unknown) {
+    return this.admin.patchSettings(ctx, parse(SettingsPatch, body));
   }
 
   @Post('assignments')
@@ -501,7 +596,7 @@ export class AdminController {
 
   @Patch('shops/:id')
   patchShop(@Ctx() ctx: ReqCtx, @Param('id') id: string, @Body() body: unknown) {
-    return this.admin.patchShop(ctx, id, parse(ShopBody.partial().omit({ code: true }), body));
+    return this.admin.patchShop(ctx, id, parse(ShopPatch, body));
   }
 
   @Get('designs')
@@ -516,7 +611,7 @@ export class AdminController {
 
   @Patch('designs/:id')
   patchDesign(@Ctx() ctx: ReqCtx, @Param('id') id: string, @Body() body: unknown) {
-    return this.admin.patchDesign(ctx, id, parse(DesignBody.partial(), body));
+    return this.admin.patchDesign(ctx, id, parse(DesignPatch, body));
   }
 
   @Post('designs/:id/pieces')

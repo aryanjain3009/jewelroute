@@ -16,6 +16,7 @@ import { OutboxService } from '../core/outbox';
 import { env, isProd } from '../env';
 import { demoReceiverEnabled } from './demo-receiver';
 import { Dispatcher } from './dispatcher';
+import { allowPrivateFor, assertWebhookUrl, EgressPolicy, isOwnReceiver } from './egress';
 import { runSeed } from '../seed/seed';
 
 const EventList = z.array(z.enum([...WEBHOOK_EVENT_TYPES, '*'] as [string, ...string[]])).min(1);
@@ -48,7 +49,12 @@ const EXAMPLES: Record<string, unknown> = {
   'visit.completed': { visitId: 'clx…', agent: { id: 'u_1', name: 'Rahul Verma' }, shop: { id: 's_1', name: 'Sharma Jewellers' }, proofCount: 1, orderCount: 1, ordersValuePaise: 54321000, memoCount: 1 },
   'visit.proof_uploaded': { visitId: 'clx…', proofId: 'clp…', url: 'https://…/proof.jpg', checksumSha256: 'e3b0…', distanceFromCheckInM: 4 },
   'order.created': { orderId: 'clo…', number: 'ORD-2026-00042', totalPaise: 54321000, goldRateSnapshot: [{ purity: 'K22', ratePaisePerGram: 1054000 }], items: [{ sku: 'AJ-BNG-2201', quantity: 2 }] },
-  'order.approved': { orderId: 'clo…', number: 'ORD-2026-00042', status: 'APPROVED', totalPaise: 54321000 },
+  'order.confirmed': { orderId: 'clo…', number: 'ORD-2026-00042', status: 'CONFIRMED', totalPaise: 36651726, reasons: [], credit: { creditLimitPaise: 250000000, outstandingPaise: 80000000, memoExposurePaise: 0, exposurePaise: 80000000, availableCreditPaise: 170000000, orderAmountPaise: 36651726, projectedExposurePaise: 116651726, requiresApproval: false, reasons: [] } },
+  'order.pending_approval': { orderId: 'clo…', number: 'ORD-2026-00043', status: 'PENDING_APPROVAL', totalPaise: 620000000, reasons: ['CREDIT_LIMIT', 'ORDER_THRESHOLD'], credit: { creditLimitPaise: 250000000, exposurePaise: 116651726, orderAmountPaise: 620000000, projectedExposurePaise: 736651726, approvalThresholdPaise: 100000000, requiresApproval: true } },
+  'order.approved': { orderId: 'clo…', number: 'ORD-2026-00042', status: 'APPROVED', totalPaise: 54321000, reasons: ['ORDER_THRESHOLD'] },
+  'order.settled': { orderId: 'clo…', number: 'ORD-2026-00042', status: 'CONFIRMED', totalPaise: 36651726, settledAt: '2026-10-21T10:30:00.000Z' },
+  'order.cancelled': { orderId: 'clo…', number: 'ORD-2026-00042', status: 'CANCELLED', fromStatus: 'CONFIRMED', totalPaise: 36651726, cancellationReason: 'Retailer changed the design' },
+  'memo.acknowledged': { memoId: 'clm…', number: 'MEMO-2026-00017', method: 'QR_CONFIRM', ackAt: '2026-10-21T06:20:00.000Z', by: 'retailer', pieceCount: 1, pieces: [{ id: 'clp…', tagCode: 'AJ-S-000123' }] },
   'order.rejected': { orderId: 'clo…', number: 'ORD-2026-00042', status: 'REJECTED', rejectionReason: 'Credit limit' },
   'memo.created': { memoId: 'clm…', number: 'MEMO-2026-00017', dueDate: '2026-10-26', pieceCount: 2, totalValuePaise: 31250000 },
   'memo.extended': { memoId: 'clm…', number: 'MEMO-2026-00017', fromDueDate: '2026-10-26', dueDate: '2026-10-30' },
@@ -91,6 +97,13 @@ export class WebhooksService {
     private readonly dispatcher: Dispatcher,
   ) {}
 
+  /** SSRF policy for a URL of this tenant: WEBHOOK_ALLOW_PRIVATE (local/test) or the own demo receiver while enabled. */
+  private async policy(tenantId: string, url: string): Promise<EgressPolicy> {
+    const t = await this.prisma.db.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { demoMode: true } });
+    const e = env();
+    return { allowPrivate: allowPrivateFor(e, t.demoMode), ownReceiver: isOwnReceiver(url, e.API_PUBLIC_URL) && demoReceiverEnabled({ flag: e.ENABLE_DEMO_RECEIVER, nodeEnv: e.NODE_ENV, demoMode: t.demoMode }) };
+  }
+
   private async endpoint(ctx: ReqCtx, id: string) {
     const e = await this.prisma.db.webhookEndpoint.findFirst({ where: { id, tenantId: ctx.user.tid } });
     if (!e) throw notFound('Webhook endpoint');
@@ -115,6 +128,7 @@ export class WebhooksService {
   }
 
   async create(ctx: ReqCtx, body: z.infer<typeof CreateBody>) {
+    await assertWebhookUrl(body.url, await this.policy(ctx.user.tid, body.url));
     const secret = newWebhookSecret();
     return this.prisma.tx(async (tx) => {
       const e = await tx.webhookEndpoint.create({ data: { tenantId: ctx.user.tid, url: body.url, description: body.description, events: body.events, secretEncrypted: encryptSecret(secret), secretLast4: secret.slice(-4) } });
@@ -125,6 +139,7 @@ export class WebhooksService {
 
   async patch(ctx: ReqCtx, id: string, body: z.infer<typeof PatchBody>) {
     const before = await this.endpoint(ctx, id);
+    if (body.url) await assertWebhookUrl(body.url, await this.policy(ctx.user.tid, body.url));
     return this.prisma.tx(async (tx) => {
       const e = await tx.webhookEndpoint.update({ where: { id }, data: body });
       await this.audit.log(tx, ctx, 'webhook.update', 'WebhookEndpoint', id, { url: before.url, events: before.events, active: before.active }, { url: e.url, events: e.events, active: e.active });

@@ -19,6 +19,10 @@ const schema = z.object({
   LOG_LEVEL: z.string().default('info'),
   /** Built-in demo webhook receiver: 'true' | 'false'; unset → on outside production, demo-mode tenants only in production. */
   ENABLE_DEMO_RECEIVER: z.preprocess((v) => (v === '' ? undefined : v), z.enum(['true', 'false']).optional()),
+  /** Proxy hops trusted for req.ip (X-Forwarded-For). Unset → 1 on Vercel, 0 elsewhere. Never trust more hops than you have. */
+  TRUST_PROXY: z.preprocess((v) => (v === '' ? undefined : v), z.coerce.number().int().min(0).max(10).optional()),
+  /** 'true' lets webhook endpoints target private/loopback addresses — local development and tests only; ignored in production except for demo-mode tenants. */
+  WEBHOOK_ALLOW_PRIVATE: z.preprocess((v) => (v === '' ? undefined : v), z.enum(['true', 'false']).optional()),
 });
 
 export type Env = z.infer<typeof schema>;

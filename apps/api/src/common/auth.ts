@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import jwt from 'jsonwebtoken';
 import type { Request } from 'express';
 import { env } from '../env';
+import { PrismaService } from '../prisma.service';
 import { AppError, unauthorized } from './errors';
 
 export type Role = 'FIELD_AGENT' | 'ADMIN';
@@ -56,14 +57,21 @@ export function tokenFromRequest(req: Request): string | undefined {
 
 @Injectable()
 export class AuthGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
-  canActivate(ctx: ExecutionContext): boolean {
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly prisma: PrismaService,
+  ) {}
+  async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const targets = [ctx.getHandler(), ctx.getClass()];
     const req = ctx.switchToHttp().getRequest<Request & { user?: AuthUser }>();
     if (this.reflector.getAllAndOverride<boolean>(IS_PUBLIC, targets)) return true;
     const token = tokenFromRequest(req);
     if (!token) throw unauthorized();
     req.user = verifyAccessToken(token);
+    // A signed token outlives deactivation by up to 15 min; deactivation (which also revokes refresh tokens)
+    // must end access at once, and a token whose user no longer exists in its tenant is worthless.
+    const live = await this.prisma.db.user.findFirst({ where: { id: req.user.sub, tenantId: req.user.tid, active: true }, select: { id: true } });
+    if (!live) throw unauthorized('ACCOUNT_DISABLED', 'This account is deactivated — sign in again or ask your manager');
     const perms = this.reflector.getAllAndOverride<Permission[]>(PERMS, targets);
     if (perms?.length) {
       const have = ROLE_PERMISSIONS[req.user.role] ?? [];

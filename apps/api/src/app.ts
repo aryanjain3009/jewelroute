@@ -11,8 +11,12 @@ import { Logger, LoggerModule } from 'nestjs-pino';
 import { Observable, tap } from 'rxjs';
 import { ulid } from 'ulid';
 import { AuthGuard } from './common/auth';
+import { throttleTracker, trustProxyHops } from './common/client-ip';
+import { redactUrl } from './common/redact';
 import { AllExceptionsFilter, EnvelopeInterceptor, installBigIntJson } from './common/http';
+import { ActivityService } from './core/activity';
 import { AuditService } from './core/audit';
+import { CreditService } from './core/credit';
 import { CustodyService } from './core/custody';
 import { IdempotencyService } from './core/idempotency';
 import { OutboxService } from './core/outbox';
@@ -33,8 +37,8 @@ installBigIntJson();
 
 @Global()
 @Module({
-  providers: [RatesService, OutboxService, AuditService, IdempotencyService, ViewsService, CustodyService, Dispatcher],
-  exports: [RatesService, OutboxService, AuditService, IdempotencyService, ViewsService, CustodyService, Dispatcher],
+  providers: [RatesService, OutboxService, AuditService, IdempotencyService, ViewsService, CustodyService, Dispatcher, CreditService, ActivityService],
+  exports: [RatesService, OutboxService, AuditService, IdempotencyService, ViewsService, CustodyService, Dispatcher, CreditService, ActivityService],
 })
 class CoreModule {}
 
@@ -55,16 +59,14 @@ class PostCommitDispatchInterceptor implements NestInterceptor {
 }
 
 /**
- * Track by client IP; login is tracked per IP+email so users behind one NAT / the web proxy
- * don't lock each other out while brute force on a single account is still capped.
+ * Track by the proxy-resolved client IP (`req.ip`, see `trust proxy` below); login is tracked per IP+email so
+ * users behind one NAT / the web proxy don't lock each other out while brute force on one account is capped.
+ * Never the raw X-Forwarded-For header: a client can put anything in it.
  */
 @Injectable()
 class AppThrottlerGuard extends ThrottlerGuard {
   protected async getTracker(req: Record<string, any>): Promise<string> { // eslint-disable-line @typescript-eslint/no-explicit-any
-    const fwd = String(req.headers?.['x-forwarded-for'] ?? '').split(',')[0].trim();
-    const ip = fwd || req.ip || 'unknown';
-    const email = typeof req.body?.email === 'string' ? req.body.email.toLowerCase() : '';
-    return String(req.url ?? '').includes('/auth/login') && email ? `${ip}:${email}` : ip;
+    return throttleTracker(req);
   }
 }
 
@@ -83,7 +85,7 @@ const REQ_ID = /^[A-Za-z0-9._-]{6,100}$/;
         },
         redact: { paths: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]', 'req.headers["x-cron-secret"]'], censor: '[redacted]' },
         customProps: (req) => ({ userId: (req as Request & { user?: { sub: string } }).user?.sub, tenantId: (req as Request & { user?: { tid: string } }).user?.tid }),
-        serializers: { req: (r: { id: string; method: string; url: string }) => ({ id: r.id, method: r.method, url: r.url }), res: (r: { statusCode: number }) => ({ statusCode: r.statusCode }) },
+        serializers: { req: (r: { id: string; method: string; url: string }) => ({ id: r.id, method: r.method, url: redactUrl(r.url) }), res: (r: { statusCode: number }) => ({ statusCode: r.statusCode }) },
         autoLogging: { ignore: (req) => req.url === '/v1/health' },
       },
     }),
@@ -112,7 +114,7 @@ export async function createApp(): Promise<INestApplication> {
   const e = env();
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true, rawBody: true });
   app.useLogger(app.get(Logger));
-  app.set('trust proxy', 1);
+  app.set('trust proxy', trustProxyHops(e));
   app.disable('x-powered-by');
   app.useBodyParser('json', { limit: '1mb' });
   app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'same-site' } }));

@@ -53,6 +53,7 @@ export function toShop(s: ShopRow) {
     lng: s.lng,
     geofenceRadiusM: s.geofenceRadiusM,
     creditLimitPaise: num(s.creditLimitPaise),
+    openingOutstandingPaise: num(s.openingOutstandingPaise),
     notes: s.notes ?? undefined,
     assignedAgentId: s.assignedAgentId ?? undefined,
   };
@@ -142,6 +143,12 @@ export function toOrder(o: OrderRow, names: Map<string, string>) {
     decidedBy: o.decidedById ? { id: o.decidedById, name: names.get(o.decidedById) ?? 'Unknown' } : undefined,
     decidedAt: iso(o.decidedAt),
     rejectionReason: o.rejectionReason ?? undefined,
+    // v3: why (or whether) this order needed approval, with the credit position frozen at creation.
+    // Legacy (migrated) snapshots lack shopId/asOf — fill them so every position has the CreditPosition shape.
+    approval: { required: o.approvalRequired, reasons: o.approvalReasons, position: o.creditSnapshot ? { shopId: o.shop.id, asOf: o.createdAt.toISOString(), ...(o.creditSnapshot as Record<string, unknown>) } : null },
+    settledAt: iso(o.settledAt),
+    cancelledAt: iso(o.cancelledAt),
+    cancellationReason: o.cancellationReason ?? undefined,
     createdAt: o.createdAt.toISOString(),
   };
 }
@@ -168,6 +175,9 @@ export function toMemo(m: MemoRow, rates: RateMap, today = istDate()) {
     ackStatus: m.ackStatus,
     ackAt: iso(m.ackAt),
     ackMethod: m.ackMethod ?? undefined,
+    /** Audit B8: the acknowledgement came from the agent's own session or device (evidence only, never blocks). */
+    selfAckSuspected: m.selfAckSuspected,
+    selfAckReason: m.selfAckReason ?? undefined,
     items: m.items.map((i) => ({ id: i.id, status: i.status, valuePaise: num(i.valuePaise), returnedAt: iso(i.returnedAt), piece: toPiece(i.piece, rates) })),
     extensions: m.extensions.map((e) => ({ fromDueDate: ymdOf(e.fromDueDate)!, toDueDate: ymdOf(e.toDueDate)!, reason: e.reason ?? undefined, createdAt: e.createdAt.toISOString() })),
     closedAt: iso(m.closedAt),

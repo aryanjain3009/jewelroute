@@ -3,6 +3,7 @@ import { formatINRCompact } from '@jewelroute/shared';
 import { ulid } from 'ulid';
 import type { Prisma } from '../../generated/prisma';
 import type { Tx } from '../prisma.service';
+import { eventRefs } from './event-refs';
 
 export interface EmitInput {
   tenantId: string;
@@ -36,6 +37,7 @@ export class OutboxService {
     const id = e.id ?? this.newId();
     const createdAt = new Date();
     const payload = toJson({ id, type: e.type, tenantId: e.tenantSlug, createdAt: createdAt.toISOString(), data: e.data });
+    const refs = eventRefs(e.aggregateType, e.aggregateId, (payload as { data: Record<string, unknown> }).data);
     await tx.outboxEvent.create({
       data: {
         id,
@@ -47,6 +49,7 @@ export class OutboxService {
         payload,
         createdAt,
         targetEndpointId: e.targetEndpointId,
+        ...refs,
       },
     });
     return id;
@@ -70,8 +73,14 @@ interface FeedData {
   reason?: string;
   memoNumber?: string;
   rejectionReason?: string;
+  cancellationReason?: string;
   orderNumber?: string;
+  reasons?: string[];
+  method?: string;
+  unsold?: { memoNumber: string; pieceIds: string[] };
 }
+
+const REASON_TEXT: Record<string, string> = { CREDIT_LIMIT: 'over credit limit', ORDER_THRESHOLD: 'above approval threshold' };
 
 /** Human sentence for the admin activity feed, derived from event type + payload. */
 export function activityTitle(type: string, d: FeedData): { title: string; amountPaise?: number } {
@@ -88,10 +97,20 @@ export function activityTitle(type: string, d: FeedData): { title: string; amoun
       return { title: `${who} completed the visit at ${shop}` };
     case 'order.created':
       return { title: `${who} booked ${d.number} at ${shop} · ${formatINRCompact(d.totalPaise ?? 0)}`, amountPaise: d.totalPaise };
+    case 'order.confirmed':
+      return { title: `${d.number} confirmed at ${shop} — within credit, no approval needed`, amountPaise: d.totalPaise };
+    case 'order.pending_approval':
+      return { title: `${d.number} at ${shop} needs approval — ${(d.reasons ?? []).map((r) => REASON_TEXT[r] ?? r).join(' and ') || 'rule tripped'}`, amountPaise: d.totalPaise };
+    case 'order.settled':
+      return { title: `${d.number} (${shop}) marked settled by ${d.actor?.name ?? 'Manager'}`, amountPaise: d.totalPaise };
+    case 'order.cancelled':
+      return { title: `${d.actor?.name ?? 'Manager'} cancelled ${d.number} (${shop})${d.cancellationReason ? ` — ${d.cancellationReason}` : ''}`, amountPaise: d.totalPaise };
+    case 'memo.acknowledged':
+      return { title: `${shop} acknowledged receiving ${d.number}${d.method === 'OTP' ? ' (code read to the agent)' : d.method === 'QR_CONFIRM' ? ' (confirmed on their phone)' : ''}`, amountPaise: d.totalValuePaise };
     case 'order.approved':
       return { title: `${d.actor?.name ?? 'Manager'} approved ${d.number} (${shop})`, amountPaise: d.totalPaise };
     case 'order.rejected':
-      return { title: `${d.actor?.name ?? 'Manager'} rejected ${d.number} (${shop})`, amountPaise: d.totalPaise };
+      return { title: `${d.actor?.name ?? 'Manager'} rejected ${d.number} (${shop})${d.unsold ? ` — ${d.unsold.pieceIds.length} sample${d.unsold.pieceIds.length === 1 ? '' : 's'} back on ${d.unsold.memoNumber}` : ''}`, amountPaise: d.totalPaise };
     case 'memo.created':
       return { title: `${who} left ${n} sample${s} at ${shop} on ${d.number} · due ${d.dueDate}`, amountPaise: d.totalValuePaise };
     case 'memo.extended':
