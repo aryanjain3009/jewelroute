@@ -29,12 +29,13 @@ export const VisitStatusPill = ({ status }: { status: VisitStatus }) => <Pill to
 
 const MEMO: Record<MemoDisplayStatus, [Tone, string]> = {
   ACTIVE: ["gold", "On memo"], DUE_SOON: ["warn", "Due soon"], OVERDUE: ["danger", "Overdue"],
-  PARTIALLY_RETURNED: ["info", "Partly returned"], RETURNED: ["neutral", "Returned"], CONVERTED_TO_ORDER: ["verified", "Converted to order"],
+  PARTIALLY_RETURNED: ["info", "Partly closed"], RETURNED: ["neutral", "Returned"], CONVERTED_TO_ORDER: ["verified", "Converted to order"],
 };
 export const MemoStatusPill = ({ status }: { status: MemoDisplayStatus }) => <Pill tone={MEMO[status][0]} dot>{MEMO[status][1]}</Pill>;
 
 const ORDER: Record<OrderStatus, [Tone, string]> = {
-  DRAFT: ["neutral", "Draft"], SUBMITTED: ["warn", "Awaiting approval"], APPROVED: ["verified", "Approved"], REJECTED: ["danger", "Rejected"],
+  DRAFT: ["neutral", "Draft"], CONFIRMED: ["verified", "Confirmed"], PENDING_APPROVAL: ["warn", "Pending approval"], APPROVED: ["verified", "Approved"],
+  REJECTED: ["danger", "Rejected"], CANCELLED: ["neutral", "Cancelled"], SUBMITTED: ["warn", "Submitted"],
 };
 export const OrderStatusPill = ({ status }: { status: OrderStatus }) => <Pill tone={ORDER[status][0]} dot>{ORDER[status][1]}</Pill>;
 

@@ -8,28 +8,29 @@ import { PurityTag } from "@/components/jr/money";
 import type { Design } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { fmtDay, fmtTime, mediaUrl } from "../format";
+import { PRESS_BTN } from "../bits";
 
 type Props = {
-  design: Design | null; onClose: () => void;
+  design: Design | null; onClose: () => void; shopName?: string;
   /** Present when the design can be ordered (inside an open visit). */
   order?: { qty: number; onSetQty: (d: Design, qty: number) => void; disabledReason?: string };
 };
 
 /** Product detail: photography, then the complete price breakdown the card leaves out. */
-export function DesignDetail({ design, onClose, order }: Props) {
+export function DesignDetail({ design, onClose, order, shopName }: Props) {
   const last = useRef<Design | null>(null);
   if (design) last.current = design;
   const shown = design ?? last.current; // keep content during the close animation
   return (
     <Drawer open={!!design} onOpenChange={(o) => !o && onClose()}>
       <DrawerContent className="mx-auto max-w-[520px] data-[vaul-drawer-direction=bottom]:max-h-[94dvh]">
-        {shown && <Body key={`${shown.id}:${order?.qty ?? 0}`} d={shown} onClose={onClose} order={order} />}
+        {shown && <Body key={`${shown.id}:${order?.qty ?? 0}`} d={shown} onClose={onClose} order={order} shopName={shopName} />}
       </DrawerContent>
     </Drawer>
   );
 }
 
-function Body({ d, onClose, order }: { d: Design; onClose: () => void; order?: Props["order"] }) {
+function Body({ d, onClose, order, shopName }: { d: Design; onClose: () => void; order?: Props["order"]; shopName?: string }) {
   const [qty, setQty] = useState(Math.max(1, order?.qty ?? 0));
   const [img, setImg] = useState(0);
   const p = d.price;
@@ -53,15 +54,15 @@ function Body({ d, onClose, order }: { d: Design; onClose: () => void; order?: P
               ))}
             </div>
             {d.imageUrls.length > 1 && (
-              <div className="absolute inset-x-0 bottom-2.5 flex justify-center gap-1.5">
-                {d.imageUrls.map((_, i) => <span key={i} className={cn("size-1.5 rounded-full", i === img ? "bg-ink" : "bg-ink/25")} />)}
+              <div className="absolute inset-x-0 bottom-2.5 flex justify-center gap-1.5" aria-hidden>
+                {d.imageUrls.map((_, i) => <span key={i} className={cn("h-1.5 rounded-full transition-colors duration-200", i === img ? "w-4 bg-paper" : "w-1.5 bg-paper/60")} />)}
               </div>
             )}
           </div>
         </div>
 
         <div className="px-4 pb-5 pt-4">
-          <div className="flex items-center gap-2 text-[13px] text-ink-3">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px] text-ink-3">
             <PurityTag purity={d.purity} /><span className="num">{d.sku}</span><span>{d.collection}</span>
           </div>
           <DrawerTitle className="mt-1.5 font-display text-[26px] font-normal leading-[1.15] tracking-[-0.02em] text-ink">{d.name}</DrawerTitle>
@@ -119,18 +120,24 @@ function Body({ d, onClose, order }: { d: Design; onClose: () => void; order?: P
         <div className="border-t border-line bg-paper px-4 pt-3 safe-bottom">
           {order.disabledReason ? <p className="pb-1 text-center text-[13px] text-ink-2">{order.disabledReason}</p> : (
             <>
+              {p && (
+                <div className="mb-2.5 flex items-baseline justify-between gap-3 text-[13px]">
+                  <span className="min-w-0 truncate text-ink-2">{shopName ? <>For <span className="font-medium text-ink">{shopName}</span></> : "Total"}</span>
+                  <span className="shrink-0 text-ink-2"><span className="num font-semibold text-ink">{formatINR(p.totalWithGstPaise * qty)}</span> incl. GST</span>
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <div className="flex h-12 items-center rounded-lg border border-line-strong" role="group" aria-label="Quantity">
-                  <button type="button" className="grid size-12 place-items-center text-ink-2 disabled:opacity-40" onClick={() => setQty((q) => Math.max(1, q - 1))} disabled={qty <= 1} aria-label="Decrease quantity"><Minus className="size-4" /></button>
+                  <button type="button" className="grid size-12 place-items-center text-ink-2 transition-colors duration-150 active:bg-sunken disabled:opacity-40" onClick={() => setQty((q) => Math.max(1, q - 1))} disabled={qty <= 1} aria-label="Decrease quantity"><Minus className="size-4" /></button>
                   <span className="num w-7 text-center text-[16px] font-semibold" aria-live="polite">{qty}</span>
-                  <button type="button" className="grid size-12 place-items-center text-ink-2" onClick={() => setQty((q) => Math.min(99, q + 1))} aria-label="Increase quantity"><Plus className="size-4" /></button>
+                  <button type="button" className="grid size-12 place-items-center text-ink-2 transition-colors duration-150 active:bg-sunken" onClick={() => setQty((q) => Math.min(99, q + 1))} aria-label="Increase quantity"><Plus className="size-4" /></button>
                 </div>
-                <Button className="h-12 flex-1 justify-between px-4 text-[15px]" disabled={!p} onClick={() => { order.onSetQty(d, qty); onClose(); }}>
+                <Button className={cn("h-12 flex-1 justify-between px-4 text-[15px]", PRESS_BTN)} disabled={!p} onClick={() => { order.onSetQty(d, qty); onClose(); }}>
                   <span>{order.qty ? (qty === order.qty ? "In order" : "Update order") : "Add to order"}</span>
-                  {p && <span className="num opacity-80">{formatINR(p.totalWithGstPaise * qty)}</span>}
+                  {p && <span className="num text-[13px] opacity-75">×{qty}</span>}
                 </Button>
               </div>
-              {order.qty > 0 && <button type="button" className="mt-1 h-10 w-full text-[14px] text-ink-2 hover:text-danger" onClick={() => { order.onSetQty(d, 0); onClose(); }}>Remove from order</button>}
+              {order.qty > 0 && <button type="button" className="mt-1 h-11 w-full text-[14px] text-ink-2 transition-colors hover:text-danger active:opacity-60" onClick={() => { order.onSetQty(d, 0); onClose(); }}>Remove from order</button>}
             </>
           )}
         </div>

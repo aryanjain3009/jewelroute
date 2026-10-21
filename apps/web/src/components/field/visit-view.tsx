@@ -1,22 +1,25 @@
 "use client";
 import Link from "next/link";
-import { Check, Phone } from "lucide-react";
+import { Check, Phone, TriangleAlert } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { ErrorState, MemoChip, VisitDot } from "./bits";
+import { ErrorState, Notice, PRESS_BTN, VisitChip } from "./bits";
 import { CheckInStage } from "./check-in-panel";
 import { ProofCapture } from "./proof";
 import { ArrivalLine, ClosedVisit, ShopContext, Workspace } from "./workspace";
 import { errorMessage, useVisit } from "./queries";
-import { fmtPlanned, fmtWeekday } from "./format";
-import { PageBar } from "./top-bar";
+import { fmtPlanned, fmtTime, fmtWeekday } from "./format";
+import { BottomSpacer, PageBar } from "./top-bar";
 import type { VisitDetail, VisitResume } from "./types";
+import { useDocTitle } from "@/lib/title";
 
 /** One workspace for the whole visit. Every stage is derived from `GET /visits/:id`, so a reload at any
  *  point lands on the same step. */
 export function VisitView({ id }: { id: string }) {
   const q = useVisit(id);
+  useDocTitle(q.data?.shop.name);
   const d = q.data;
   const s = d?.visit.status;
   const open = s === "CHECKED_IN" || s === "ACTIVE";
@@ -24,8 +27,8 @@ export function VisitView({ id }: { id: string }) {
   const back = closed ? "/field/visits" : "/field/today";
 
   const bar = (
-    <PageBar back={back} backLabel={closed ? "Visits" : "Today"} title={d?.shop.name ?? "Visit"}
-      right={d?.shop.phone ? <a href={`tel:${d.shop.phone}`} aria-label={`Call ${d.shop.name}`} className="grid size-11 place-items-center rounded-lg text-ink-2 hover:bg-hover hover:text-ink"><Phone className="size-[18px]" /></a> : null} />
+    <PageBar back={back} backLabel={closed ? "Visits" : "Today"} title={d ? `Stop ${d.visit.sequence}` : "Visit"}
+      right={d?.shop.phone ? <a href={`tel:${d.shop.phone}`} aria-label={`Call ${d.shop.name}`} className="grid size-11 place-items-center rounded-lg text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink active:bg-sunken"><Phone className="size-[18px]" /></a> : null} />
   );
 
   if (q.isPending) return <>{bar}<VisitSkeleton /></>;
@@ -51,21 +54,24 @@ export function VisitView({ id }: { id: string }) {
       {bar}
       <main className="pb-6">
         <ShopHeader d={data} />
-        {!closed && <Stages stage={stage} />}
+        {!closed && stage < 2 && <Stages stage={stage} />}
         {blocked && <Blocked b={blocked} plannedDate={data.visit.plannedDate} />}
 
         {step === "CHECK_IN" && (
           <>
             <CheckInStage data={data} />
             <ShopContext d={data} />
+            {/* Clears the sticky check-in bar (helper line, button, simulated-arrival link). */}
+            <BottomSpacer h={176} />
           </>
         )}
 
         {step === "UPLOAD_PROOF" && (
           <>
             <ArrivalLine v={data.visit} />
-            <div className="mt-4 px-4"><ProofCapture visitId={data.visit.id} existingChecksums={data.proofs.map((p) => p.checksumSha256)} /></div>
+            <div className="mt-3 px-4"><ProofCapture visitId={data.visit.id} existingChecksums={data.proofs.map((p) => p.checksumSha256)} /></div>
             <ShopContext d={data} />
+            <BottomSpacer h={184} />
           </>
         )}
 
@@ -78,37 +84,31 @@ export function VisitView({ id }: { id: string }) {
 
 function ShopHeader({ d }: { d: VisitDetail }) {
   const { shop, visit } = d;
+  const open = visit.status === "CHECKED_IN" || visit.status === "ACTIVE";
   return (
-    <header className="px-4 pb-3 pt-4">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <VisitDot status={visit.status} />
-        {visit.plannedTime && <span className="num text-[13px] text-ink-3">Planned {fmtPlanned(visit.plannedTime)}</span>}
-        <span className="text-[13px] text-ink-3">Stop {visit.sequence}</span>
+    <header className="px-4 pb-4 pt-4">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-ink-3">
+        <VisitChip status={visit.status} />
+        {open && visit.checkInAt && <span>Since <span className="num">{fmtTime(visit.checkInAt)}</span></span>}
+        {!open && visit.plannedTime && <span className="num">{fmtPlanned(visit.plannedTime)}</span>}
       </div>
-      <h2 className="mt-1.5 text-[22px] font-semibold leading-tight tracking-[-0.02em] text-ink">{shop.name}</h2>
-      <p className="mt-0.5 text-[14px] text-ink-2">{shop.ownerName ? `${shop.ownerName}, ` : ""}{shop.area}</p>
-      <p className="text-[13px] text-ink-3">{shop.address}</p>
-      {visit.activeMemoCount > 0 && <MemoChip count={visit.activeMemoCount} valuePaise={visit.activeMemoValuePaise} className="mt-2" />}
+      <h2 className="mt-2 line-clamp-2 text-[22px] font-semibold leading-[1.2] tracking-[-0.02em] text-ink">{shop.name}</h2>
+      <p className="mt-1 truncate text-[14px] text-ink-2">{shop.ownerName ? `${shop.ownerName}, ` : ""}{shop.area}</p>
+      <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-ink-3">{shop.address}</p>
     </header>
   );
 }
 
 function Blocked({ b, plannedDate }: { b: NonNullable<VisitResume["blockedBy"]>; plannedDate: string }) {
-  return (
-    <div role="alert" className="mx-4 mb-3 rounded-xl border border-warn/20 bg-warn-soft px-4 py-3 text-[14px] text-ink">
-      {b.code === "ANOTHER_VISIT_OPEN" ? (
-        <>
-          <p className="font-medium">Another visit is still open</p>
-          <p className="mt-0.5 text-ink-2">Complete it before checking in here.</p>
-          <Link href={`/field/visits/${b.visitId}`} className="mt-2 inline-flex h-10 items-center rounded-lg bg-ink px-3.5 text-[14px] font-medium text-white">Open that visit</Link>
-        </>
-      ) : (
-        <>
-          <p className="font-medium">Planned for {fmtWeekday(plannedDate)}</p>
-          <p className="mt-0.5 text-ink-2">Check-in opens on the day of the visit.</p>
-        </>
-      )}
-    </div>
+  return b.code === "ANOTHER_VISIT_OPEN" ? (
+    <Notice tone="warn" icon={TriangleAlert} role="alert" className="mx-4 mb-3" title="Another visit is still open"
+      action={<Button asChild className={cn("h-10 px-3.5 text-[14px]", PRESS_BTN)}><Link href={`/field/visits/${b.visitId}`}>Open that visit</Link></Button>}>
+      Complete it before checking in here.
+    </Notice>
+  ) : (
+    <Notice tone="warn" icon={TriangleAlert} role="alert" className="mx-4 mb-3" title={`Planned for ${fmtWeekday(plannedDate)}`}>
+      Check-in opens on the day of the visit.
+    </Notice>
   );
 }
 
@@ -120,7 +120,7 @@ function Stages({ stage }: { stage: number }) {
         const done = i < stage; const cur = i === stage;
         return (
           <li key={label} aria-current={cur ? "step" : undefined}>
-            <span className={cn("block h-[3px] rounded-full", done ? "bg-verified" : cur ? "bg-ink" : "bg-line-strong")} />
+            <span className={cn("block h-[3px] rounded-full transition-colors duration-300", done ? "bg-verified" : cur ? "bg-ink" : "bg-line-strong")} />
             <span className={cn("mt-1.5 flex items-center gap-1 text-[12px]", cur ? "font-medium text-ink" : done ? "text-verified" : "text-ink-3")}>
               {done && <Check className="size-3" strokeWidth={3} />}{label}
             </span>
@@ -133,13 +133,14 @@ function Stages({ stage }: { stage: number }) {
 
 function VisitSkeleton() {
   return (
-    <div className="space-y-3 px-4 pt-4">
-      <Skeleton className="h-4 w-32" />
-      <Skeleton className="h-7 w-56" />
-      <Skeleton className="h-4 w-40" />
-      <Skeleton className="h-[220px] w-full rounded-xl" />
-      <Skeleton className="h-16 w-full rounded-xl" />
+    <div className="px-4 pt-4" aria-busy>
+      <Skeleton className="h-[22px] w-40 rounded-md" />
+      <Skeleton className="mt-3 h-7 w-56" />
+      <Skeleton className="mt-2 h-4 w-40" />
+      <Skeleton className="mt-1.5 h-3.5 w-52" />
+      <div className="mt-5 grid grid-cols-3 gap-1.5">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-[3px]" />)}</div>
+      <Skeleton className="mt-6 h-[200px] w-full rounded-xl" />
+      <Skeleton className="mt-3 h-[72px] w-full rounded-xl" />
     </div>
   );
 }
-

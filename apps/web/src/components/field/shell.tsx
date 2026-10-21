@@ -1,10 +1,12 @@
 "use client";
-/** Field app shell: one phone-width column (centred on desktop) + a bottom tab bar.
+/** Field app shell: one phone-width column (centred on tablets and desktops) + a bottom tab bar.
  *  Pushed screens (a visit and its sale flow) hide the tab bar so their own primary action
  *  owns the bottom of the screen, the way iOS hides the tab bar on pushed views. */
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { CircleUserRound, Gem, History, Route } from "lucide-react";
+import { useMe } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -18,11 +20,16 @@ export const TAB_BAR_H = "calc(56px + env(safe-area-inset-bottom))";
 
 export function FieldShell({ children }: { children: React.ReactNode }) {
   const path = usePathname() ?? "";
+  const router = useRouter();
+  const me = useMe();
+  // The middleware routes by the access token; this covers a session that only had a refresh cookie.
+  const wrongRole = !!me.data && me.data.role !== "FIELD_AGENT";
+  useEffect(() => { if (wrongRole) router.replace("/admin"); }, [wrongRole, router]);
   const pushed = /^\/field\/visits\/[^/]+/.test(path);
   return (
-    <div className="min-h-dvh bg-sunken text-[15px] text-ink">
+    <div className="min-h-dvh bg-sunken text-[15px] text-ink [-webkit-tap-highlight-color:transparent]">
       <div className="relative mx-auto flex min-h-dvh max-w-[520px] flex-col bg-paper min-[521px]:border-x min-[521px]:border-line">
-        {children}
+        {wrongRole ? null : children}
         {!pushed && <div aria-hidden style={{ height: TAB_BAR_H }} className="shrink-0" />}
       </div>
       {!pushed && <TabBar path={path} />}
@@ -38,8 +45,9 @@ function TabBar({ path }: { path: string }) {
           const active = path === href || path.startsWith(`${href}/`);
           return (
             <Link key={href} href={href} aria-current={active ? "page" : undefined}
-              className={cn("flex h-14 flex-col items-center justify-center gap-1 text-[11px] transition-colors", active ? "font-semibold text-ink" : "font-medium text-ink-3 hover:text-ink-2")}>
-              <I className="size-[22px]" strokeWidth={active ? 2.1 : 1.7} />
+              className={cn("group flex h-14 flex-col items-center justify-center gap-[3px] text-[11px] tracking-[0.01em] transition-colors duration-150",
+                active ? "font-semibold text-ink" : "font-medium text-ink-3 hover:text-ink-2")}>
+              <I className="size-[22px] transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-safe:group-active:scale-90" strokeWidth={active ? 2.1 : 1.7} />
               {label}
             </Link>
           );

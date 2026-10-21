@@ -2,8 +2,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronRight, MapPinOff, Navigation } from "lucide-react";
-import { distanceM, formatINRCompact } from "@jewelroute/shared";
+import { CalendarClock, Check, CheckCircle2, ChevronRight, Clock3, MapPinOff, Navigation, TriangleAlert } from "lucide-react";
+import { distanceM, formatINR, formatINRCompact } from "@jewelroute/shared";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Chip } from "@/components/app/chrome";
@@ -11,11 +11,11 @@ import type { MapMarker, MapTone } from "@/components/jr/map";
 import { cn } from "@/lib/utils";
 import { FieldMap } from "./field-map";
 import { useToday, errorMessage } from "./queries";
-import { ErrorState, MemoChip, SectionTitle } from "./bits";
-import { fmtDistance, fmtTime, fmtWeekday, firstName, greeting, mapsDirections, plannedParts, plural } from "./format";
+import { ErrorState, FieldEmpty, MemoChip, Notice, PRESS_BTN, PRESS_ROW, SectionTitle } from "./bits";
+import { fmtDistance, fmtPlanned, fmtTime, fmtWeekday, firstName, greeting, mapsDirections, plannedParts, plural } from "./format";
 import { BottomBar, PageBar } from "./top-bar";
 import { useFieldGeo, type GeoFix, type FieldGeo, geoFailed } from "./use-field-geo";
-import type { FieldVisit } from "./types";
+import type { FieldVisit, TodayResponse } from "./types";
 
 const isOpen = (v: FieldVisit) => v.status === "CHECKED_IN" || v.status === "ACTIVE";
 const toneFor = (v: FieldVisit, focusId?: string): MapTone => {
@@ -59,71 +59,53 @@ export function TodayView() {
         <ErrorState title="Couldn't load today's route" message={errorMessage(q.error)} onRetry={() => q.refetch()} />
       ) : (
         <main className="pb-6">
-          <Header name={firstName(d!.user?.name ?? d!.agent.name)} done={d!.progress.completed} total={d!.progress.planned} inProgress={d!.progress.inProgress} />
+          <Header d={d!} name={firstName(d!.user?.name ?? d!.agent.name)} />
+          <Carrying d={d!} />
 
           {stale && (
-            <div role="alert" className="mx-4 mb-4 rounded-xl border border-warn/25 bg-warn-soft px-4 py-3">
-              <p className="text-[15px] font-medium text-ink">{stale.shop.name} is still open from {fmtWeekday(stale.plannedDate)}</p>
-              <p className="mt-0.5 text-[14px] text-ink-2">Complete that visit before you can check in anywhere today.</p>
-              <Button asChild className="mt-3 h-11 w-full text-[15px]"><Link href={`/field/visits/${stale.id}`}>Resume and complete</Link></Button>
+            <Notice tone="warn" icon={TriangleAlert} role="alert" className="mx-4 mb-4"
+              title={<>{stale.shop.name} is still open from {fmtWeekday(stale.plannedDate)}</>}
+              action={<Button asChild className={cn("h-11 w-full text-[15px]", PRESS_BTN)}><Link href={`/field/visits/${stale.id}`}>Resume and complete</Link></Button>}>
+              Complete that visit before you can check in anywhere today.
+            </Notice>
+          )}
+
+          {d!.visits.length > 0 && (
+            <div className="px-4">
+              <div className="relative h-[168px] overflow-hidden rounded-xl border border-line bg-sunken">
+                <FieldMap markers={markers} me={fix} route={d!.visits.map((v) => v.id)} interactive={false} markerStyle="numbered" selectedId={focus?.id} />
+                <GeoChip geo={geo} />
+              </div>
             </div>
           )}
 
-          <div className="px-4">
-            <div className="relative h-[176px] overflow-hidden rounded-xl border border-line">
-              {markers.length > 0 ? (
-                <FieldMap markers={markers} me={fix} route={d!.visits.map((v) => v.id)} selectedId={focus?.id} interactive={false} />
-              ) : (
-                <div className="grid h-full place-items-center bg-sunken text-[13px] text-ink-3">No shops on today’s route</div>
-              )}
-              <GeoChip geo={geo} />
-            </div>
-          </div>
-
-          <SectionTitle className="mt-6" aside={d!.visits.length ? plural(d!.visits.length, "stop") : undefined}>Route</SectionTitle>
           {d!.visits.length === 0 ? (
-            <div className="mx-4 mt-2 rounded-xl border border-dashed border-line-strong px-5 py-10 text-center">
-              <MapPinOff className="mx-auto size-5 text-ink-3" strokeWidth={1.75} />
-              <p className="mt-3 text-[15px] font-medium text-ink">No visits assigned for today</p>
-              <p className="mt-1 text-[14px] text-ink-2">Your manager assigns shops. Pull to refresh once they have.</p>
-            </div>
+            <FieldEmpty icon={MapPinOff} className="mx-4 mt-2 rounded-xl border border-line py-12" title="No visits assigned for today"
+              hint="Your manager assigns shops. They appear here on their own as soon as they're assigned."
+              action={<Button asChild variant="outline" className={cn("h-11 px-4 text-[15px]", PRESS_BTN)}><Link href="/field/visits?scope=upcoming"><CalendarClock />See upcoming visits</Link></Button>} />
           ) : (
-            <ol className="mt-2 border-y border-line">
-              {d!.visits.map((v) => v.id === focus?.id
-                ? <FocusRow key={v.id} v={v} distance={dist(fix, v)} innerRef={focusRef} />
-                : <VisitRow key={v.id} v={v} distance={dist(fix, v)} />)}
-            </ol>
-          )}
-          {d!.visits.length > 0 && !focus && d!.progress.completed === d!.progress.planned && (
-            <p className="px-4 pt-4 text-[14px] text-ink-2">Route complete. Bring unsold samples back to the vault or keep them in your bag for tomorrow.</p>
+            <>
+              <SectionTitle className="mt-6" aside={plural(d!.visits.length, "stop")}>Route</SectionTitle>
+              {!focus && <RouteDone d={d!} />}
+              <ol className="mt-2 border-y border-line">
+                {d!.visits.map((v) => v.id === focus?.id
+                  ? <FocusRow key={v.id} v={v} distance={dist(fix, v)} innerRef={focusRef} />
+                  : <VisitRow key={v.id} v={v} distance={dist(fix, v)} />)}
+              </ol>
+            </>
           )}
 
-          <Link href="/field/profile" className="mx-4 mt-6 grid grid-cols-2 overflow-hidden rounded-xl border border-line hover:bg-hover">
-            <div className="px-4 py-3">
-              <p className="text-[13px] text-ink-2">In your bag</p>
-              <p className="mt-0.5 text-[15px] text-ink"><span className="num font-semibold text-gold-ink">{formatINRCompact(d!.bag.valuePaise)}</span> <span className="text-[13px] text-ink-3">{plural(d!.bag.pieceCount, "piece")}</span></p>
-            </div>
-            <div className="border-l border-line px-4 py-3">
-              <p className="text-[13px] text-ink-2">Out on memo</p>
-              <p className="mt-0.5 text-[15px] text-ink">
-                <span className="num font-semibold">{formatINRCompact(d!.activeMemos.valuePaise)}</span>{" "}
-                <span className={cn("text-[13px]", d!.activeMemos.overdueCount ? "text-danger" : "text-ink-3")}>
-                  {d!.activeMemos.overdueCount ? `${d!.activeMemos.overdueCount} overdue` : plural(d!.activeMemos.count, "memo")}
-                </span>
-              </p>
-            </div>
-          </Link>
         </main>
       )}
 
       {focus && !focusVisible && (
-        <BottomBar aboveTabs>
+        <BottomBar aboveTabs enter>
           <div className="flex items-center gap-3">
             <div className="min-w-0 flex-1">
-              <p className="text-[12px] text-ink-3">{isOpen(focus) ? "In visit" : "Next"}</p>
+              <p className="text-[12px] text-ink-3">{isOpen(focus) ? `In visit since ${fmtTime(focus.checkInAt)}` : `Next stop${focus.plannedTime ? `, ${fmtPlanned(focus.plannedTime)}` : ""}`}</p>
               <p className="truncate text-[15px] font-medium text-ink">{focus.shop.name}</p>
             </div>
-            <Button asChild className="h-11 px-5 text-[15px]"><Link href={`/field/visits/${focus.id}`}>{isOpen(focus) ? "Continue visit" : "Open visit"}</Link></Button>
+            <Button asChild className={cn("h-11 px-5 text-[15px]", PRESS_BTN)}><Link href={`/field/visits/${focus.id}`}>{isOpen(focus) ? "Continue visit" : "Open visit"}</Link></Button>
           </div>
         </BottomBar>
       )}
@@ -131,22 +113,44 @@ export function TodayView() {
   );
 }
 
-function Header({ name, done, total, inProgress }: { name: string; done: number; total: number; inProgress: number }) {
-  const pct = total ? Math.round((done / total) * 100) : 0;
+const SEG: Record<FieldVisit["status"], string> = {
+  COMPLETED: "bg-verified", CHECKED_IN: "bg-info", ACTIVE: "bg-info", MISSED: "bg-danger", CANCELLED: "bg-line", PLANNED: "bg-line-strong",
+};
+
+function Header({ d, name }: { d: TodayResponse; name: string }) {
+  const { completed: done, planned: total, inProgress } = d.progress;
+  const missed = d.visits.filter((v) => v.status === "MISSED").length;
   return (
     <div className="px-4 pb-4 pt-4">
-      <h2 className="text-[22px] font-semibold tracking-[-0.02em] text-ink">{greeting()}{name ? `, ${name}` : ""}</h2>
+      <h2 className="text-[22px] font-semibold leading-tight tracking-[-0.02em] text-ink">{greeting()}{name ? `, ${name}` : ""}</h2>
       {total > 0 ? (
         <>
-          <p className="mt-1 text-[14px] text-ink-2">
-            <span className="num font-medium text-ink">{done} of {total}</span> visits completed{inProgress ? <span className="text-info"> · 1 in progress</span> : null}
+          <p className="mt-1 flex flex-wrap gap-x-3 text-[14px] text-ink-2">
+            <span><span className="num font-medium text-ink">{done} of {total}</span> visits completed</span>
+            {inProgress > 0 && <span className="text-info">{inProgress} in progress</span>}
+            {missed > 0 && <span className="text-danger">{missed} missed</span>}
           </p>
-          <div className="mt-3 h-1 overflow-hidden rounded-full bg-sunken" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label={`${done} of ${total} visits completed`}>
-            <div className="h-full rounded-full bg-verified transition-[width] duration-500" style={{ width: `${pct}%` }} />
+          {/* One segment per stop, in route order, coloured by the status the server holds. */}
+          <div className="mt-3 flex gap-1" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label={`${done} of ${total} visits completed`}>
+            {d.visits.map((v) => <span key={v.id} className={cn("h-1 flex-1 rounded-full transition-colors duration-300", SEG[v.status])} />)}
           </div>
         </>
       ) : <p className="mt-1 text-[14px] text-ink-2">No visits planned today.</p>}
     </div>
+  );
+}
+
+function RouteDone({ d }: { d: TodayResponse }) {
+  const all = d.progress.completed === d.progress.planned;
+  return all ? (
+    <Notice tone="ok" icon={CheckCircle2} className="mx-4 mt-2" title="Route complete"
+      action={<Button asChild variant="outline" className={cn("h-10 bg-paper px-3.5 text-[14px]", PRESS_BTN)}><Link href="/field/profile">Check your bag</Link></Button>}>
+      All {plural(d.progress.planned, "visit")} done. Bring unsold samples back to the vault, or keep them in your bag for tomorrow.
+    </Notice>
+  ) : (
+    <Notice tone="neutral" icon={Clock3} className="mx-4 mt-2" title="No more stops planned today">
+      {d.progress.completed} of {d.progress.planned} visits completed. Your manager can add a shop to your route.
+    </Notice>
   );
 }
 
@@ -163,11 +167,14 @@ function TimeCell({ v, muted }: { v: FieldVisit; muted?: boolean }) {
 function Meta({ v, distance }: { v: FieldVisit; distance?: number }) {
   const done = v.status === "COMPLETED";
   return (
-    <span className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px] text-ink-2">
-      <span>{v.shop.area}</span>
-      {distance !== undefined && !done && <span className="num text-ink-3">{fmtDistance(distance)}</span>}
-      {done && v.completedAt && <span className="text-ink-3">Done {fmtTime(v.completedAt)}</span>}
-      {v.status === "MISSED" && <span className="text-danger">Missed</span>}
+    <span className="mt-0.5 flex min-w-0 items-center gap-x-2.5 text-[13px] text-ink-2">
+      <span className="truncate">{v.shop.area}</span>
+      {distance !== undefined && !done && v.status !== "CANCELLED" && (distance <= v.shop.geofenceRadiusM
+        ? <span className="shrink-0 font-medium text-verified">You’re here</span>
+        : <span className="num shrink-0 text-ink-3">{fmtDistance(distance)} away</span>)}
+      {done && v.completedAt && <span className="shrink-0 text-ink-3">Done <span className="num">{fmtTime(v.completedAt)}</span></span>}
+      {v.status === "MISSED" && <span className="shrink-0 text-danger">Missed</span>}
+      {v.status === "CANCELLED" && <span className="shrink-0 text-ink-3">Cancelled</span>}
     </span>
   );
 }
@@ -177,19 +184,20 @@ function FocusRow({ v, distance, innerRef }: { v: FieldVisit; distance?: number;
   return (
     <li ref={innerRef} className="relative border-b border-line bg-[#fafafa] last:border-b-0">
       <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] bg-ink" />
-      <div className="flex gap-3 px-4 pb-3.5 pt-3">
+      <div className="flex gap-3 px-4 pb-4 pt-3.5">
         <TimeCell v={v} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-[12px] font-medium text-ink-2">{open ? "In visit" : "Next"}</span>
-            {open && <Chip tone="blue">Checked in {fmtTime(v.checkInAt)}</Chip>}
+            {open
+              ? <Chip tone="blue"><span className="size-1.5 rounded-full bg-current" aria-hidden />In visit since <span className="num">{fmtTime(v.checkInAt)}</span></Chip>
+              : <span className="text-[12px] font-semibold text-ink-2">Next stop</span>}
           </div>
-          <p className="truncate text-[16px] font-semibold text-ink">{v.shop.name}</p>
+          <p className="mt-1 line-clamp-2 text-[17px] font-semibold leading-snug tracking-[-0.01em] text-ink">{v.shop.name}</p>
           <Meta v={v} distance={distance} />
-          {v.activeMemoCount > 0 && <MemoChip count={v.activeMemoCount} className="mt-2" />}
-          <div className="mt-3 flex gap-2">
-            <Button asChild className="h-11 flex-1 text-[15px]"><Link href={`/field/visits/${v.id}`}>{open ? "Continue visit" : "Open visit"}</Link></Button>
-            <Button asChild variant="outline" className="h-11 w-11 px-0" aria-label={`Directions to ${v.shop.name}`}>
+          {v.activeMemoCount > 0 && <MemoChip count={v.activeMemoCount} valuePaise={v.activeMemoValuePaise} className="mt-2" />}
+          <div className="mt-3.5 flex gap-2">
+            <Button asChild className={cn("h-11 flex-1 text-[15px]", PRESS_BTN)}><Link href={`/field/visits/${v.id}`}>{open ? "Continue visit" : "Open visit"}</Link></Button>
+            <Button asChild variant="outline" className={cn("size-11 bg-paper px-0", PRESS_BTN)} aria-label={`Directions to ${v.shop.name}`}>
               <a href={mapsDirections(v.shop.lat, v.shop.lng)} target="_blank" rel="noreferrer"><Navigation className="size-[18px]" /></a>
             </Button>
           </div>
@@ -204,7 +212,7 @@ function VisitRow({ v, distance }: { v: FieldVisit; distance?: number }) {
   const muted = done || v.status === "CANCELLED" || v.status === "MISSED";
   return (
     <li className="border-b border-line last:border-b-0">
-      <Link href={`/field/visits/${v.id}`} className="flex min-h-[68px] items-start gap-3 px-4 py-3 transition-colors hover:bg-hover active:bg-sunken">
+      <Link href={`/field/visits/${v.id}`} className={cn("flex min-h-[68px] items-start gap-3 px-4 py-3", PRESS_ROW)}>
         <TimeCell v={v} muted={muted} />
         <div className="min-w-0 flex-1">
           <p className={cn("truncate text-[15px] font-medium", muted ? "text-ink-2" : "text-ink")}>{v.shop.name}</p>
@@ -219,27 +227,56 @@ function VisitRow({ v, distance }: { v: FieldVisit; distance?: number }) {
   );
 }
 
+/** What Rahul is responsible for right now, in one line: pieces in his bag and pieces on memo (both are
+ *  custody, so both values are gold), with overdue memos called out. */
+function Carrying({ d }: { d: TodayResponse }) {
+  const overdue = d.activeMemos.overdueCount;
+  return (
+    <section aria-label="Custody" className="mx-4 mb-4 grid grid-cols-2 overflow-hidden rounded-xl border border-line">
+      <Link href="/field/profile" className={cn("min-w-0 px-3.5 py-2.5", PRESS_ROW)} title={formatINR(d.bag.valuePaise)}>
+        <p className="text-[12px] text-ink-2">In your bag</p>
+        <p className="mt-0.5 flex items-baseline gap-2"><span className="num text-[16px] font-semibold text-gold-ink">{formatINRCompact(d.bag.valuePaise)}</span><span className="text-[12px] text-ink-3">{plural(d.bag.pieceCount, "piece")}</span></p>
+      </Link>
+      <Link href="/field/profile#memos" className={cn("min-w-0 border-l border-line px-3.5 py-2.5", PRESS_ROW)} title={formatINR(d.activeMemos.valuePaise)}>
+        <p className="text-[12px] text-ink-2">On memo</p>
+        <p className="mt-0.5 flex items-baseline gap-2">
+          {d.activeMemos.count ? <span className="num text-[16px] font-semibold text-gold-ink">{formatINRCompact(d.activeMemos.valuePaise)}</span> : <span className="text-[16px] text-ink-3">None</span>}
+          <span className={cn("truncate text-[12px]", overdue ? "font-medium text-danger" : "text-ink-3")}>{overdue ? `${overdue} overdue` : plural(d.activeMemos.count, "memo")}</span>
+        </p>
+      </Link>
+    </section>
+  );
+}
+
 function GeoChip({ geo }: { geo: FieldGeo }) {
-  const base = "absolute bottom-2 left-2 rounded-full border border-line bg-paper px-2.5 py-1 text-[12px]";
-  if (geo.status === "watching" && geo.fix) return <span className={cn(base, "pointer-events-none text-ink-2")}><span className="mr-1.5 inline-block size-2 rounded-full bg-info align-middle" />You <span className="num">±{Math.round(geo.fix.accuracyM)} m</span></span>;
+  const base = "absolute bottom-2 left-2 inline-flex h-7 items-center gap-1.5 rounded-full border border-line bg-paper px-2.5 text-[12px] shadow-float";
+  if (geo.status === "watching" && geo.fix) return <span className={cn(base, "pointer-events-none text-ink-2")}><span className="size-2 rounded-full bg-info" />You <span className="num">±{Math.round(geo.fix.accuracyM)} m</span></span>;
   if (geoFailed(geo.status)) {
     return (
-      <button type="button" onClick={geo.retry} className={cn(base, "font-medium text-danger")}>
-        {geo.status === "denied" ? "Location blocked. Distances hidden" : geo.status === "timeout" ? "No GPS fix yet. Tap to retry" : "Location unavailable. Tap to retry"}
+      <button type="button" onClick={geo.retry} className={cn(base, "font-medium text-danger transition-opacity active:opacity-60")}>
+        <span className="size-2 rounded-full bg-danger" />
+        {geo.status === "denied" ? "Location blocked, distances hidden" : geo.status === "timeout" ? "No GPS fix yet, tap to retry" : "Location unavailable, tap to retry"}
       </button>
     );
   }
-  return <span className={cn(base, "text-ink-3")}>Finding your location</span>;
+  return <span className={cn(base, "text-ink-3")}><span className="size-2 animate-pulse rounded-full bg-ink-3" />Finding your location</span>;
 }
 
 function TodaySkeleton() {
   return (
-    <div className="space-y-3 px-4 pt-4">
-      <Skeleton className="h-7 w-56" />
-      <Skeleton className="h-4 w-40" />
-      <Skeleton className="h-1 w-full" />
-      <Skeleton className="h-[176px] w-full rounded-xl" />
-      <div className="space-y-px pt-3">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[68px] w-full" />)}</div>
+    <div className="pt-4" aria-busy>
+      <div className="space-y-2 px-4"><Skeleton className="h-7 w-56" /><Skeleton className="h-4 w-40" /></div>
+      <div className="mt-3 flex gap-1 px-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-1 flex-1" />)}</div>
+      <div className="mt-5 px-4"><Skeleton className="h-[168px] w-full rounded-xl" /></div>
+      <div className="mt-6 px-4"><Skeleton className="h-3.5 w-14" /></div>
+      <div className="mt-3 divide-y divide-line border-y border-line">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="flex gap-3 px-4 py-3.5">
+            <div className="w-12 space-y-1.5"><Skeleton className="h-4 w-10" /><Skeleton className="h-3 w-6" /></div>
+            <div className="flex-1 space-y-2"><Skeleton className="h-4 w-44" /><Skeleton className="h-3 w-28" /></div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

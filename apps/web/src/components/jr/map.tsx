@@ -11,7 +11,10 @@ export interface MapProps {
   markers: MapMarker[];
   me?: { lat: number; lng: number; accuracyM?: number } | null;
   /** Draw a geofence circle (metres) around a point. */
-  fence?: { lat: number; lng: number; radiusM: number; inside?: boolean } | null;
+  fence?: { lat: number; lng: number; radiusM: number; inside?: boolean; outsideColor?: string } | null;
+  /** "numbered" (field): a 22px circle with the route number inside, the label pill only on the selected
+   *  stop, and the agent's dot drawn under the markers. Default keeps the pill markers. */
+  markerStyle?: "pill" | "numbered";
   /** Connect markers in this order with a dashed route line. */
   route?: string[];
   className?: string;
@@ -23,6 +26,36 @@ export interface MapProps {
 }
 
 const STYLE = "https://tiles.openfreemap.org/styles/positron";
+
+/** The OpenFreeMap style compares feature properties as numbers (`ref_length`, `admin_level`, `rank`), but
+ *  Indian OSM data has roads and places where they are null, and MapLibre warns "Expected value to be of
+ *  type number, but found null instead" for each one, on every map. Guard each numeric comparison of a
+ *  `get` with a type check (`all` short-circuits), so those features simply don't match — same rendering,
+ *  no warning. */
+const CMP = new Set(["<", "<=", ">", ">="]);
+type Expr = unknown;
+function guardNumeric(e: Expr): Expr {
+  if (!Array.isArray(e)) return e;
+  const [op, a, b] = e as [unknown, unknown, unknown];
+  const isGet = (x: unknown): x is ["get", string] => Array.isArray(x) && x[0] === "get" && x.length === 2 && typeof x[1] === "string";
+  if (typeof op === "string" && CMP.has(op) && e.length === 3 && (isGet(a) || isGet(b))) {
+    const g = (isGet(a) ? a : b) as ["get", string];
+    return ["all", ["==", ["typeof", g], "number"], e];
+  }
+  return e.map(guardNumeric);
+}
+function guardStyle(next: maplibregl.StyleSpecification): maplibregl.StyleSpecification {
+  return {
+    ...next,
+    layers: next.layers.map((l) => {
+      const out = { ...l } as Record<string, unknown>;
+      if ("filter" in l && l.filter) out.filter = guardNumeric(l.filter);
+      if ("layout" in l && l.layout) out.layout = Object.fromEntries(Object.entries(l.layout).map(([k, v]) => [k, guardNumeric(v)]));
+      if ("paint" in l && l.paint) out.paint = Object.fromEntries(Object.entries(l.paint).map(([k, v]) => [k, guardNumeric(v)]));
+      return out as unknown as maplibregl.LayerSpecification;
+    }),
+  };
+}
 const TONE: Record<MapTone, { bg: string; fg: string; ring: string }> = {
   planned: { bg: "#ffffff", fg: "#191714", ring: "#d6d0c3" },
   next: { bg: "#191714", fg: "#fcfbf8", ring: "#191714" },
@@ -44,7 +77,7 @@ function circle(lat: number, lng: number, radiusM: number, steps = 64) {
   return { type: "Feature" as const, properties: {}, geometry: { type: "Polygon" as const, coordinates: [coords] } };
 }
 
-export function JrMap({ markers, me, fence, route, className, initialZoom = 12, selectedId, interactive = true, points }: MapProps) {
+export function JrMap({ markers, me, fence, route, className, initialZoom = 12, selectedId, interactive = true, points, markerStyle = "pill" }: MapProps) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<MLMap | null>(null);
   const loaded = useRef(false);
@@ -55,21 +88,56 @@ export function JrMap({ markers, me, fence, route, className, initialZoom = 12, 
     if (!el.current || map.current) return;
     const first = markers[0] ?? me;
     map.current = new maplibregl.Map({
-      container: el.current, style: STYLE,
+      container: el.current,
       center: first ? [first.lng, first.lat] : [77.209, 28.6139], zoom: initialZoom,
       attributionControl: { compact: true }, interactive, cooperativeGestures: false,
     });
+    map.current.setStyle(STYLE, { transformStyle: (_prev, next) => guardStyle(next) });
     if (interactive) map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    // Markers and the camera don't need tiles; layers only need the style. Drawing on "style.load"
+    // (not just "load", which waits for every first tile) keeps the map useful when a tile host is slow or blocked.
+    map.current.on("style.load", () => { loaded.current = true; draw(); });
     map.current.on("load", () => { loaded.current = true; draw(); });
+    draw();
     return () => { map.current?.remove(); map.current = null; loaded.current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function draw() {
-    const m = map.current; if (!m || !loaded.current) return;
+    const m = map.current; if (!m) return;
     domMarkers.current.forEach((d) => d.remove()); domMarkers.current = [];
+    const numbered = markerStyle === "numbered";
+    const meNode = () => {
+      const node = document.createElement("div");
+      node.style.cssText = "width:16px;height:16px;border-radius:999px;background:#2f5f8f;border:3px solid #fff;box-shadow:0 0 0 6px rgb(47 95 143/.18)";
+      return node;
+    };
+    if (numbered && me) domMarkers.current.push(new maplibregl.Marker({ element: meNode() }).setLngLat([me.lng, me.lat]).addTo(m));
 
     for (const mk of markers) {
+      if (numbered) {
+        const tone = TONE[mk.tone ?? "planned"];
+        const sel = selectedId === mk.id;
+        const node = document.createElement("button");
+        node.type = "button";
+        node.setAttribute("aria-label", mk.label ?? "Shop");
+        node.style.cssText = "display:flex;align-items:center;gap:6px;background:none;border:0;padding:0;cursor:pointer;font:600 12px/1 var(--font-ui),system-ui";
+        const dot = document.createElement("span");
+        dot.textContent = mk.badge !== undefined ? String(mk.badge) : "";
+        dot.style.cssText = `width:22px;height:22px;border-radius:999px;display:grid;place-items:center;background:${tone.bg};color:${tone.fg};border:1.5px solid ${tone.ring};box-shadow:0 1px 2px rgb(0 0 0/.08),0 4px 10px -4px rgb(0 0 0/.25);font-size:11px`;
+        node.append(dot);
+        if (mk.label && sel) {
+          const l = document.createElement("span");
+          l.textContent = mk.label;
+          l.style.cssText = "padding:4px 8px;border-radius:8px;background:#fff;color:#1c1d1f;border:1px solid #e3e3e3;box-shadow:0 4px 12px -6px rgb(0 0 0/.25);white-space:nowrap";
+          node.append(l);
+        }
+        if (mk.onClick) node.addEventListener("click", (e) => { e.stopPropagation(); mk.onClick!(); });
+        // Anchor on the circle's centre (the label hangs off to the right).
+        const marker = new maplibregl.Marker({ element: node, anchor: "left", offset: [-11, 0] }).setLngLat([mk.lng, mk.lat]);
+        marker.addTo(m); domMarkers.current.push(marker);
+        continue;
+      }
       const tone = TONE[mk.tone ?? "planned"];
       const node = document.createElement("button");
       node.type = "button";
@@ -95,12 +163,14 @@ export function JrMap({ markers, me, fence, route, className, initialZoom = 12, 
       domMarkers.current.push(new maplibregl.Marker({ element: node }).setLngLat([p.lng, p.lat]).addTo(m));
     }
 
-    if (me) {
-      const node = document.createElement("div");
-      node.style.cssText = "width:16px;height:16px;border-radius:999px;background:#2f5f8f;border:3px solid #fff;box-shadow:0 0 0 6px rgb(47 95 143/.18)";
-      domMarkers.current.push(new maplibregl.Marker({ element: node }).setLngLat([me.lng, me.lat]).addTo(m));
-    }
+    if (me && !numbered) domMarkers.current.push(new maplibregl.Marker({ element: meNode() }).setLngLat([me.lng, me.lat]).addTo(m));
 
+    const styleReady = loaded.current || m.isStyleLoaded();
+    if (styleReady) drawLayers(m);
+    fitOnce(m);
+  }
+
+  function drawLayers(m: MLMap) {
     const src = (id: string, data: GeoJSON.Feature | GeoJSON.FeatureCollection) => {
       const s = m.getSource(id) as maplibregl.GeoJSONSource | undefined;
       if (s) s.setData(data as never); else m.addSource(id, { type: "geojson", data: data as never });
@@ -108,7 +178,9 @@ export function JrMap({ markers, me, fence, route, className, initialZoom = 12, 
     const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 
     src("jr-fence", fence ? circle(fence.lat, fence.lng, fence.radiusM) : empty);
-    const fenceColor = fence?.inside ? "#2c7a54" : "#b08a35";
+    // inside: true = verified (green); false = outside (outsideColor, default gold); undefined = no fix yet
+    // (field keeps its outsideColor, admin shows neutral grey).
+    const fenceColor = fence?.inside ? "#2c7a54" : fence?.inside === false ? fence.outsideColor ?? "#b08a35" : fence?.outsideColor ?? "#8f9095";
     if (!m.getLayer("jr-fence-fill")) {
       m.addLayer({ id: "jr-fence-fill", type: "fill", source: "jr-fence", paint: { "fill-color": fenceColor, "fill-opacity": 0.1 } });
       m.addLayer({ id: "jr-fence-line", type: "line", source: "jr-fence", paint: { "line-color": fenceColor, "line-width": 1.5, "line-dasharray": [2, 2] } });
@@ -121,6 +193,9 @@ export function JrMap({ markers, me, fence, route, className, initialZoom = 12, 
     src("jr-route", ordered.length > 1 ? { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: ordered.map((x) => [x.lng, x.lat]) } } : empty);
     if (!m.getLayer("jr-route-line")) m.addLayer({ id: "jr-route-line", type: "line", source: "jr-route", paint: { "line-color": "#191714", "line-width": 1.5, "line-opacity": 0.55, "line-dasharray": [1, 2] } }, "jr-fence-fill");
 
+  }
+
+  function fitOnce(m: MLMap) {
     if (!fitted.current) {
       const pts: LngLatLike[] = markers.map((x) => [x.lng, x.lat] as [number, number]);
       if (me) pts.push([me.lng, me.lat]);
