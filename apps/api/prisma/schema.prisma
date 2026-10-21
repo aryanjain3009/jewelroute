@@ -63,13 +63,24 @@ enum CustodyReason {
   RETURN_TO_VAULT
   CONVERTED_TO_SALE
   ADJUSTMENT
+  SALE_REJECTED // v3: a manager rejected a memo-converted order — the piece goes SOLD → back to the memo's shop
 }
 
+// v3: approval is a rule, not a default. CONFIRMED = no rule tripped (counts towards outstanding);
+// PENDING_APPROVAL = a rule tripped (Order.approvalReasons); APPROVED/REJECTED only from PENDING_APPROVAL.
+// Legacy SUBMITTED rows were mapped in 20261021000300_v3_credit_activity. The value was re-added in
+// 20261021000400 as the expand step of expand/contract; CHECK "Order_no_submitted" forbids it on every row, so
+// it is inert. It does NOT help an older deployment (that client still fails on CONFIRMED rows) and the down
+// script does not need it (it goes through TEXT) — see DECISIONS › v3 (re-review n2). A later contract
+// migration drops it. Never write it.
 enum OrderStatus {
   DRAFT
   SUBMITTED
+  PENDING_APPROVAL
+  CONFIRMED
   APPROVED
   REJECTED
+  CANCELLED
 }
 
 enum MemoStatus {
@@ -102,6 +113,7 @@ model Tenant {
   slug      String   @unique
   name      String
   demoMode  Boolean  @default(true) // allows clearly-labelled SIMULATED check-ins for demos
+  approvalThresholdPaise BigInt? // v3: an order total >= this needs approval (ORDER_THRESHOLD); null = no rule
   createdAt DateTime @default(now())
 
   users            User[]
@@ -129,6 +141,10 @@ model User {
   active       Boolean  @default(true)
   homeArea     String?
   createdAt    DateTime @default(now())
+  /// Last authenticated request (field agents; refreshed at most once a minute) — evidence for self-ack detection.
+  lastSeenAt   DateTime?
+  lastSeenIp   String?
+  lastSeenUa   String?
 
   refreshTokens RefreshToken[]
   visits        Visit[]        @relation("AgentVisits")
@@ -149,8 +165,19 @@ model RefreshToken {
   tokenHash String    @unique
   expiresAt DateTime
   revokedAt DateTime?
+  /// Set when this token was exchanged for a successor (rotation). A second use within 30 s is a parallel tab,
+  /// not theft; family revocation and logout clear it. CHECK RefreshToken_rotated_is_revoked.
+  rotatedAt DateTime?
+  /// The token this one was rotated into (its plaintext is re-derivable, so a grace reuse returns the SAME successor).
+  successorId String?
+  /// The single grace reuse (a second tab) was spent; any further presentation is theft.
+  graceUsedAt DateTime?
+  /// sha256 of the jr_dev device cookie the session was created on (self-ack evidence, audit review M3).
+  deviceHash String?
   createdAt DateTime  @default(now())
   userAgent String?
+
+  @@index([userId])
 }
 
 model Shop {
@@ -168,6 +195,7 @@ model Shop {
   lng              Float
   geofenceRadiusM  Int      @default(100)
   creditLimitPaise BigInt   @default(0)
+  openingOutstandingPaise BigInt @default(0) // v3: receivable carried in from before JewelRoute
   notes            String?
   assignedAgentId  String?
   assignedAgent    User?    @relation("ShopAssignedAgent", fields: [assignedAgentId], references: [id], onDelete: SetNull)
@@ -364,7 +392,7 @@ model Order {
   agent            User        @relation("AgentOrders", fields: [agentId], references: [id])
   visitId          String?
   visit            Visit?      @relation(fields: [visitId], references: [id])
-  status           OrderStatus @default(SUBMITTED)
+  status           OrderStatus // always explicit: CONFIRMED or PENDING_APPROVAL at create (credit rule)
   clientOpId       String
   subtotalPaise    BigInt
   gstPaise         BigInt
@@ -375,6 +403,12 @@ model Order {
   decidedById      String?
   decidedAt        DateTime?
   rejectionReason  String?
+  approvalRequired Boolean     @default(false) // v3: a rule tripped at creation
+  approvalReasons  String[]    @default([]) // CREDIT_LIMIT | ORDER_THRESHOLD (CHECK in SQL)
+  creditSnapshot   Json? // CreditPosition frozen at creation (null for legacy decided orders)
+  settledAt        DateTime? // v3: paid — no longer counts towards outstanding
+  cancelledAt      DateTime?
+  cancellationReason String?
   createdAt        DateTime    @default(now())
 
   items OrderItem[]
@@ -384,6 +418,7 @@ model Order {
   @@index([tenantId, status, createdAt])
   @@index([tenantId, visitId])
   @@index([tenantId, shopId, createdAt])
+  @@index([tenantId, shopId, status])
 }
 
 // Frozen price snapshot; immutable after insert (trigger).
@@ -408,6 +443,10 @@ model OrderItem {
   otherPaise       BigInt        @default(0)
   unitPricePaise   BigInt
   lineTotalPaise   BigInt
+
+  // v3 re-review n1: the sold-piece guard triggers (20261021000500) look up by pieceId and by orderId.
+  @@index([pieceId])
+  @@index([orderId])
 }
 
 model Memo {
@@ -433,6 +472,13 @@ model Memo {
   ackAt             DateTime?
   ackMethod         String? // QR_CONFIRM | OTP
   ackTokenExpiresAt DateTime?
+  /// Evidence of the retailer acknowledgement (read model only, never blocks): who confirmed (QR) or who last
+  /// opened the code page (OTP), and whether that was the agent's own session or device.
+  ackIp             String?
+  ackUserAgent      String?
+  ackViewSuspected  Boolean    @default(false)
+  selfAckSuspected  Boolean    @default(false)
+  selfAckReason     String? // AGENT_SESSION | AGENT_DEVICE | CODE_VIEWED_ON_AGENT_DEVICE
   overdueNotifiedAt DateTime?
   closedAt          DateTime?
   createdAt         DateTime   @default(now())
@@ -506,12 +552,25 @@ model OutboxEvent {
   createdAt        DateTime  @default(now())
   fannedOutAt      DateTime?
   targetEndpointId String? // set for `ping` test events: deliver to this endpoint only
+  // v3 activity refs — set by eventRefs() on every write (OutboxService.emit, seed), back-filled in SQL.
+  shopId           String?
+  agentId          String?
+  visitId          String?
+  orderId          String?
+  memoId           String?
+  pieceIds         String[]  @default([])
 
   deliveries WebhookDelivery[]
 
   @@index([tenantId, createdAt])
   @@index([fannedOutAt])
   @@index([tenantId, aggregateType, aggregateId])
+  @@index([tenantId, shopId, createdAt])
+  @@index([tenantId, agentId, createdAt])
+  @@index([tenantId, visitId, createdAt])
+  @@index([tenantId, orderId, createdAt])
+  @@index([tenantId, memoId, createdAt])
+  @@index([pieceIds], type: Gin)
 }
 
 model WebhookDelivery {
