@@ -1,0 +1,1152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>JewelRoute FE–BE Integration Report</title>
+<style>
+  :root {
+    --ink: #17181a; --ink2: #44464b; --ink3: #74767c; --line: #d9d7d2; --line2: #e9e7e2;
+    --head: #f4f3f0; --gold: #85661f; --soft: #faf9f7;
+  }
+  @page { size: A4; margin: 17mm 16mm 16mm 16mm; }
+  @page wide { size: A4 landscape; margin: 15mm 16mm 14mm 16mm; }
+  @page cover { size: A4; margin: 16mm; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; background: #fff; color: var(--ink); font-family: Inter, "Inter Display", system-ui, sans-serif;
+         font-size: 10.5pt; line-height: 1.5; font-feature-settings: "tnum" 1, "cv11" 1; }
+  code, .mono { font-family: "DejaVu Sans Mono", ui-monospace, Menlo, monospace; font-size: 0.84em; overflow-wrap: anywhere; word-break: normal; }
+  p { margin: 0 0 6pt; }
+  ul, ol { margin: 0 0 7pt; padding-left: 15pt; }
+  li { margin: 0 0 2pt; }
+  a { color: inherit; text-decoration: none; }
+  strong { font-weight: 600; }
+
+  h2 { font-size: 16.5pt; font-weight: 600; letter-spacing: -0.015em; margin: 0 0 10pt; padding-top: 2pt; line-height: 1.25; }
+  h3 { font-size: 11.6pt; font-weight: 600; margin: 15pt 0 5pt; letter-spacing: -0.005em; break-after: avoid; }
+  h4 { font-size: 10.5pt; font-weight: 600; margin: 10pt 0 3pt; break-after: avoid; }
+  .num { color: var(--gold); font-weight: 600; margin-right: 7pt; }
+  section.chapter { break-before: page; }
+  .lead { color: var(--ink2); font-size: 10.5pt; margin-bottom: 10pt; }
+  .small { font-size: 9pt; color: var(--ink2); }
+  .muted { color: var(--ink3); }
+
+  /* wide (landscape) blocks */
+  .wide { page: wide; }
+
+  /* tables */
+  table { width: 100%; border-collapse: collapse; margin: 4pt 0 10pt; font-size: 9pt; line-height: 1.38; }
+  th, td { border: 0.5pt solid var(--line); padding: 3pt 5pt; vertical-align: top; text-align: left; }
+  th { background: var(--head); font-weight: 600; font-size: 8.4pt; color: var(--ink2); }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
+  table.dense { font-size: 8.3pt; line-height: 1.33; }
+  table.dense th { font-size: 7.8pt; }
+  table.dense td, table.dense th { padding: 2.4pt 4pt; }
+  td.m { font-family: "DejaVu Sans Mono", monospace; font-size: 7.6pt; font-weight: 700; white-space: nowrap; }
+  td.p code { font-size: 7.6pt; }
+  .kv td:first-child { width: 32%; font-weight: 500; }
+  .stat { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border: 0.5pt solid var(--line); margin: 6pt 0 10pt; }
+  .stat div { padding: 7pt 9pt; border-right: 0.5pt solid var(--line); }
+  .stat div:last-child { border-right: 0; }
+  .stat b { display: block; font-size: 17pt; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; }
+  .stat span { font-size: 8.4pt; color: var(--ink2); }
+  .note { border-left: 2pt solid var(--line); padding: 3pt 0 3pt 9pt; margin: 6pt 0 10pt; color: var(--ink2); font-size: 9.4pt; }
+  .note b { color: var(--ink); }
+
+  /* figures */
+  figure { margin: 8pt 0 12pt; break-inside: avoid; }
+  figure .svgwrap { width: 100%; text-align: center; }
+  figure svg { max-width: 100% !important; height: auto; }
+  figcaption { font-size: 8.6pt; color: var(--ink2); margin-top: 5pt; border-top: 0.5pt solid var(--line2); padding-top: 4pt; }
+  figcaption b { color: var(--ink); font-weight: 600; }
+  script.mmd { display: none; }
+
+  /* cover */
+  .cover { page: cover; height: 262mm; display: flex; flex-direction: column; justify-content: space-between; }
+  .cover h1 { font-size: 30pt; font-weight: 600; letter-spacing: -0.025em; line-height: 1.1; margin: 0 0 10pt; }
+  .cover .sub { font-size: 13pt; color: var(--ink2); max-width: 140mm; }
+  .cover .meta { font-size: 9.4pt; color: var(--ink2); border-top: 0.5pt solid var(--line); padding-top: 8pt; }
+  .cover .meta table { font-size: 9pt; margin: 0; }
+  .cover .meta td { border: 0; padding: 1.5pt 0; }
+  .cover .meta td:first-child { width: 36mm; color: var(--ink3); }
+  .eyebrow { font-size: 9pt; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold); font-weight: 600; margin-bottom: 14pt; }
+
+  /* toc */
+  .toc { break-before: page; }
+  .toc ol { list-style: none; padding: 0; margin: 0; }
+  .toc li { display: flex; align-items: baseline; gap: 6pt; margin: 0; padding: 2.2pt 0; font-size: 10pt; }
+  .toc li.l2 { padding-left: 16pt; font-size: 9.2pt; color: var(--ink2); padding-top: 1pt; padding-bottom: 1pt; }
+  .toc li.l1 { font-weight: 600; margin-top: 5pt; }
+  .toc li .dots { flex: 1; border-bottom: 0.5pt dotted #b9b7b2; transform: translateY(-3pt); }
+  .toc li .pg { min-width: 18pt; text-align: right; font-variant-numeric: tabular-nums; }
+  .toc .tn { color: var(--gold); font-weight: 600; min-width: 22pt; display: inline-block; }
+  .toc li.l2 .tn { color: var(--ink3); font-weight: 500; min-width: 26pt; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14pt; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================ COVER -->
+<div class="cover">
+  <div>
+    <div class="eyebrow">Technical report</div>
+    <h1>JewelRoute<br>Frontend ↔ Backend Integration</h1>
+    <p class="sub">How the Next.js web app and the NestJS API connect: every endpoint and what it does, the API design, the data flow behind each click, and flowcharts of the key processes.</p>
+  </div>
+  <div class="meta">
+    <table>
+      <tr><td>Audience</td><td>Founder and CTO reviewing the system</td></tr>
+      <tr><td>Date</td><td>21 October 2026 (times in IST, UTC+5:30)</td></tr>
+      <tr><td>Source</td><td>Repository <code>jewelroute</code>, branch head <code>7e34424</code> (clean working tree when this was generated). Includes batch approve, delivery paging, record activity, agent-held piece location, field "Sell" and "Extend" on memos, admin add and deactivate agent, and the removal of the legacy <code>components/admin/*</code> screens. This report documents the code on disk, not plans.</td></tr>
+      <tr><td>Apps</td><td><code>apps/web</code> Next.js 15 (App Router, React, TanStack Query) · <code>apps/api</code> NestJS 11 + Prisma + PostgreSQL · <code>packages/shared</code> pricing, geo, dates, event types</td></tr>
+      <tr><td>Method</td><td>Every controller, service, migration and web call site was read. Endpoint list generated from <code>@Controller</code>/<code>@Get|@Post|@Patch|@Delete</code> decorators; click mappings traced from <code>api(</code>, <code>useMutation</code>, <code>useAction</code>, <code>useWrite</code> and <code>useSync</code> call sites.</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ============================================================ TOC -->
+<nav class="toc" id="toc">
+  <h2>Contents</h2>
+  <ol id="toc-list"></ol>
+</nav>
+
+<!-- ============================================================ 1 SUMMARY -->
+<section class="chapter" id="s1">
+<h2 data-toc="1"><span class="num">1</span>Summary</h2>
+<p class="lead">JewelRoute is a field-sales system for jewellery makers who sell through retailers. A manager plans routes; field agents visit shops, check in with server-verified GPS, attach a photo, book orders priced from the live gold rate, and leave physical samples on <em>memo</em> (consignment) with a retailer who acknowledges receipt from their own phone. Every custody move of every sample is recorded in an append-only ledger, and state changes are published to customer systems as signed webhooks.</p>
+
+<h3 data-toc="1.1">Two apps, one contract</h3>
+<ul>
+  <li><strong>Web</strong> (<code>apps/web</code>, Next.js 15): three surfaces in one app. The field app at <code>/field/*</code> is mobile-first (Today, Visits, Catalog, Profile tabs). The admin console is at <code>/admin/*</code> (Home, Visits, Agents, Shops, Orders, Memos, Samples, Catalog, Integrations, Settings). The public retailer acknowledgement page is at <code>/ack/[token]</code>. There are also a marketing page at <code>/</code> and <code>/developers</code> docs.</li>
+  <li><strong>API</strong> (<code>apps/api</code>, NestJS 11 + Prisma): all business rules, pricing, custody, idempotency, tenancy and webhooks. PostgreSQL is the single source of truth. The web never patches derived state locally: it writes, then refetches.</li>
+  <li><strong>Shared</strong> (<code>packages/shared</code>): pricing maths (<code>priceDesign</code>, <code>orderTotals</code>), the geofence decision, IST business dates, money formatting and the webhook event list. The API uses them as the authority and the web uses the same code for display only.</li>
+</ul>
+
+<h3 data-toc="1.2">How they talk</h3>
+<p>Browser → same-origin <code>/api/v1/…</code> → Next.js rewrite in <code>apps/web/next.config.ts</code> (<code>/api/:path*</code> → <code>${API_ORIGIN}/:path*</code>) → NestJS <code>/v1/*</code> (throttler → auth/RBAC guard → zod validation → service in a Prisma transaction) → PostgreSQL. Responses come back in one envelope, <code>{ok:true,data}</code> or <code>{ok:false,error:{code,message,details},requestId}</code>. Auth is two httpOnly first-party cookies (<code>jr_at</code> access JWT, 15 min; <code>jr_rt</code> rotating refresh token, 30 days), so the browser sends them with no CORS. State changes also write an <code>OutboxEvent</code> row in the same transaction. After the response, a post-commit interceptor kicks the dispatcher, which fans events out to subscribed endpoints as HMAC-signed HTTP POSTs with a retry ladder.</p>
+
+<div class="stat">
+  <div><b>82</b><span>HTTP routes: 4 auth · 23 field · 36 admin · 12 webhook admin · 2 public · 5 ops</span></div>
+  <div><b>25</b><span>tables (Prisma models); 3 append-only by trigger, 2 partial unique indexes, 11 CHECKs</span></div>
+  <div><b>12 + 1</b><span>webhook event types, plus <code>ping</code> for test sends</span></div>
+  <div><b>30 + 4</b><span>API integration tests on real Postgres (10 + 16 + 4) + 4 shared unit tests; 28-step HTTP e2e smoke</span></div>
+</div>
+
+<h3 data-toc="1.3">What a reviewer should know</h3>
+<table class="dense">
+  <thead><tr><th style="width:24%">Topic</th><th>Finding (from the code on disk)</th></tr></thead>
+  <tbody>
+  <tr><td>Strong guarantees</td><td>Money and custody creates (<code>POST /orders</code>, <code>/memos</code>, <code>/memos/:id/return</code>, <code>/memos/:id/convert</code>) <strong>require</strong> an <code>Idempotency-Key</code>; the key row is inserted inside the business transaction, so it commits or rolls back with the effect. Concurrency is guarded by row locks (<code>FOR UPDATE</code>), guarded updates (<code>… WHERE status='SUBMITTED'</code>), and database invariants (one open visit per agent, one OUT memo line per piece, append-only ledgers).</td></tr>
+  <tr><td>Earlier gaps, now closed (verified in code)</td><td>Every business endpoint now has a web caller. <b>Sell from memo</b> → <code>POST /v1/memos/:id/convert</code> and <b>Extend</b> → <code>POST /v1/memos/:id/extend</code> (<code>components/field/visit-drawers.tsx</code>, buttons in the visit's "Samples at this shop"). <b>Add agent</b> → <code>POST /v1/admin/agents</code>, and <b>Deactivate/Reactivate agent</b> → <code>PATCH /v1/admin/agents/:id</code> (<code>admin-v2/field/dialogs.tsx</code>). The Orders list bulk approve → <code>POST /v1/admin/orders/approve</code>. Routes the web does not call: the v1 read routes kept for API clients and <code>/developers</code> (<code>GET /admin/dashboard</code>, <code>/admin/pieces/:id/history</code>, <code>/admin/audit</code>, <code>/orders/:id</code>, <code>/memos/:id</code>), <code>GET /admin/activity</code> (its <code>useActivity</code> hook is defined but unused; records and Home carry their own activity) and the ops routes.</td></tr>
+  <tr><td>One refresh mechanism</td><td>Since commit <code>4d26473</code> (legacy <code>components/admin/*</code> deleted, v2-only hooks, <code>qk</code> keys everywhere), every write in the web app refreshes through <code>useSync()</code> and the single <code>AFFECTS</code> map in <code>lib/sync.ts</code>. The <code>webhook.changed</code> entry now also covers the delivery detail and the receiver log.</td></tr>
+  <tr><td>Retry cadence depends on traffic</td><td>The only scheduled trigger is a <strong>daily</strong> Vercel cron (<code>0 3 * * *</code> UTC = 08:30 IST) on <code>/v1/internal/dispatch</code>. Between runs, due retries are attempted only when a write kicks the dispatcher or an admin opens Home, Dashboard or Deliveries (at most once per 10 s per instance). A FAILED delivery's 30 s back-off is therefore a minimum, not a schedule.</td></tr>
+  <tr><td>Optional keys</td><td>Check-in, proof attach and complete accept an optional key. The web sends one for check-in and proofs, but not for complete or for the field memo extend; a repeated complete returns <code>409 VISIT_ALREADY_COMPLETED</code>, which the web treats as success. Admin writes carry no key. They rely on state guards and unique constraints, except piece intake (<code>POST /admin/designs/:id/pieces</code>), where a double submit would create two batches. The UI disables the button while pending.</td></tr>
+  <tr><td>Small inconsistencies</td><td>The shop form accepts geofence radius 20–1000 m while the API accepts 10–2000 m. <code>JWT_REFRESH_SECRET</code> is validated at boot but unused, because refresh tokens are opaque random strings stored as SHA-256. <code>docs/AUDIT.md</code> says 25 tests; the suite now has 30 (F16 and <code>records.test.ts</code> R1–R4 were added).</td></tr>
+  <tr><td>Not verified here</td><td>The test suites and e2e smoke were not executed for this report (a verifier was running scenarios against the live servers; no data was touched). Counts and behaviours come from reading the source.</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ============================================================ 2 ARCHITECTURE -->
+<section class="chapter" id="s2">
+<h2 data-toc="2"><span class="num">2</span>Architecture and connection</h2>
+<p class="lead">One browser-visible origin (the Next.js app) fronts the API. Cookies stay first-party, the browser never needs CORS, and the API remains independently deployable (on Vercel, <code>apps/api/vercel.json</code> routes every path to one serverless function that boots Nest once per instance, see <code>src/serverless.ts</code>).</p>
+
+<figure>
+<script type="text/plain" class="mmd" data-id="fig-context">
+flowchart TB
+  FA["Field agent<br/>phone · /field/*"]
+  MG["Manager<br/>desktop · /admin/*"]
+  RT["Retailer<br/>own phone · /ack/:token"]
+  subgraph WEB["Next.js 15 web — apps/web"]
+    MW["middleware.ts<br/>cookie gate"]
+    PG["Pages + TanStack Query<br/>lib/api.ts · lib/sync.ts"]
+    RW["Rewrite /api/:path*<br/>→ API_ORIGIN/:path*"]
+  end
+  subgraph API["NestJS 11 API — apps/api"]
+    GU["Throttler → Auth + RBAC"]
+    CT["Controllers → services<br/>zod · Prisma transaction"]
+    IN["Envelope · post-commit kick"]
+    DP["Dispatcher<br/>outbox → deliveries"]
+  end
+  DB[("PostgreSQL<br/>25 tables")]
+  BL[("Vercel Blob<br/>proof photos")]
+  EX["Customer webhook<br/>endpoint"]
+  CR["Vercel cron<br/>daily dispatch"]
+  FA --> MW
+  MG --> MW
+  MW --> PG
+  RT -->|"public page, no auth"| PG
+  PG -->|"same-origin fetch + cookies"| RW
+  RW --> GU --> CT --> DB
+  CT --> IN -->|"after commit"| DP
+  CR --> DP
+  DP --> DB
+  DP -->|"signed POST"| EX
+  PG -->|"put() with client token"| BL
+</script>
+<figcaption><b>Figure 1 — System context.</b> All browser traffic, including the public acknowledgement page, enters through the Next.js origin and is proxied to the API. Proof photos go straight from the phone to Vercel Blob when a Blob token is configured; otherwise they go through the API (direct mode, stored in Postgres).</figcaption>
+</figure>
+
+<h3 data-toc="2.1">The request path</h3>
+<ol>
+  <li><strong>Browser</strong>: every authenticated call goes through <code>api()</code> in <code>apps/web/src/lib/api.ts</code>. It prefixes <code>/api/v1</code>, sets <code>credentials:"include"</code> and <code>cache:"no-store"</code>, JSON-encodes the body (or passes <code>FormData</code>), and adds <code>Idempotency-Key</code> when asked (<code>true</code> → fresh <code>crypto.randomUUID()</code>, or a caller-supplied stable key).</li>
+  <li><strong>Next.js</strong>: <code>next.config.ts</code> rewrites <code>/api/:path*</code> to <code>${API_ORIGIN}/:path*</code> (default <code>http://localhost:4000</code>) and adds security headers to every page (<code>X-Content-Type-Options</code>, <code>Referrer-Policy</code>, <code>X-Frame-Options: SAMEORIGIN</code>, <code>Permissions-Policy: camera=(self), geolocation=(self)</code>).</li>
+  <li><strong>Middleware</strong> (<code>src/middleware.ts</code>, matcher <code>/field/:path*</code> and <code>/admin/:path*</code>): a cheap gate that redirects to <code>/login?next=…</code> when neither <code>jr_at</code> nor <code>jr_rt</code> is present. It does no verification; real authorization happens in the API on every call. After login, <code>login-form.tsx</code> sends ADMIN users to <code>/admin</code> and FIELD_AGENT users to <code>/field/today</code>, and honours <code>?next=</code> only inside the role's own area.</li>
+  <li><strong>NestJS</strong> (<code>src/app.ts</code>): helmet, cookie-parser, 1 MB JSON limit, CORS allowlist (a fallback, since the proxy makes calls same-origin), pino request logging. Then the global guards, handler, interceptors and exception filter described below.</li>
+</ol>
+
+<h3 data-toc="2.2">Authentication and session refresh</h3>
+<table class="dense kv">
+  <tbody>
+  <tr><td>Login</td><td><code>POST /v1/auth/login</code> looks the user up by email (optionally scoped by <code>tenantSlug</code>; an email that exists in two tenants without a slug fails), compares with bcrypt, and compares against a dummy hash when the user is missing so timing does not reveal existence. It issues an access JWT and a refresh token, sets both cookies, and also returns them in the body for API clients and the e2e script.</td></tr>
+  <tr><td>Access token (<code>jr_at</code>)</td><td>JWT signed with <code>JWT_ACCESS_SECRET</code>, issuer <code>jewelroute</code>, 15 min. Claims: <code>sub</code> (user id), <code>tid</code> (tenant id), <code>tslug</code>, <code>role</code>, <code>name</code>. Cookie flags: httpOnly, <code>SameSite=Lax</code>, <code>Secure</code> in production, path <code>/</code>. <code>AuthGuard</code> also accepts <code>Authorization: Bearer</code>. An expired token gives <code>401 TOKEN_EXPIRED</code>; a bad one gives <code>401 INVALID_TOKEN</code>.</td></tr>
+  <tr><td>Refresh token (<code>jr_rt</code>)</td><td>Opaque <code>rt_&lt;32 random bytes&gt;</code>, stored only as SHA-256 in <code>RefreshToken</code>, 30 days. <code>/auth/refresh</code> claims the row with a conditional <code>updateMany … revokedAt:null</code>, so a token can be used once. Presenting an already-revoked token revokes every live token of that user (theft signal).</td></tr>
+  <tr><td>Client refresh on 401</td><td>In <code>api()</code>, a 401 on any non-<code>/auth/*</code> path triggers a single-flight <code>POST /api/v1/auth/refresh</code> (concurrent 401s share one promise) and one retry of the original call. If the refresh fails, the browser goes to <code>/login?next=&lt;current path&gt;</code>. The XHR upload path (<code>proof-upload.ts</code>) calls <code>api("/auth/me")</code> on 401, which runs the same refresh, then retries the upload once.</td></tr>
+  <tr><td>Logout</td><td><code>POST /v1/auth/logout</code> revokes the presented refresh token and clears both cookies. Deactivating an agent (<code>PATCH /admin/agents/:id {active:false}</code>) revokes all their refresh tokens, but an issued access JWT stays valid for up to 15 min (documented known gap).</td></tr>
+  </tbody>
+</table>
+
+<h3 data-toc="2.3">NestJS pipeline: guards, interceptors, filter, modules</h3>
+<table class="dense">
+  <thead><tr><th style="width:20%">Stage</th><th>Implementation (file)</th></tr></thead>
+  <tbody>
+  <tr><td>Throttler guard</td><td><code>AppThrottlerGuard</code> (<code>app.ts</code>): 1200 requests/min per client IP (first <code>X-Forwarded-For</code> hop). Login is tracked per IP plus email. Route overrides: login 10/min, refresh 30/min, ack verify 20/min, public ack view 30/min, public confirm 10/min, demo receiver 120/min; health and internal routes skip throttling. Rejections give <code>429 RATE_LIMITED</code>.</td></tr>
+  <tr><td>Auth + RBAC guard</td><td><code>AuthGuard</code> (<code>common/auth.ts</code>): <code>@Public()</code> routes pass. Otherwise it verifies the JWT and checks <code>@Requires(...)</code> permissions against <code>ROLE_PERMISSIONS</code>: <code>FIELD_AGENT → [field]</code>, <code>ADMIN → [admin, admin.read, field]</code>. A missing permission gives <code>403 FORBIDDEN</code>.</td></tr>
+  <tr><td>Validation</td><td>Every body and query is parsed with zod via <code>parse()</code> (<code>common/http.ts</code>). A failure gives <code>400 VALIDATION_FAILED</code> with <code>details:[{path,message}]</code>.</td></tr>
+  <tr><td>Request context</td><td><code>@Ctx()</code> builds <code>ReqCtx</code>: user (from the verified JWT), requestId, IP, <code>Idempotency-Key</code> (trimmed, ≤200 chars), method, path and body. <strong>tenantId always comes from the JWT</strong>, never from the request.</td></tr>
+  <tr><td>Envelope interceptor</td><td><code>EnvelopeInterceptor</code> wraps every successful return as <code>{ok:true,data}</code>. <code>installBigIntJson()</code> serialises BigInt (paise) as a JSON number.</td></tr>
+  <tr><td>Post-commit dispatch</td><td><code>PostCommitDispatchInterceptor</code>: after any successful non-GET/HEAD/OPTIONS request (except <code>/auth/</code>, <code>/internal/dispatch</code> and <code>/dev/webhook-receiver</code>) it calls <code>Dispatcher.kick()</code>. Services commit their transaction before returning, so the outbox rows are already visible. On Vercel, <code>waitUntil</code> keeps the function alive until delivery finishes.</td></tr>
+  <tr><td>Exception filter</td><td><code>AllExceptionsFilter</code>: maps <code>AppError</code>, Nest <code>HttpException</code>, throttler, zod, Prisma <code>P2025</code> (→404), serialization or deadlock failures (→<code>409 CONCURRENT_UPDATE</code>), body too large (413) and malformed JSON (400) to <code>{ok:false,error,requestId}</code>. Errors of 500 and above are logged.</td></tr>
+  <tr><td>Modules</td><td><code>CoreModule</code> (global: Rates, Outbox, Audit, Idempotency, Views, Custody, Dispatcher), <code>PrismaModule</code>, <code>AuthModule</code>, <code>VisitsModule</code>, <code>UploadsModule</code>, <code>OrdersModule</code>, <code>MemosModule</code>, <code>AdminModule</code> (Admin + Records controllers), <code>WebhooksModule</code> (Webhooks + Ops controllers). Swagger UI is at <code>/docs</code> and JSON at <code>/docs-json</code>.</td></tr>
+  </tbody>
+</table>
+
+<h3 data-toc="2.4">Envelope, error codes and request ids</h3>
+<ul>
+  <li><strong>Success</strong>: <code>{"ok":true,"data":…}</code>. <code>api()</code> returns <code>json.data</code>.</li>
+  <li><strong>Error</strong>: <code>{"ok":false,"error":{"code":"OUTSIDE_GEOFENCE","message":"…","details":{…}},"requestId":"req_01J…"}</code>. <code>api()</code> throws <code>ApiError(status, code, message, details, requestId)</code>, and screens branch on <code>code</code> (catalogue in §3.4).</li>
+  <li><strong>Request ids</strong>: a client-supplied <code>X-Request-Id</code> matching <code>^[A-Za-z0-9._-]{6,100}$</code> is kept; otherwise the API mints <code>req_&lt;ULID&gt;</code>. The id is echoed in the <code>x-request-id</code> response header (exposed via CORS), included in every error body, attached to log lines, and stored on <code>AuditLog.requestId</code>.</li>
+  <li><strong>Retries in the browser</strong>: the TanStack default (<code>components/providers.tsx</code>) never retries a 4xx and retries 5xx or network errors up to twice. Default <code>staleTime</code> is 10 s, with <code>refetchOnWindowFocus</code> on.</li>
+</ul>
+
+<h3 data-toc="2.5">Idempotency keys</h3>
+<p><code>IdempotencyService.run()</code> (<code>core/idempotency.ts</code>) inside one Prisma transaction:</p>
+<ol>
+  <li>Insert <code>(tenantId, key, userId, fingerprint)</code> into <code>IdempotencyKey</code> with <code>ON CONFLICT DO NOTHING</code>. The fingerprint is SHA-256 of <code>method + path + canonical JSON body</code>. A concurrent duplicate blocks on the unique slot until the first transaction ends.</li>
+  <li>The winner runs the operation and stores the response body in the same transaction, so the stored response exists only if the effect committed. Errors roll the key back too, so a retry after a failure re-executes (test F6).</li>
+  <li>The loser reads the committed row. Same fingerprint and user returns the stored response. A different body gives <code>422 IDEMPOTENCY_KEY_REUSED</code>. A row with no response yet gives <code>409 IDEMPOTENCY_IN_PROGRESS</code>.</li>
+</ol>
+<p><strong>Second line of defence</strong>: orders and memos store the key as <code>clientOpId</code> (unique per tenant). On a unique violation the service returns the existing record. <strong>Client side</strong>: <code>opKey.for(scope, signature)</code> in <code>components/field/guard.ts</code> persists <code>{sig, key}</code> in sessionStorage per action scope (<code>checkin:&lt;visit&gt;:real|sim</code>, <code>order:&lt;visit&gt;</code>, <code>memo:&lt;visit&gt;</code>, <code>return:&lt;memo&gt;</code>). The same body after a timeout or reload therefore reuses the same key, and a changed body gets a new key. Keys are cleared on success or on a 4xx rejection. Proofs carry their own key inside the persisted <code>PendingProof</code>.</p>
+
+<h3 data-toc="2.6">Tenant scoping and RBAC</h3>
+<ul>
+  <li>Every row carries <code>tenantId</code>, and every query filters by the JWT's <code>tid</code>. Foreign ids return <code>404</code>, never <code>403</code>, so existence never leaks (tests 6 and F1 build a second tenant through the API and probe every v1 and v2 read and write).</li>
+  <li>Agents see only their own visits, orders, memos and proof files (<code>404</code> otherwise). Admins can read any record in the tenant, but mutating a visit (check-in, proof, order, memo) requires being the assigned agent, so an admin gets <code>403 NOT_YOUR_VISIT</code>.</li>
+  <li>Permissions are declared per route. Adding a role (for example REGIONAL_MANAGER) is one entry in <code>ROLE_PERMISSIONS</code>.</li>
+</ul>
+
+<h3 data-toc="2.7">Uploads: Vercel Blob or direct</h3>
+<p><code>POST /v1/uploads/proof-token</code> checks that the visit is the caller's and is open, then builds a server-chosen object key <code>tenants/&lt;slug&gt;/visits/&lt;visitId&gt;/&lt;ULID&gt;.jpg</code>.</p>
+<ul>
+  <li><strong>Blob mode</strong> (when <code>BLOB_READ_WRITE_TOKEN</code> is set): returns a Vercel Blob client token scoped to exactly that pathname (10 min, ≤8 MB, image types only). The phone uploads with <code>put()</code> from <code>@vercel/blob/client</code>. On attach, the API requires the https URL to contain the object key. Bytes are not re-hashed server-side (documented decision).</li>
+  <li><strong>Direct mode</strong> (no token, as in local and self-hosted setups): the phone posts multipart to <code>/api/v1/uploads/direct</code> (≤4 MB). The API validates the type, key shape, tenant and open visit, recomputes SHA-256 and upserts <code>StoredFile</code> (bytea), so a retry is a no-op. It returns <code>url=/api/v1/files/:id</code>. <code>GET /v1/files/:id</code> streams the file: authenticated, tenant-scoped, agents limited to their own visits, <code>Cache-Control: private, immutable</code>, and the SHA-256 as ETag.</li>
+</ul>
+
+<h3 data-toc="2.8">Outbound webhooks</h3>
+<p>Events are rows in <code>OutboxEvent</code> written in the same transaction as the change. The payload is exactly the public body <code>{id:"evt_&lt;ULID&gt;", type, tenantId:&lt;slug&gt;, createdAt, data}</code>. The dispatcher (<code>webhooks/dispatcher.ts</code>) has three triggers: the post-commit kick, an opportunistic <code>maybeKick</code> on <code>GET /admin/home</code>, <code>/admin/dashboard</code> and <code>/admin/webhooks/deliveries</code> (at most once per 10 s per instance), and the cron route. Each request is a POST with headers <code>X-JewelRoute-Event</code>, <code>-Delivery</code>, <code>-Timestamp</code> and <code>-Signature: sha256=HMAC_SHA256(secret, "&lt;timestamp&gt;.&lt;raw body&gt;")</code>, a 10 s timeout and <code>redirect:"manual"</code>. Endpoint secrets (<code>whsec_…</code>) are stored encrypted with AES-256-GCM under <code>APP_ENCRYPTION_KEY</code>. Pipeline and retry ladder: Figure 9.</p>
+
+<h3 data-toc="2.9">Public acknowledgement page</h3>
+<p>Creating a memo returns <code>ack.url = APP_PUBLIC_URL/ack/&lt;token&gt;</code>. The token is 24 random bytes stored only as SHA-256 and valid for 72 h. The agent shows it as a QR code. <code>/ack/[token]</code> renders <code>AckView</code>, which calls the public endpoints with plain <code>fetch</code> (no cookies, no refresh, no redirect). The retailer sees the exact pieces and can tap <em>Confirm receipt</em>, or read a 6-digit code to the agent. The code is <code>HMAC(APP_SECRET, memoId:token) mod 10⁶</code>, shown only while pending and stored only as a hash. Five wrong codes lock code entry with <code>423 ACK_LOCKED</code>; the QR path still works.</p>
+</section>
+
+<!-- ============================================================ 3 API DESIGN -->
+<section class="chapter" id="s3">
+<h2 data-toc="3"><span class="num">3</span>API design</h2>
+
+<h3 data-toc="3.1">Principles</h3>
+<table class="dense">
+  <thead><tr><th style="width:24%">Principle</th><th>How it shows up in the code</th></tr></thead>
+  <tbody>
+  <tr><td>Contract-first</td><td><code>docs/CONTRACT.md</code> is the single document both apps build against (shapes, conventions, changelog). <code>CLAUDE.md</code> and <code>AGENTS.md</code> point agents at it, and the v2 section is marked "implemented; additive".</td></tr>
+  <tr><td>One envelope</td><td><code>{ok,data}</code> or <code>{ok:false,error{code,message,details},requestId}</code> on every route, including errors raised by Nest itself (§2.4).</td></tr>
+  <tr><td>Integers for money and weight</td><td>Money is integer paise (₹1 = 100 paise; <code>BigInt</code> in Postgres, number in JSON). Weight is integer milligrams. Making charge is either paise per gram (<code>PER_GRAM</code>) or basis points of gold value (<code>PERCENT</code>, 1200 = 12%). Rounding is half-up to whole paise. GST (3%) is computed once on the order subtotal, not per line.</td></tr>
+  <tr><td>Server-authoritative pricing</td><td><code>price()</code> (<code>core/rates.ts</code>) uses the shared <code>priceDesign</code>. Orders read rates once per transaction (one <code>DISTINCT ON</code> query) and freeze them in <code>OrderItem</code> rows and <code>Order.goldRateSnapshot</code>. A purity with no rate gives <code>409 GOLD_RATE_MISSING</code>, never a ₹0 price.</td></tr>
+  <tr><td>IST business dates</td><td>The business day is <code>istDate()</code> (Asia/Kolkata), sent as <code>YYYY-MM-DD</code> and stored as a Postgres <code>date</code>. Timestamps are ISO-8601 UTC. <code>plannedTime</code> is an IST wall-clock <code>HH:MM</code> (CHECK in SQL). "Today", "overdue", check-in day and MISSED are all IST.</td></tr>
+  <tr><td>Idempotency</td><td>Required on money and custody creates, optional on visit transitions; mechanics in §2.5.</td></tr>
+  <tr><td>Append-only ledgers</td><td><code>GoldRate</code>, <code>CustodyEvent</code> and <code>OrderItem</code> have <code>BEFORE UPDATE OR DELETE</code> triggers that raise (the demo seed purges via a transaction-local flag). The current rate is the latest row. Custody is the ordered event chain with a gap-free <code>seq</code> per piece.</td></tr>
+  <tr><td>Transactional outbox</td><td>An event exists if and only if its state change committed. It doubles as the admin activity feed (<code>activityTitle()</code> turns payloads into sentences).</td></tr>
+  <tr><td>No existence leaks</td><td>Cross-tenant or not-yours returns <code>404</code> (§2.6).</td></tr>
+  <tr><td>Resumable flows</td><td><code>GET /visits/:id</code> returns a server-derived <code>resume</code> block (<code>nextStep</code>, <code>canCheckIn</code>, <code>canSell</code>, <code>canComplete</code>, <code>blockedBy</code>, <code>pendingAcks</code>), so a reload lands on the right step.</td></tr>
+  <tr><td>Gap-free document numbers</td><td><code>nextDocNumber()</code> upserts <code>DocSequence</code> under a row lock, giving <code>ORD-2026-00042</code> and <code>MEMO-2026-00017</code> (per tenant per year), piece tags <code>AJ-S-000123</code> (kind <code>TAG</code>, year 0) and shop codes <code>SH-0001</code> (kind <code>TAG</code>, year 1).</td></tr>
+  </tbody>
+</table>
+
+<h3 data-toc="3.2">Versioning: v1 and additive v2</h3>
+<p>Every route is under <code>/v1</code>. "v2" is not a URL prefix. It is the Attio-style IA added on 21 Oct 2026 (CONTRACT.md § "v2"): new record endpoints (<code>/admin/home</code>, <code>/admin/search</code>, <code>/admin/*/:id</code> records, <code>/field/visits</code>, <code>/field/catalog</code>, <code>/field/profile</code>) and enriched row shapes (<code>AdminVisitRow</code>, <code>ShopRow</code>, <code>PieceRow</code>, <code>CustodyEventRow</code>, <code>AttentionItem</code>, <code>AuditRow</code>). They are strict supersets: v1 fields are kept (for example <code>ShopRow.piecesHere</code> and <code>AuditRow.actorName</code>), so v1 clients keep working. Until today, <code>admin-v2/*/data.ts</code> fell back to composing v1 routes when a v2 route was missing. Those fallbacks were removed in commit <code>4d26473</code>, so the admin web now calls the v2 routes directly.</p>
+
+<h3 data-toc="3.3">Conventions at a glance</h3>
+<div class="two">
+<table class="dense kv"><tbody>
+  <tr><td>Purity</td><td><code>K24 K22 K18 K14</code> (24/22/18/14 karat)</td></tr>
+  <tr><td>Visit status</td><td><code>PLANNED CHECKED_IN ACTIVE COMPLETED MISSED CANCELLED</code></td></tr>
+  <tr><td>Verification</td><td><code>VERIFIED LOW_ACCURACY SIMULATED</code></td></tr>
+  <tr><td>Custodian</td><td><code>VAULT AGENT SHOP SOLD LOST</code></td></tr>
+  <tr><td>Order status</td><td><code>SUBMITTED APPROVED REJECTED</code> (+<code>DRAFT</code> unused)</td></tr>
+</tbody></table>
+<table class="dense kv"><tbody>
+  <tr><td>Memo status</td><td><code>ACTIVE PARTIALLY_RETURNED RETURNED CONVERTED_TO_ORDER</code>; display adds <code>DUE_SOON OVERDUE</code></td></tr>
+  <tr><td>Memo item</td><td><code>OUT RETURNED CONVERTED</code></td></tr>
+  <tr><td>Delivery</td><td><code>PENDING SUCCEEDED FAILED DEAD</code></td></tr>
+  <tr><td>Geofence</td><td>inside ⇔ distance ≤ radius + min(accuracy, 50 m); &gt;75 m accuracy or unknown accuracy → <code>LOW_ACCURACY</code></td></tr>
+  <tr><td>Status codes</td><td>creates 201, actions 200 (<code>@HttpCode(200)</code>)</td></tr>
+</tbody></table>
+</div>
+
+<h3 data-toc="3.4">Error catalogue</h3>
+<table class="dense">
+  <thead><tr><th style="width:24%">Code</th><th style="width:6%">HTTP</th><th>When (source)</th></tr></thead>
+  <tbody>
+  <tr><td><code>VALIDATION_FAILED</code></td><td>400</td><td>zod parse failure on body or query; invalid enum filters on list endpoints; bad delivery status filter.</td></tr>
+  <tr><td><code>INVALID_JSON</code> · <code>BAD_REQUEST</code></td><td>400</td><td>Malformed JSON body · other Nest 400s.</td></tr>
+  <tr><td><code>IDEMPOTENCY_KEY_REQUIRED</code></td><td>400</td><td>Missing key on <code>POST /orders</code>, <code>/memos</code>, <code>/memos/:id/return</code>, <code>/memos/:id/convert</code>.</td></tr>
+  <tr><td><code>INVALID_DATE</code></td><td>400</td><td>Assignment date before today (IST).</td></tr>
+  <tr><td><code>INVALID_DUE_DATE</code></td><td>400</td><td>Memo due date outside today…+90 days; an extension not after the current due date, in the past, or more than 90 days out.</td></tr>
+  <tr><td><code>FILE_REQUIRED</code></td><td>400</td><td>Direct upload without a <code>file</code> part.</td></tr>
+  <tr><td><code>UNAUTHENTICATED</code></td><td>401</td><td>No token on a protected route.</td></tr>
+  <tr><td><code>TOKEN_EXPIRED</code> · <code>INVALID_TOKEN</code></td><td>401</td><td>Access JWT expired (the web refreshes and retries) · signature or issuer invalid.</td></tr>
+  <tr><td><code>INVALID_CREDENTIALS</code></td><td>401</td><td>Wrong email or password (same message for an unknown email).</td></tr>
+  <tr><td><code>NO_REFRESH_TOKEN</code> · <code>INVALID_REFRESH_TOKEN</code></td><td>401</td><td>Refresh without a token · expired, revoked, reused or disabled account.</td></tr>
+  <tr><td><code>INVALID_CRON_SECRET</code></td><td>401</td><td><code>/internal/*</code> without a valid <code>x-cron-secret</code> or Bearer <code>CRON_SECRET</code>.</td></tr>
+  <tr><td><code>INVALID_SIGNATURE</code></td><td>401</td><td>Demo receiver: signature does not verify or timestamp older than 5 min.</td></tr>
+  <tr><td><code>FORBIDDEN</code></td><td>403</td><td>The role lacks the route's permission (for example an agent calling <code>/admin/*</code>).</td></tr>
+  <tr><td><code>NOT_YOUR_VISIT</code></td><td>403</td><td>An admin tries to mutate an agent's visit (check-in, proof, order, memo).</td></tr>
+  <tr><td><code>SIMULATION_NOT_ALLOWED</code></td><td>403</td><td><code>simulated:true</code> check-in while <code>Tenant.demoMode</code> is false.</td></tr>
+  <tr><td><code>NOT_FOUND</code></td><td>404</td><td>Unknown id, another tenant's id, or another agent's visit, order, memo or file (no existence leak); invalid or unknown ack token; Prisma P2025.</td></tr>
+  <tr><td><code>ACK_EXPIRED</code></td><td>410</td><td>Pending ack link older than 72 h.</td></tr>
+  <tr><td><code>OUTSIDE_GEOFENCE</code></td><td>409</td><td>Real check-in farther than radius + capped accuracy slack; <code>details {distanceM, radiusM}</code>.</td></tr>
+  <tr><td><code>ALREADY_CHECKED_IN</code></td><td>409</td><td>Check-in on a visit that is already open (also mapped from the partial unique index).</td></tr>
+  <tr><td><code>ANOTHER_VISIT_OPEN</code></td><td>409</td><td>The agent has another CHECKED_IN or ACTIVE visit; <code>details {visitId}</code>.</td></tr>
+  <tr><td><code>VISIT_NOT_PLANNED</code> · <code>VISIT_NOT_TODAY</code></td><td>409</td><td>Check-in on a MISSED, CANCELLED or COMPLETED visit, or unassigning a non-planned visit · planned date is not today (IST).</td></tr>
+  <tr><td><code>VISIT_NOT_OPEN</code></td><td>409</td><td>Proof token, proof, order or memo on a visit that is not CHECKED_IN or ACTIVE.</td></tr>
+  <tr><td><code>VISIT_ALREADY_COMPLETED</code> · <code>PROOF_REQUIRED</code></td><td>409</td><td>Complete called twice · complete without at least one proof.</td></tr>
+  <tr><td><code>VISIT_SHOP_MISMATCH</code></td><td>409</td><td>Return or convert with an explicit <code>visitId</code> at a different shop than the memo.</td></tr>
+  <tr><td><code>ALREADY_ASSIGNED</code> · <code>AGENT_INACTIVE</code></td><td>409</td><td>Same agent, shop and date already planned (unique index) · assigning to a deactivated agent.</td></tr>
+  <tr><td><code>DESIGN_INACTIVE</code> · <code>GOLD_RATE_MISSING</code></td><td>409</td><td>An order line references a deactivated design · no current rate for a purity (orders, memo valuation, conversion).</td></tr>
+  <tr><td><code>ORDER_ALREADY_DECIDED</code></td><td>409</td><td>Approve or reject on a non-SUBMITTED order (guarded update).</td></tr>
+  <tr><td><code>PIECE_NOT_IN_YOUR_CUSTODY</code></td><td>409</td><td>Memo create with a piece the agent does not hold; <code>details {pieceIds, tagCodes}</code>.</td></tr>
+  <tr><td><code>PIECE_ALREADY_ON_MEMO</code></td><td>409</td><td>Partial unique index <code>MemoItem_one_out_per_piece</code> hit by a concurrent memo.</td></tr>
+  <tr><td><code>PIECE_NOT_ON_MEMO</code> · <code>PIECE_NOT_AT_SHOP</code></td><td>409</td><td>Return or convert of a piece that is not OUT on this memo · not physically at the memo's shop.</td></tr>
+  <tr><td><code>PIECE_NOT_IN_VAULT</code> · <code>PIECE_NOT_WITH_AGENT</code></td><td>409</td><td>Issue of a non-vault piece · return-to-vault of pieces not all with the same agent.</td></tr>
+  <tr><td><code>NO_PIECES</code></td><td>409</td><td>Custody move with an empty piece list.</td></tr>
+  <tr><td><code>MEMO_CLOSED</code> · <code>ALREADY_ACKNOWLEDGED</code></td><td>409</td><td>Extend on a RETURNED or CONVERTED memo · reissuing an ack link after acknowledgement.</td></tr>
+  <tr><td><code>SHOP_CODE_TAKEN</code> · <code>SKU_TAKEN</code> · <code>EMAIL_TAKEN</code></td><td>409</td><td>Unique per-tenant code, SKU or email.</td></tr>
+  <tr><td><code>IDEMPOTENCY_IN_PROGRESS</code> · <code>IDEMPOTENCY_RETRY</code></td><td>409</td><td>Duplicate key while the original has no stored response yet · race where the key row vanished.</td></tr>
+  <tr><td><code>CONCURRENT_UPDATE</code></td><td>409</td><td>Prisma P2034, serialization failure or deadlock; safe to retry.</td></tr>
+  <tr><td><code>PAYLOAD_TOO_LARGE</code></td><td>413</td><td>JSON body over 1 MB (multipart limits are 4 MB direct, 8 MB token).</td></tr>
+  <tr><td><code>IDEMPOTENCY_KEY_REUSED</code></td><td>422</td><td>Same key, different body or different user.</td></tr>
+  <tr><td><code>INVALID_OBJECT_KEY</code> · <code>OBJECT_NOT_FOUND</code> · <code>INVALID_URL</code> · <code>CHECKSUM_MISMATCH</code></td><td>422</td><td>Proof key outside <code>tenants/&lt;slug&gt;/visits/&lt;id&gt;/</code> · no stored file in direct mode · blob URL does not contain the key · direct-mode SHA-256 differs from the claimed checksum.</td></tr>
+  <tr><td><code>UNSUPPORTED_MEDIA_TYPE</code></td><td>422</td><td>Direct upload that is not jpeg, png, webp or heic.</td></tr>
+  <tr><td><code>ACK_CODE_INVALID</code></td><td>422</td><td>Wrong 6-digit retailer code (attempt counted).</td></tr>
+  <tr><td><code>ACK_LOCKED</code></td><td>423</td><td>Five or more wrong codes; the retailer must confirm on their phone or the agent reissues the link.</td></tr>
+  <tr><td><code>RATE_LIMITED</code></td><td>429</td><td>Throttler limits (§2.3).</td></tr>
+  <tr><td><code>INTERNAL</code> · <code>SIMULATED_FAILURE</code></td><td>500</td><td>Unhandled error (logged) · demo receiver token starting with <code>fail-</code>.</td></tr>
+  <tr><td><code>UNHEALTHY</code></td><td>503</td><td><code>GET /v1/health</code> cannot reach the database.</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ============================================================ 4 ENDPOINTS (landscape) -->
+<section class="chapter wide" id="s4">
+<h2 data-toc="4"><span class="num">4</span>Complete endpoint reference</h2>
+<p class="small">82 routes generated from the controller decorators in <code>apps/api/src/**</code>. Paths are shown without the browser prefix <code>/api</code>. <b>Role</b>: <code>field</code> = FIELD_AGENT or ADMIN; <code>admin</code> = ADMIN only; <code>auth</code> = any signed-in user; <code>public</code> = no auth. <b>Tx</b> = runs in one Prisma transaction (<code>maxWait</code> 10 s, <code>timeout</code> 20 s). <b>Key</b> = Idempotency-Key (req = required, opt = optional). Every successful write except auth, internal dispatch and the demo receiver also triggers a post-commit dispatcher run.</p>
+
+<h3 data-toc="4.1">Auth</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">POST</td><td class="p"><code>/v1/auth/login</code></td><td>public</td><td>Email and password (bcrypt, dummy-hash on unknown user; optional <code>tenantSlug</code>). Issues a 15 min access JWT and a 30 day refresh token, sets <code>jr_at</code>/<code>jr_rt</code>, returns <code>{user, accessToken, refreshToken}</code>. 10/min per IP+email.</td><td>—</td><td>—</td><td>RefreshToken</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/auth/refresh</code></td><td>public</td><td>Rotates the refresh token (cookie or <code>body.refreshToken</code>). Reuse of a revoked token revokes the user's whole family. Sets new cookies. 30/min.</td><td>conditional claim (<code>updateMany</code>)</td><td>—</td><td>RefreshToken</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/auth/logout</code></td><td>public</td><td>Revokes the presented refresh token and clears both cookies.</td><td>—</td><td>—</td><td>RefreshToken</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/auth/me</code></td><td>auth</td><td>Current user plus tenant <code>{id, slug, name, demoMode}</code>; drives role routing and the demo-mode "Simulate arrival" control.</td><td>read</td><td>—</td><td>—</td></tr>
+</tbody></table>
+
+<h3 data-toc="4.2">Field: today, visits, check-in, proofs, notes, catalog</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">GET</td><td class="p"><code>/v1/field/today?date=</code></td><td>field</td><td>The caller's route for an IST date (default today): non-cancelled visits by sequence, progress counts, <code>nextVisitId</code>, <code>openVisit</code> (any date, so a visit left open yesterday is surfaced), bag count and value at current rates, and open memos (count, outstanding value, overdue).</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/field/visits?scope=recent|upcoming</code></td><td>field</td><td>Own visits: <code>recent</code> = the last 14 days including all of today (non-cancelled); <code>upcoming</code> = the next 7 days, as <code>AdminVisitRow</code> with outcome counts.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/field/catalog?q&amp;category&amp;collection&amp;purity&amp;minWeightMg&amp;maxWeightMg</code></td><td>field</td><td>Active designs priced at current rates, facets (categories, collections, purities), current rates, and <code>availablePieces</code> from the caller's bag.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/field/profile</code></td><td>field</td><td>Own user, bag (<code>PieceRow[]</code>), open memos by due date, and 7-day stats (visits completed, order value, memos open).</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/visits/:id</code></td><td>field (own; admin any)</td><td>Visit workspace: <code>resume</code> block (now with <code>returnedCount</code>), visit summary, shop, proofs, notes (with authors), orders and memos created in the visit, <code>returns</code> (memo returns made during this visit, grouped per action), shop context (5 previous orders, active memos at the shop, last completed visit) and the agent's bag.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/visits/:id/geofence-check</code></td><td>field</td><td><code>{lat,lng,accuracyM?}</code> → server distance (haversine), radius, accuracy-aware verdict and verification label, plus a human message. No state change. 200.</td><td>none</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/visits/:id/check-in</code></td><td>field (assigned)</td><td>PLANNED → CHECKED_IN. Under a row lock it checks: not already open, planned for today (IST), inside the fence (or <code>simulated:true</code> on a demo tenant, which records SIMULATED), and no other open visit. Stores position, accuracy, distance and verification. 200.</td><td>key opt (web sends); tx + <code>FOR UPDATE</code>; partial unique index backstop</td><td><code>visit.checked_in</code></td><td>Visit, OutboxEvent, IdempotencyKey</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/visits/:id/proofs</code></td><td>field (assigned)</td><td>Attaches an uploaded photo. The key must be under <code>tenants/&lt;slug&gt;/visits/&lt;id&gt;/</code>. Direct mode checks the stored SHA-256; blob mode requires an https URL containing the key. Dedupes on <code>(visitId, checksum)</code>. The first proof moves CHECKED_IN → ACTIVE. Records capture position and distance from check-in. 201.</td><td>key opt (web sends one per photo); tx + lock</td><td><code>visit.proof_uploaded</code> (not on dedupe)</td><td>VisitProof, Visit, OutboxEvent, IdempotencyKey</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/visits/:id/notes</code></td><td>field (readable)</td><td>Appends a free-text note (≤4000 chars) visible to the manager. Any visit status. An admin may also add notes. 201.</td><td>none; single insert</td><td>—</td><td>VisitNote</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/visits/:id/complete</code></td><td>field (assigned)</td><td>Open → COMPLETED with optional summary and position. Requires at least one proof. The event carries proof, order and memo counts and values. 200.</td><td>key opt (web sends none); tx + lock</td><td><code>visit.completed</code></td><td>Visit, OutboxEvent</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/visits/:id/catalog?…</code></td><td>field</td><td>Same as the field catalog, but <code>availablePieces</code> is the visit agent's bag (so an admin reading a visit sees the agent's bag).</td><td>read</td><td>—</td><td>—</td></tr>
+</tbody></table>
+
+<h3 data-toc="4.3">Field: uploads and files</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">POST</td><td class="p"><code>/v1/uploads/proof-token</code></td><td>field</td><td><code>{visitId, contentType, sizeBytes≤8 MB}</code> for the caller's open visit. Returns <code>{mode:"blob", clientToken, pathname}</code> (Vercel Blob token scoped to the pathname, 10 min) or <code>{mode:"direct", pathname, uploadUrl:"/api/v1/uploads/direct", maxBytes:4 MB}</code>. 201.</td><td>none</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/uploads/direct</code></td><td>field</td><td>Multipart <code>file</code> + <code>pathname</code>. Validates type, key shape and tenant, and that the visit is the caller's and open. Recomputes SHA-256 and stores the bytes. Returns <code>{url:/api/v1/files/:id, objectKey, checksumSha256, sizeBytes, contentType}</code>.</td><td>upsert on <code>(tenantId, objectKey)</code>, so a retry is a no-op</td><td>—</td><td>StoredFile</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/files/:id</code></td><td>auth</td><td>Streams a direct-mode file. Tenant-scoped; agents may open only files under their own visits' keys. <code>Cache-Control: private, max-age=31536000, immutable</code>, ETag = SHA-256.</td><td>read</td><td>—</td><td>—</td></tr>
+</tbody></table>
+
+<h3 data-toc="4.4">Field: orders</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">POST</td><td class="p"><code>/v1/orders</code></td><td>field (assigned, visit open)</td><td><code>{visitId, items[{designId, quantity 1..500}] (≤100), notes?}</code>. Locks the visit and rejects inactive designs. Prices every line at the current gold rate inside the transaction, freezes <code>OrderItem</code> rows and <code>goldRateSnapshot</code>, numbers <code>ORD-YYYY-NNNNN</code>, and sets status SUBMITTED. Returns <code>{order}</code>. 201.</td><td><b>key req</b>; tx; <code>clientOpId</code> unique backstop returns the existing order</td><td><code>order.created</code></td><td>Order, OrderItem, DocSequence, AuditLog, OutboxEvent, IdempotencyKey</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/orders/:id</code></td><td>field (own; admin any)</td><td>One order view (lines with frozen prices, totals, snapshot, decision). No web caller.</td><td>read</td><td>—</td><td>—</td></tr>
+</tbody></table>
+
+<h3 data-toc="4.5">Field: memos and retailer acknowledgement</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">POST</td><td class="p"><code>/v1/memos</code></td><td>field (assigned, visit open)</td><td><code>{visitId, pieceIds[1..100], dueDate (today…+90), notes?}</code>. Numbers <code>MEMO-YYYY-NNNNN</code> and moves each piece AGENT → SHOP (<code>MEMO_HANDOVER</code>) through the custody ledger. Values pieces at the current rate (<code>MemoItem</code> OUT, memo total), then issues a 72 h ack token and code. Returns <code>{memo, ack:{url, expiresAt}}</code>. 201.</td><td><b>key req</b>; tx; pieces locked <code>FOR UPDATE ORDER BY id</code>; partial unique index → <code>PIECE_ALREADY_ON_MEMO</code></td><td><code>sample.custody_changed</code>, <code>memo.created</code></td><td>Memo, MemoItem, SamplePiece, CustodyEvent, DocSequence, AuditLog ×2, OutboxEvent ×2, IdempotencyKey</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/memos/:id</code></td><td>field (own; admin any)</td><td>Memo view: stored and display status, items with pieces, extensions, ack state. No web caller since the admin fallback was removed.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/memos/:id/return</code></td><td>field (own memo; admin any)</td><td><code>{pieceIds, visitId?}</code>. Moves OUT pieces SHOP → the memo's agent (<code>MEMO_RETURN</code>), marks items RETURNED and recomputes the memo status. The move is attributed to the caller's open visit at that shop (or an explicit open visit at the same shop). 200.</td><td><b>key req</b>; tx; memo row <code>FOR UPDATE</code></td><td><code>sample.custody_changed</code>, <code>memo.returned</code></td><td>MemoItem, Memo, SamplePiece, CustodyEvent, AuditLog ×2, OutboxEvent ×2, IdempotencyKey</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/memos/:id/extend</code></td><td>field (own)</td><td><code>{dueDate, reason?}</code>. The new date must be after the current one, ≥ today and ≤ +90 days. Writes <code>MemoExtension</code> and clears <code>overdueNotifiedAt</code> (re-arms <code>memo.overdue</code>). 200. Called by the field <b>Extend</b> drawer.</td><td>tx + lock; no key</td><td><code>memo.extended</code></td><td>MemoExtension, Memo, AuditLog, OutboxEvent</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/memos/:id/convert</code></td><td>field (own)</td><td><code>{pieceIds, visitId?}</code>: sells OUT pieces. Moves SHOP → SOLD (<code>CONVERTED_TO_SALE</code>), creates an order (one line per piece at its own net weight, today's rate, <code>sourceMemoId</code>), marks items CONVERTED and recomputes the status. Returns <code>{memo, order}</code>. 200. Called by the field <b>Sell from memo</b> drawer.</td><td><b>key req</b>; tx; order <code>clientOpId = convert:&lt;key&gt;</code></td><td><code>sample.custody_changed</code>, <code>order.created</code>, <code>memo.converted</code></td><td>SamplePiece, CustodyEvent, Order, OrderItem, DocSequence, MemoItem, Memo, AuditLog, OutboxEvent ×3</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/memos/:id/ack/verify</code></td><td>field (own)</td><td><code>{code: 6 digits}</code>. Compares against the HMAC hash in constant time. A match sets ACKNOWLEDGED (method OTP); a miss increments attempts, and the 5th miss locks. 200, <code>422 ACK_CODE_INVALID</code> or <code>423 ACK_LOCKED</code>. 20/min.</td><td>tx + memo lock</td><td>—</td><td>Memo, AuditLog</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/memos/:id/ack/link</code></td><td>field (own)</td><td>Reissues the ack link: new token, code hash and 72 h expiry, attempts reset. The old link stops working. 409 if already acknowledged. 200.</td><td>tx + lock</td><td>—</td><td>Memo</td></tr>
+</tbody></table>
+<p class="small">Where the ack events go: neither retailer confirmation path emits a webhook. Acknowledgement is visible through <code>Memo.ackStatus</code>, the audit log and the field poll.</p>
+
+<h3 data-toc="4.6">Admin: home, dashboard, activity, search</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/home?date=</code></td><td>admin</td><td>v2 Home: metrics (orders today, visits, samples at retailers, overdue memos, pending approvals), map (shops plus check-ins), server-built <code>attention[]</code> (memo overdue or due today, missed visit, missing or simulated proof, pending order, failing webhook), 40 activity items, agents, rates.</td><td>read; <code>maybeKick</code></td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/dashboard?date=</code></td><td>admin</td><td>v1 dashboard: the same metrics, map, activity and agents plus <code>exceptions</code> (pending orders, overdue memos, missed visits) and the day's visits. No web caller now (still listed on <code>/developers</code>).</td><td>read; <code>maybeKick</code></td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/activity</code></td><td>admin</td><td>Latest 100 outbox events (excluding <code>ping</code>) as feed items <code>{title, amountPaise, actor, shop, entity}</code>. No live web caller.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/search?q=</code></td><td>admin</td><td>⌘K search: up to 5 each of shops, pieces (tag, design), orders, memos, agents and designs, case-insensitive.</td><td>read</td><td>—</td><td>—</td></tr>
+</tbody></table>
+
+<h3 data-toc="4.7">Admin: shops</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/shops?q&amp;agentId&amp;status</code></td><td>admin</td><td><code>ShopRow[]</code>: assigned agent, last and next visit, open orders (30 days), memo exposure, samples here, and status ACTIVE / MEMO_OVERDUE / DORMANT / NEW (grouped queries, ≤1000).</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/shops/:id</code></td><td>admin</td><td>Shop record: row, visits in the last 30 days and upcoming, orders, memos, pieces at the shop now, activity mentioning the shop.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/shops</code></td><td>admin</td><td>Creates a shop (geofence 10–2000 m, default 100). The code is auto-generated as <code>SH-NNNN</code> if omitted; a duplicate gives 409 <code>SHOP_CODE_TAKEN</code>. 201.</td><td>tx</td><td>—</td><td>Shop, AuditLog (DocSequence if auto code)</td></tr>
+<tr><td class="m">PATCH</td><td class="p"><code>/v1/admin/shops/:id</code></td><td>admin</td><td>Partial update (the code is immutable), including <code>assignedAgentId</code> or <code>null</code>; the agent is validated. Before and after values are audited.</td><td>tx</td><td>—</td><td>Shop, AuditLog</td></tr>
+</tbody></table>
+
+<h3 data-toc="4.8">Admin: visits and assignments</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/visits?date|from&amp;to&amp;agentId&amp;shopId&amp;status&amp;proof</code></td><td>admin</td><td><code>AdminVisitRow[]</code> (default: today), with proof state, duration and outcome (orders, memos, returns), ≤1000. CSV filters are validated.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/visits/:id</code></td><td>admin</td><td>Field visit detail plus <code>row</code>, <code>audit</code> (visit, its orders and memos), <code>activity</code>, and <code>custody</code> (every move made during the visit, with location and proof).</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/assignments</code></td><td>admin</td><td><code>{agentId, shopId, date, sequence?, plannedTime?}</code> creates a PLANNED visit (sequence = max + 1). The date must be ≥ today and the agent active. A duplicate agent, shop and date gives 409 <code>ALREADY_ASSIGNED</code>. 201.</td><td>tx; unique index</td><td>—</td><td>Visit, AuditLog</td></tr>
+<tr><td class="m">DELETE</td><td class="p"><code>/v1/admin/assignments/:visitId</code></td><td>admin</td><td>Removes a stop from the route: PLANNED → CANCELLED (guarded update); any other status gives 409 <code>VISIT_NOT_PLANNED</code>.</td><td>tx; guarded update</td><td>—</td><td>Visit, AuditLog</td></tr>
+</tbody></table>
+
+<h3 data-toc="4.9">Admin: agents</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/agents</code></td><td>admin</td><td>AgentRow per field agent: today planned, completed and in progress; current and next visit; bag count and value; open memos (count, value, overdue); orders today; last check-in (grouped queries).</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/agents/:id</code></td><td>admin</td><td>Agent record: profile, today's visit rows, bag (<code>PieceRow[]</code>), open memos, last 30 orders, activity.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/agents</code></td><td>admin</td><td>Creates a FIELD_AGENT (bcrypt password ≥8 chars); a duplicate email gives 409 <code>EMAIL_TAKEN</code>. 201. Called by <b>Add agent</b> on the Agents list.</td><td>tx</td><td>—</td><td>User, AuditLog</td></tr>
+<tr><td class="m">PATCH</td><td class="p"><code>/v1/admin/agents/:id</code></td><td>admin</td><td>Updates name, phone, home area, password or active. Deactivation revokes all refresh tokens. Called by <b>Deactivate/Reactivate agent</b> on the agent record (body <code>{active}</code>).</td><td>tx</td><td>—</td><td>User, RefreshToken, AuditLog</td></tr>
+</tbody></table>
+
+<h3 data-toc="4.10">Admin: orders</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/orders?status&amp;from&amp;to&amp;agentId&amp;shopId</code></td><td>admin</td><td>Order views, newest first, ≤500. Date filters are IST days on <code>createdAt</code>.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/orders/:id</code></td><td>admin</td><td>Order record: order, source visit row (verification, distance), audit history, and <code>activity</code> for the order (outbox events by aggregate or <code>data.orderId</code>).</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/orders/approve</code></td><td>admin</td><td><code>{orderIds ≤200}</code> batch approve (new in <code>d8ee0eb</code>). Duplicate ids are collapsed; each order runs through the same <code>decide()</code> in its own transaction, so one failure never rolls back the others. Returns per-order <code>results[{id, ok, number?, status?, error?}]</code>, <code>approved</code> and <code>failed</code>. 200. Called by the Orders list bulk approve.</td><td>one tx per order; guarded update</td><td><code>order.approved</code> ×N</td><td>Order, AuditLog, OutboxEvent</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/orders/:id/approve</code></td><td>admin</td><td>SUBMITTED → APPROVED via <code>updateMany … WHERE status='SUBMITTED'</code>, recording the decider and time. A second decision gives 409 <code>ORDER_ALREADY_DECIDED</code>. 200.</td><td>tx; guarded update (one-shot)</td><td><code>order.approved</code></td><td>Order, AuditLog, OutboxEvent</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/orders/:id/reject</code></td><td>admin</td><td><code>{reason}</code> SUBMITTED → REJECTED with <code>rejectionReason</code>; the agent sees the reason. 200.</td><td>tx; guarded update</td><td><code>order.rejected</code></td><td>Order, AuditLog, OutboxEvent</td></tr>
+</tbody></table>
+
+<h3 data-toc="4.11">Admin: memos</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/memos?filter=active|due_today|overdue|returned|all&amp;shopId&amp;agentId</code></td><td>admin</td><td>Memo views plus <code>pieceCount</code> and <code>issuedAt</code>, ≤300 (open filters by due date; returned and all by newest).</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/memos/:id</code></td><td>admin</td><td>Memo record: memo, chronological <code>custody</code> rows for its pieces from the vault issue that preceded the handover onward, source visit row, audit history, and <code>activity</code> for the memo.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/memos/:id/extend</code></td><td>admin</td><td>Same service as the field extend (an admin may extend any memo in the tenant). 200.</td><td>tx + lock</td><td><code>memo.extended</code></td><td>MemoExtension, Memo, AuditLog, OutboxEvent</td></tr>
+</tbody></table>
+
+<h3 data-toc="4.12">Admin: designs, pieces and custody</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/designs</code></td><td>admin</td><td>All designs (including inactive) priced at current rates, each with all its pieces.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/designs</code></td><td>admin</td><td>Creates a design (SKU, category, collection, purity, gross and net mg, making charge, stones, other components, image URLs). Duplicate SKU gives 409 <code>SKU_TAKEN</code>. 201.</td><td>tx</td><td>—</td><td>JewelryDesign, AuditLog</td></tr>
+<tr><td class="m">PATCH</td><td class="p"><code>/v1/admin/designs/:id</code></td><td>admin</td><td>Partial update, including <code>active</code> (an inactive design cannot be ordered).</td><td>tx</td><td>—</td><td>JewelryDesign, AuditLog</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/designs/:id/pieces</code></td><td>admin</td><td>Intake: creates 1–50 physical pieces in the VAULT with tags <code>AJ-S-NNNNNN</code>, <code>custodySeq</code> 1 and an <code>INTAKE</code> custody event each. 201.</td><td>tx; <b>not idempotent</b></td><td>— (no outbox event)</td><td>SamplePiece, CustodyEvent, DocSequence, AuditLog</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/pieces?q&amp;status&amp;custodianType&amp;agentId&amp;shopId&amp;designId</code></td><td>admin</td><td><code>PieceRow[]</code> with derived status IN_VAULT / WITH_AGENT / ON_MEMO / OVERDUE / SOLD / LOST, open memo, last move, value, and for agent-held pieces a <code>location</code>: the agent's open visit, else their last check-in, else "In field bag". ≤1000.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/pieces/:id</code></td><td>admin</td><td>Piece record: row (with location), design, full immutable ledger as <code>CustodyEventRow[]</code> (from/to labels, actor, visit location, proof, memo, outbox event id), and the piece's <code>activity</code>.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/pieces/:id/history</code></td><td>admin</td><td>v1 ledger (seq, from/to labels, reason, actor, memo number). No web caller now.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/pieces/issue</code></td><td>admin</td><td><code>{pieceIds ≤200, agentId}</code> VAULT → AGENT (<code>ISSUE_TO_AGENT</code>); the agent must be active. A piece not in the vault gives 409 <code>PIECE_NOT_IN_VAULT</code>. 200.</td><td>tx; pieces <code>FOR UPDATE</code></td><td><code>sample.custody_changed</code></td><td>SamplePiece, CustodyEvent, AuditLog, OutboxEvent</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/pieces/return-to-vault</code></td><td>admin</td><td><code>{pieceIds}</code> AGENT → VAULT (<code>RETURN_TO_VAULT</code>); all pieces must be with the same agent. 200.</td><td>tx; locks</td><td><code>sample.custody_changed</code></td><td>SamplePiece, CustodyEvent, AuditLog, OutboxEvent</td></tr>
+</tbody></table>
+
+<h3 data-toc="4.13">Admin: gold rates and audit</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/gold-rates</code></td><td>admin</td><td>The current rate per purity (with who set it) and the last 60 history rows.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/gold-rates</code></td><td>admin</td><td><code>{purity, ratePaisePerGram}</code> appends a rate, effective now. Existing orders are untouched (frozen snapshot); new prices, bags and memo valuations use it immediately. 201.</td><td>tx; append-only table</td><td>— (no webhook)</td><td>GoldRate, AuditLog</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/audit?entityType&amp;entityId</code></td><td>admin</td><td>≤200 audit rows, newest first, with actor reference, human <code>summary</code> and resolved references (<code>core/audit-summary.ts</code>). No web caller (records embed their audit rows).</td><td>read</td><td>—</td><td>—</td></tr>
+</tbody></table>
+
+<h3 data-toc="4.14">Webhooks and integrations</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/webhooks/event-types</code></td><td>admin</td><td>The 12 event types with descriptions and example envelopes.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/webhooks</code></td><td>admin</td><td>Endpoints with <code>secretLast4</code> and 24 h stats (succeeded; failed + dead).</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/webhooks</code></td><td>admin</td><td><code>{url (https in prod), description?, events[] or ["*"]}</code>. Generates a <code>whsec_</code> secret, stores it encrypted, and returns it once. 201.</td><td>tx</td><td>—</td><td>WebhookEndpoint, AuditLog</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/webhooks/deliveries?endpointId&amp;status&amp;eventType&amp;cursor&amp;limit</code></td><td>admin</td><td>Without <code>cursor</code>/<code>limit</code>: the latest 100 as a bare array (v1 shape). With either: keyset pages <code>{items, nextCursor}</code> on (createdAt, id) desc, limit ≤200 (default 50); the cursor is opaque.</td><td>read; <code>maybeKick</code></td><td>—</td><td>—</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/webhooks/deliveries/:id</code></td><td>admin</td><td>Delivery with the signed payload and per-attempt log (headers actually sent, status, latency, error, response body ≤2000 chars).</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/webhooks/deliveries/:id/retry</code></td><td>admin</td><td>Manual retry: resets to PENDING and claims in one <code>UPDATE … RETURNING</code>, then attempts immediately. If another worker holds the lock, it waits up to about 10 s for that attempt. 200.</td><td>atomic reset+claim</td><td>— (re-sends existing)</td><td>WebhookDelivery, WebhookAttempt</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/webhooks/received</code></td><td>admin</td><td>Last 50 requests received by the built-in demo receiver (headers, body, <code>signatureOk</code>).</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">PATCH</td><td class="p"><code>/v1/admin/webhooks/:id</code></td><td>admin</td><td>Updates URL, description, events or <code>active</code>.</td><td>tx</td><td>—</td><td>WebhookEndpoint, AuditLog</td></tr>
+<tr><td class="m">DELETE</td><td class="p"><code>/v1/admin/webhooks/:id</code></td><td>admin</td><td>Soft delete: deactivates the endpoint and moves PENDING and FAILED deliveries to DEAD ("Endpoint deleted"). History is kept.</td><td>tx</td><td>—</td><td>WebhookEndpoint, WebhookDelivery, AuditLog</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/webhooks/:id/rotate-secret</code></td><td>admin</td><td>New secret, effective immediately, returned once. 200.</td><td>tx</td><td>—</td><td>WebhookEndpoint, AuditLog</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/admin/webhooks/:id/secret</code></td><td>admin</td><td>Decrypts and returns the secret. Audited as <code>webhook.reveal_secret</code> (a GET that writes an audit row).</td><td>tx (audit)</td><td>—</td><td>AuditLog</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/admin/webhooks/:id/test</code></td><td>admin</td><td>Emits a <code>ping</code> targeted at this endpoint only, creates its delivery, and delivers synchronously. Returns the delivery detail. 200.</td><td>tx, then sync attempt</td><td><code>ping</code></td><td>OutboxEvent, WebhookDelivery, WebhookAttempt</td></tr>
+</tbody></table>
+
+<h3 data-toc="4.15">Public</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">GET</td><td class="p"><code>/v1/public/memo-ack/:token</code></td><td>public (token)</td><td>Retailer view: tenant, shop, agent, memo number, due date, pieces (tag, name, purity, weights, value), total, ack state and the 6-digit code while pending. Expired and pending gives 410 <code>ACK_EXPIRED</code>. 30/min.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/public/memo-ack/:token</code></td><td>public (token)</td><td><code>{confirm:true}</code> marks ACKNOWLEDGED (method QR_CONFIRM) via a guarded update. Repeats return the same result. Audit row with actor <code>null</code> and the retailer's IP. 10/min.</td><td>tx; guarded update (idempotent)</td><td>—</td><td>Memo, AuditLog</td></tr>
+</tbody></table>
+
+<h3 data-toc="4.16">Ops</h3>
+<table class="dense">
+<colgroup><col style="width:4.5%"><col style="width:15%"><col style="width:5.5%"><col style="width:34.5%"><col style="width:14%"><col style="width:11.5%"><col style="width:15%"></colgroup>
+<thead><tr><th>Method</th><th>Path</th><th>Role</th><th>What it does</th><th>Idempotency / tx</th><th>Events</th><th>Tables written</th></tr></thead>
+<tbody>
+<tr><td class="m">GET</td><td class="p"><code>/v1/health</code></td><td>public</td><td><code>SELECT 1</code>. Returns <code>{status, db, time, version}</code> or 503 <code>UNHEALTHY</code>. Not throttled, not logged.</td><td>read</td><td>—</td><td>—</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/internal/dispatch</code></td><td>cron secret</td><td>One dispatcher run: emit <code>memo.overdue</code> (once per memo), mark past PLANNED visits MISSED, fan out the outbox, deliver up to 50 due deliveries. Returns run stats.</td><td>each step in its own tx</td><td><code>memo.overdue</code></td><td>Memo, Visit, OutboxEvent, WebhookDelivery, WebhookAttempt</td></tr>
+<tr><td class="m">GET</td><td class="p"><code>/v1/internal/dispatch</code></td><td>cron secret</td><td>Same as POST (Vercel cron issues GET; scheduled daily 03:00 UTC = 08:30 IST).</td><td>as above</td><td><code>memo.overdue</code></td><td>as above</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/internal/seed</code></td><td>cron secret</td><td>Wipes and recreates the demo tenant <code>aurum</code> (Aurum Jewels), including the demo webhook endpoint.</td><td>purge flag for append-only tables</td><td>—</td><td>all tenant tables</td></tr>
+<tr><td class="m">POST</td><td class="p"><code>/v1/dev/webhook-receiver/:token</code></td><td>public</td><td>Built-in receiver. Verifies the signature exactly as a customer would (timestamp within 5 min) and stores the hit. Tokens starting with <code>fail-</code> always answer 500 (to demo retries). 120/min.</td><td>—</td><td>—</td><td>ReceivedWebhook</td></tr>
+</tbody></table>
+</section>
+
+<!-- ============================================================ 5 DATA MODEL -->
+<section class="chapter" id="s5">
+<h2 data-toc="5"><span class="num">5</span>Data model</h2>
+<p class="lead">25 Prisma models in <code>apps/api/prisma/schema.prisma</code>, three migrations. Every business row carries <code>tenantId</code>. Money columns are <code>BigInt</code> paise, weights are <code>Int</code> milligrams, business dates are <code>@db.Date</code>.</p>
+
+
+<p class="small">Figure 2 (relationship diagram) is on the landscape page at the end of this section.</p>
+
+<h3 data-toc="5.1">Tables by area</h3>
+<table class="dense">
+  <thead><tr><th style="width:15%">Table</th><th style="width:47%">Key fields</th><th>Uniques and indexes · notes</th></tr></thead>
+  <tbody>
+  <tr><td colspan="3"><b>Tenancy and identity</b></td></tr>
+  <tr><td>Tenant</td><td><code>slug</code>, <code>name</code>, <code>demoMode</code> (allows SIMULATED check-ins)</td><td><code>slug</code> unique</td></tr>
+  <tr><td>User</td><td><code>email</code>, <code>name</code>, <code>role</code> FIELD_AGENT|ADMIN, <code>passwordHash</code> (bcrypt), <code>active</code>, <code>phone</code>, <code>homeArea</code></td><td>(tenantId, email) unique; (tenantId, role)</td></tr>
+  <tr><td>RefreshToken</td><td><code>tokenHash</code> (SHA-256), <code>expiresAt</code>, <code>revokedAt</code>, <code>userAgent</code></td><td><code>tokenHash</code> unique; rotation by revocation</td></tr>
+  <tr><td colspan="3"><b>Field operations</b></td></tr>
+  <tr><td>Shop</td><td><code>code</code>, <code>name</code>, owner, phone, address, area, city, <code>lat/lng</code>, <code>geofenceRadiusM</code> (default 100), <code>creditLimitPaise</code>, <code>assignedAgentId?</code></td><td>(tenantId, code) unique; (tenantId, city); (tenantId, assignedAgentId)</td></tr>
+  <tr><td>Visit</td><td><code>shopId</code>, <code>agentId</code>, <code>plannedDate</code> (date), <code>plannedTime?</code> HH:MM, <code>sequence</code>, <code>status</code>, check-in lat/lng/accuracy/distance, <code>verification</code>, <code>startedAt</code>, <code>completedAt</code>, completion position, <code>summary</code>, <code>assignedById</code></td><td>(tenant, agent, shop, plannedDate) unique; partial unique "one open per agent"; indexes by date, agent+date, shop+date</td></tr>
+  <tr><td>VisitProof</td><td><code>objectKey</code>, <code>url</code>, content type, size, <code>checksumSha256</code>, <code>capturedAt</code>, capture and check-in positions, <code>distanceM</code></td><td>(visitId, checksumSha256) unique, so the same photo is attached once</td></tr>
+  <tr><td>VisitNote</td><td><code>visitId</code>, <code>authorId</code>, <code>body</code></td><td>—</td></tr>
+  <tr><td colspan="3"><b>Catalog and pricing</b></td></tr>
+  <tr><td>GoldRate</td><td><code>purity</code>, <code>ratePaisePerGram</code>, <code>effectiveFrom</code>, <code>source</code> MANUAL, <code>createdById</code></td><td>append-only; (tenant, purity, effectiveFrom); current = latest ≤ now</td></tr>
+  <tr><td>JewelryDesign</td><td><code>sku</code>, name, category, collection, <code>purity</code>, gross and net mg, <code>makingChargeType/Value</code>, <code>stoneValuePaise</code>, <code>otherComponents</code> JSON, <code>imageUrls[]</code>, <code>active</code></td><td>(tenantId, sku) unique; (tenant, category)</td></tr>
+  <tr><td colspan="3"><b>Custody</b></td></tr>
+  <tr><td>SamplePiece</td><td><code>designId</code>, <code>tagCode</code>, gross and net mg (per piece), <code>custodianType</code>, <code>custodianAgentId?</code>, <code>custodianShopId?</code>, <code>custodySeq</code></td><td>(tenantId, tagCode) unique; indexes by custodian type, agent and shop</td></tr>
+  <tr><td>CustodyEvent</td><td><code>pieceId</code>, <code>seq</code>, from and to (type, agent, shop), <code>reason</code>, <code>memoId?</code>, <code>visitId?</code>, <code>actorId</code>, <code>outboxEventId?</code>, <code>occurredAt</code></td><td>append-only; (pieceId, seq) unique, gap-free; indexes by time, visit, memo</td></tr>
+  <tr><td colspan="3"><b>Commerce</b></td></tr>
+  <tr><td>Order</td><td><code>number</code>, shop, agent, <code>visitId?</code>, <code>status</code>, <code>clientOpId</code>, subtotal, GST, total (paise), <code>goldRateSnapshot</code> JSON, notes, <code>sourceMemoId?</code>, decided by and at, <code>rejectionReason</code></td><td>(tenant, clientOpId) and (tenant, number) unique; (tenant, status, createdAt); (tenant, visitId); (tenant, shop, createdAt)</td></tr>
+  <tr><td>OrderItem</td><td>design, <code>pieceId?</code>, sku, name, purity, qty, net mg, <code>goldRateId</code>, rate, gold, making, stone, other, unit and line totals</td><td>append-only frozen price snapshot</td></tr>
+  <tr><td>Memo</td><td><code>number</code>, shop, agent, <code>visitId?</code>, <code>status</code>, <code>clientOpId</code>, <code>dueDate</code>, <code>totalValuePaise</code>, <code>ackStatus</code>, <code>ackTokenHash</code>, <code>ackCodeHash</code>, <code>ackAttempts</code>, <code>ackAt</code>, <code>ackMethod</code>, <code>ackTokenExpiresAt</code>, <code>overdueNotifiedAt</code>, <code>closedAt</code></td><td>(tenant, clientOpId), (tenant, number), <code>ackTokenHash</code> unique; (tenant, status, dueDate)</td></tr>
+  <tr><td>MemoItem</td><td><code>memoId</code>, <code>pieceId</code>, <code>valuePaise</code> (exposure at handover), <code>status</code> OUT|RETURNED|CONVERTED, <code>returnedAt</code></td><td>partial unique: one OUT line per piece</td></tr>
+  <tr><td>MemoExtension</td><td><code>fromDueDate</code>, <code>toDueDate</code>, <code>reason</code>, <code>actorId</code></td><td>history of extensions; the view exposes <code>extended: true</code></td></tr>
+  <tr><td colspan="3"><b>Integration</b></td></tr>
+  <tr><td>WebhookEndpoint</td><td><code>url</code>, description, <code>secretEncrypted</code> (AES-256-GCM), <code>secretLast4</code>, <code>events[]</code>, <code>active</code></td><td>soft-deleted via <code>active=false</code></td></tr>
+  <tr><td>OutboxEvent</td><td><code>id</code> evt_ULID, <code>type</code>, aggregate type and id, <code>actorId</code>, <code>payload</code> (the exact public body), <code>fannedOutAt</code>, <code>targetEndpointId?</code> (ping)</td><td>(tenant, createdAt); (fannedOutAt); (tenant, aggregate)</td></tr>
+  <tr><td>WebhookDelivery</td><td><code>endpointId</code>, <code>eventId</code>, <code>status</code>, <code>attempts</code>, <code>nextAttemptAt</code>, <code>lockedUntil</code>, last status code, latency, error, <code>deliveredAt</code></td><td>(endpointId, eventId) unique; (status, nextAttemptAt)</td></tr>
+  <tr><td>WebhookAttempt</td><td><code>attemptNo</code>, status code, latency, error, response body, <code>requestHeaders</code> JSON</td><td>one row per HTTP attempt</td></tr>
+  <tr><td>ReceivedWebhook</td><td>endpoint token, delivery and event ids, headers, body, <code>signatureOk</code></td><td>demo receiver log</td></tr>
+  <tr><td colspan="3"><b>Platform</b></td></tr>
+  <tr><td>StoredFile</td><td><code>objectKey</code>, content type, size, <code>sha256</code>, <code>bytes</code> (bytea), <code>uploadedById</code></td><td>(tenantId, objectKey) unique; direct-mode proofs</td></tr>
+  <tr><td>AuditLog</td><td><code>actorId?</code> (null = retailer via public link), <code>action</code>, entity type and id, <code>before</code>/<code>after</code> JSON, <code>requestId</code>, <code>ip</code></td><td>(tenant, entityType, entityId); (tenant, createdAt)</td></tr>
+  <tr><td>IdempotencyKey</td><td><code>key</code>, <code>userId</code>, <code>fingerprint</code>, <code>responseStatus</code>, <code>responseBody</code></td><td>PK (tenantId, key)</td></tr>
+  <tr><td>DocSequence</td><td><code>kind</code> ORD|MEMO|TAG, <code>year</code>, <code>next</code></td><td>PK (tenantId, kind, year); row-locked upsert</td></tr>
+  </tbody>
+</table>
+
+<h3 data-toc="5.2">Database-enforced invariants</h3>
+<p class="small">Hand-written in <code>migrations/20261021000000_init/migration.sql</code> (after the generated DDL) and <code>20261021000200_v2_attio_ia</code>. These hold even if application code has a bug.</p>
+<table class="dense">
+  <thead><tr><th style="width:30%">Constraint</th><th style="width:12%">Kind</th><th>Rule</th></tr></thead>
+  <tbody>
+  <tr><td><code>Visit_one_open_per_agent</code></td><td>partial unique</td><td><code>(tenantId, agentId) WHERE status IN ('CHECKED_IN','ACTIVE')</code>: at most one open visit per agent. Backs the <code>ANOTHER_VISIT_OPEN</code> check against races (test 1b).</td></tr>
+  <tr><td><code>MemoItem_one_out_per_piece</code></td><td>partial unique</td><td><code>(pieceId) WHERE status = 'OUT'</code>: a piece can be out on at most one memo (test 4, F9).</td></tr>
+  <tr><td><code>SamplePiece_custodian_consistent</code></td><td>CHECK</td><td>AGENT ⇔ <code>custodianAgentId</code> set; SHOP ⇔ <code>custodianShopId</code> set. Every piece has exactly one custodian.</td></tr>
+  <tr><td><code>SamplePiece_weights</code> · <code>JewelryDesign_weights</code></td><td>CHECK</td><td>net &gt; 0, gross ≥ net, <code>custodySeq</code> ≥ 1 · making charge and stone value ≥ 0.</td></tr>
+  <tr><td><code>Order_totals</code> · <code>OrderItem_values</code></td><td>CHECK</td><td><code>total = subtotal + gst</code>, all ≥ 0 · <code>quantity &gt; 0</code>, <code>lineTotal = unitPrice × quantity</code>.</td></tr>
+  <tr><td><code>GoldRate_positive</code> · <code>MemoItem_value</code></td><td>CHECK</td><td>rate &gt; 0 · item value ≥ 0.</td></tr>
+  <tr><td><code>Shop_geo</code></td><td>CHECK</td><td>radius &gt; 0, lat within ±90, lng within ±180.</td></tr>
+  <tr><td><code>CustodyEvent_seq</code> · <code>Memo_ack_attempts</code></td><td>CHECK</td><td><code>seq ≥ 1</code> · <code>ackAttempts ≥ 0</code>.</td></tr>
+  <tr><td><code>Visit_plannedTime_format</code></td><td>CHECK</td><td><code>plannedTime</code> null or <code>^([01][0-9]|2[0-3]):[0-5][0-9]$</code>.</td></tr>
+  <tr><td><code>GoldRate_append_only</code> · <code>CustodyEvent_append_only</code> · <code>OrderItem_append_only</code></td><td>trigger</td><td><code>BEFORE UPDATE OR DELETE … jr_forbid_mutation()</code> raises <code>check_violation</code>. The only escape is DELETE with the transaction-local <code>jewelroute.allow_purge = on</code> used by the demo seed (test 8).</td></tr>
+  <tr><td>Plain uniques</td><td>unique</td><td>Per-tenant email, shop code, SKU, tag code, order and memo number, <code>clientOpId</code>; (visit, checksum); (piece, seq); (endpoint, event); (agent, shop, date).</td></tr>
+  </tbody>
+</table>
+<div class="wide">
+<h3 data-toc="5.3">Relationship diagram</h3>
+<figure>
+<script type="text/plain" class="mmd" data-id="fig-er">
+erDiagram
+  Tenant ||--o{ User : has
+  Tenant ||--o{ Shop : has
+  User ||--o{ Visit : "agent of"
+  Shop ||--o{ Visit : "visited in"
+  Visit ||--o{ VisitProof : "proved by"
+  Visit ||--o{ VisitNote : has
+  Visit ||--o{ Order : "booked in"
+  Visit ||--o{ Memo : "left in"
+  JewelryDesign ||--o{ SamplePiece : "physical copies"
+  SamplePiece ||--o{ CustodyEvent : "ledger (append-only)"
+  SamplePiece ||--o{ MemoItem : "on memo"
+  Memo ||--o{ MemoItem : contains
+  Memo ||--o{ MemoExtension : extended
+  Order ||--o{ OrderItem : "frozen lines"
+  JewelryDesign ||--o{ OrderItem : priced
+  OutboxEvent ||--o{ WebhookDelivery : "fanned out"
+  WebhookEndpoint ||--o{ WebhookDelivery : receives
+  WebhookDelivery ||--o{ WebhookAttempt : attempts
+</script>
+<figcaption><b>Figure 2 — Core relationships.</b> Not shown: RefreshToken, GoldRate (append-only, per tenant and purity), ReceivedWebhook, StoredFile, AuditLog, IdempotencyKey, DocSequence. <code>Order.sourceMemoId</code>, <code>CustodyEvent.memoId/visitId/outboxEventId</code> and <code>SamplePiece.custodianAgentId/custodianShopId</code> are references shown in the tables below.</figcaption>
+</figure>
+</div>
+</section>
+
+<!-- ============================================================ 6 CLICK-BY-CLICK (landscape) -->
+<section class="chapter wide" id="s6">
+<h2 data-toc="6"><span class="num">6</span>Click-by-click data flow</h2>
+<p class="small">Every user-facing action in the web app, traced from the component that handles it. Endpoints are shown as the browser calls them, after <code>/api</code>. "sync(x)" means <code>useSync()(x)</code> from <code>lib/sync.ts</code>, which invalidates every key in <code>AFFECTS[x]</code> (prefix match, so <code>["visit"]</code> also refreshes <code>["visit", id]</code>). The two most common lists: <b>V</b> (<code>everywhereVisit</code>) = today, visit, field-visits, home, dashboard, admin-visits, admin-visit, shop, shops, agent, agents, activity. <b>C</b> (<code>custody</code>) = pieces, piece, profile, catalog, designs, memos, memo, shop, shops, agent, agents, today, visit, admin-visit, home, dashboard, activity.</p>
+
+<h3 data-toc="6.1">Login</h3>
+<table class="dense">
+<colgroup><col style="width:9%"><col style="width:14%"><col style="width:20%"><col style="width:16%"><col style="width:23%"><col style="width:18%"></colgroup>
+<thead><tr><th>Screen</th><th>Control</th><th>What the browser does</th><th>Endpoint(s)</th><th>Server-side effect</th><th>Refreshes afterwards</th></tr></thead>
+<tbody>
+<tr><td><code>/login</code></td><td><b>Sign in</b> (email + password form)</td><td>Mutation via <code>api()</code>; the button shows a spinner and the form is ignored while busy.</td><td><code>POST /v1/auth/login</code></td><td>bcrypt check; insert RefreshToken; <code>Set-Cookie: jr_at, jr_rt</code></td><td><code>qc.setQueryData(["me"], user)</code>; <code>router.replace</code> to <code>/admin</code> or <code>/field/today</code> (or <code>?next=</code> inside the role's area). 401 shows "That email and password don't match".</td></tr>
+<tr><td><code>/login</code></td><td><b>Sign in as Rahul (field agent)</b></td><td>Same call with the demo credentials <code>rahul@aurum.test</code> / <code>Rahul@2026</code>; errors also toast.</td><td><code>POST /v1/auth/login</code></td><td>as above</td><td>→ <code>/field/today</code></td></tr>
+<tr><td><code>/login</code></td><td><b>Sign in as Priya (manager)</b></td><td>Same with <code>admin@aurum.test</code> / <code>Aurum@2026</code>.</td><td><code>POST /v1/auth/login</code></td><td>as above</td><td>→ <code>/admin</code></td></tr>
+<tr><td>Field Profile · admin user menu</td><td><b>Sign out</b></td><td><code>logout()</code> in <code>lib/session.ts</code>, then <code>location.href="/login"</code>.</td><td><code>POST /v1/auth/logout</code></td><td>revoke refresh token; clear cookies</td><td>full page load (cache gone)</td></tr>
+</tbody></table>
+
+<h3 data-toc="6.2">Field: Today and opening a visit</h3>
+<table class="dense">
+<colgroup><col style="width:9%"><col style="width:14%"><col style="width:20%"><col style="width:16%"><col style="width:23%"><col style="width:18%"></colgroup>
+<thead><tr><th>Screen</th><th>Control</th><th>What the browser does</th><th>Endpoint(s)</th><th>Server-side effect</th><th>Refreshes afterwards</th></tr></thead>
+<tbody>
+<tr><td><code>/field/today</code></td><td>(page load)</td><td>Query <code>["today"]</code>, polled every 60 s and on focus. Starts <code>watchPosition</code> (high accuracy, own 15 s timeout); distances to shops are computed locally for display only.</td><td><code>GET /v1/field/today</code></td><td>read</td><td>—</td></tr>
+<tr><td><code>/field/today</code></td><td><b>Open visit</b> / <b>Continue visit</b> (focus row, sticky bar), any route row, a map marker</td><td>Navigates to <code>/field/visits/:id</code>; query <code>["visit", id]</code> refetches on focus.</td><td><code>GET /v1/visits/:id</code></td><td>read; returns <code>resume.nextStep</code>, which picks the stage</td><td>—</td></tr>
+<tr><td><code>/field/today</code></td><td><b>Resume and complete</b> (banner when a visit from an earlier day is still open)</td><td>Navigates to that visit (from <code>openVisit</code>).</td><td><code>GET /v1/visits/:id</code></td><td>read</td><td>—</td></tr>
+<tr><td><code>/field/today</code></td><td>Directions icon</td><td>Opens the maps directions URL in a new tab; no API.</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td><code>/field/today</code></td><td>"In your bag / Out on memo" card</td><td>Navigates to <code>/field/profile</code>.</td><td><code>GET /v1/field/profile</code></td><td>read</td><td>—</td></tr>
+<tr><td><code>/field/today</code></td><td>Location chip <b>Tap to retry</b></td><td>Restarts geolocation; no API.</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td><code>/field/visits</code></td><td><b>Recent</b> / <b>Upcoming</b> tabs, a row</td><td>Query <code>["field-visits", scope]</code>; Recent is today's whole route plus the last 14 days, straight from the API. A row opens the visit.</td><td><code>GET /v1/field/visits?scope=</code></td><td>read</td><td>—</td></tr>
+</tbody></table>
+
+<h3 data-toc="6.3">Field: geofence and check-in</h3>
+<table class="dense">
+<colgroup><col style="width:9%"><col style="width:14%"><col style="width:20%"><col style="width:16%"><col style="width:23%"><col style="width:18%"></colgroup>
+<thead><tr><th>Screen</th><th>Control</th><th>What the browser does</th><th>Endpoint(s)</th><th>Server-side effect</th><th>Refreshes afterwards</th></tr></thead>
+<tbody>
+<tr><td>Visit (PLANNED)</td><td>(automatic) geofence polling</td><td>Query <code>["geofence", id]</code> while a fix exists: every 5 s (not in background), plus 600 ms after the agent moves ≥15 m from the last checked position. The UI treats "inside" as true only if the server said so for a position within 25 m of the current fix.</td><td><code>POST /v1/visits/:id/geofence-check</code></td><td>none (pure computation)</td><td>local only; panel shows distance, "Verifying", "Location verified" or "Outside the zone"</td></tr>
+<tr><td>Visit (PLANNED)</td><td><b>Check in</b> (enabled only when the server says inside and <code>resume.canCheckIn ≠ false</code>)</td><td>Guarded single run. Body <code>{lat, lng, accuracyM}</code>; key <code>opKey.for("checkin:&lt;id&gt;:real","real")</code>, reused on network retry.</td><td><code>POST /v1/visits/:id/check-in</code></td><td>tx: lock visit, checks; Visit → CHECKED_IN (VERIFIED or LOW_ACCURACY); outbox <code>visit.checked_in</code>; idempotency row; post-commit dispatch</td><td>sync(<code>visit.checked_in</code>) = <b>V</b>. Errors: <code>OUTSIDE_GEOFENCE</code> toast + fence refetch; <code>ANOTHER_VISIT_OPEN</code> toast with "Open it"; <code>ALREADY_CHECKED_IN</code> → sync.</td></tr>
+<tr><td>Visit (PLANNED, demo tenant)</td><td><b>Simulate arrival (demo, recorded as simulated)</b> (also in the GPS-failure panel)</td><td>Same call with the shop's own lat/lng, <code>accuracyM:5</code>, <code>simulated:true</code>; key scope <code>checkin:&lt;id&gt;:sim</code>. Shown only when <code>me.tenant.demoMode</code>.</td><td><code>POST /v1/visits/:id/check-in</code></td><td>as above with verification SIMULATED (403 <code>SIMULATION_NOT_ALLOWED</code> if not a demo tenant)</td><td>sync(<code>visit.checked_in</code>) = <b>V</b>; Home attention shows "Simulated GPS check-in"</td></tr>
+<tr><td>Visit (PLANNED)</td><td><b>Retry location</b>, <b>Directions</b></td><td>Restart <code>watchPosition</code> · external maps link.</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>Visit (blocked)</td><td><b>Open that visit</b></td><td>Shown when <code>resume.blockedBy = ANOTHER_VISIT_OPEN</code>; navigates to the open visit.</td><td><code>GET /v1/visits/:id</code></td><td>read</td><td>—</td></tr>
+</tbody></table>
+
+<h3 data-toc="6.4">Field: arrival photo (proof)</h3>
+<table class="dense">
+<colgroup><col style="width:9%"><col style="width:14%"><col style="width:20%"><col style="width:16%"><col style="width:23%"><col style="width:18%"></colgroup>
+<thead><tr><th>Screen</th><th>Control</th><th>What the browser does</th><th>Endpoint(s)</th><th>Server-side effect</th><th>Refreshes afterwards</th></tr></thead>
+<tbody>
+<tr><td>Visit (UPLOAD_PROOF)</td><td><b>Take arrival photo</b> (camera input) / <b>Upload</b> (file picker)</td><td>(1) Prepare: downscale to ≤1600 px, JPEG q 0.82 (strips EXIF), SHA-256, new idempotency key; saved to sessionStorage <code>jr:proof:&lt;visitId&gt;</code>. (2) Token. (3) Upload bytes with progress: blob <code>put()</code>, or XHR multipart. (4) Attach.</td><td><code>POST /v1/uploads/proof-token</code> → blob store <i>or</i> <code>POST /v1/uploads/direct</code> → <code>POST /v1/visits/:id/proofs</code></td><td>Direct: StoredFile upsert. Attach tx: VisitProof (dedupe by checksum), Visit CHECKED_IN → ACTIVE, outbox <code>visit.proof_uploaded</code></td><td>sync(<code>visit.proof_uploaded</code>) = <b>V</b>; the stage advances to "Sell and complete"; toast "Arrival photo attached"</td></tr>
+<tr><td>Visit (UPLOAD_PROOF)</td><td><b>Retry upload</b></td><td>Resumes the saved <code>PendingProof</code>: skips the upload if bytes are already stored and re-attaches with the <b>same key</b>. On <code>INVALID_OBJECT_KEY</code>, <code>OBJECT_NOT_FOUND</code>, <code>CHECKSUM_MISMATCH</code> or <code>INVALID_URL</code> it drops the stored-object marker and re-uploads the same bytes. A photo prepared before a reload comes back as "failed, retry".</td><td>same as above</td><td>replay returns the stored response; checksum dedupe prevents a second proof</td><td>as above; on <code>VISIT_NOT_OPEN</code> it clears the pending photo and syncs</td></tr>
+<tr><td>Visit (UPLOAD_PROOF)</td><td><b>Use a different photo</b></td><td>New file → new prepare, new key.</td><td>as above</td><td>as above</td><td>as above</td></tr>
+<tr><td>Visit workspace</td><td>Proof summary row</td><td>Opens the evidence drawer (photo, time, verification, distances, checksum). <code>&lt;img&gt;</code> loads via <code>/api/v1/files/:id</code> with cookies in direct mode.</td><td><code>GET /v1/files/:id</code> (direct mode)</td><td>read</td><td>—</td></tr>
+</tbody></table>
+
+<h3 data-toc="6.5">Field: visit workspace, notes, catalog, order</h3>
+<table class="dense">
+<colgroup><col style="width:9%"><col style="width:14%"><col style="width:20%"><col style="width:16%"><col style="width:23%"><col style="width:18%"></colgroup>
+<thead><tr><th>Screen</th><th>Control</th><th>What the browser does</th><th>Endpoint(s)</th><th>Server-side effect</th><th>Refreshes afterwards</th></tr></thead>
+<tbody>
+<tr><td>Visit workspace</td><td><b>Add note</b> → <b>Save note</b></td><td>Drawer; the draft survives reloads (<code>jr:note:&lt;id&gt;</code>). Guarded single run; no key.</td><td><code>POST /v1/visits/:id/notes</code></td><td>insert VisitNote</td><td>sync(<code>visit.note_added</code>) = visit, admin-visit, shop, activity</td></tr>
+<tr><td>Visit workspace</td><td><b>Browse catalog</b> · <b>Create order</b> · <b>Leave on memo</b></td><td>Navigates to <code>/field/visits/:id/sale?mode=order&amp;browse=1</code>, <code>?mode=order</code> or <code>?mode=memo</code>. The sale view loads the visit plus an unfiltered catalog (facets, rates).</td><td><code>GET /v1/visits/:id</code>, <code>GET /v1/visits/:id/catalog</code></td><td>read</td><td>—</td></tr>
+<tr><td>Catalog tab <code>/field/catalog</code></td><td>(page load); <b>Order for &lt;shop&gt;</b> when a visit is open</td><td>Browse-only catalog (<code>["catalog","browse",…]</code>); the button navigates to the open visit's sale page.</td><td><code>GET /v1/field/catalog</code>, <code>GET /v1/field/today</code></td><td>read</td><td>—</td></tr>
+<tr><td>Sale: catalog</td><td>Search box, category chips (<b>All</b>, …), purity radio (<b>Any</b>/22K/…), <b>Clear filters</b></td><td>Search is debounced 250 ms. Query key <code>["catalog", visitId, filters]</code> keeps the previous data while loading; stale after 30 s.</td><td><code>GET /v1/visits/:id/catalog?q=&amp;category=&amp;purity=</code></td><td>read</td><td>—</td></tr>
+<tr><td>Sale: catalog</td><td>Design card (tap)</td><td>Opens the design drawer: photos, weights, full price breakdown from the list response, pieces in the bag. No extra call.</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>Sale: catalog</td><td>Card <b>+</b> quick add · drawer quantity −/+ · <b>Add to order</b> / <b>Update order</b> / <b>Remove from order</b></td><td>Edits the local draft only (sessionStorage <code>jr:sale:&lt;visitId&gt;</code>, design id → qty). Disabled with a reason when the visit is not open or has no proof.</td><td>—</td><td>—</td><td>bottom bar shows a display-only preview (shared <code>orderTotals</code>)</td></tr>
+<tr><td>Sale: catalog</td><td><b>Review order</b></td><td>Local step change to review.</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>Sale: review order</td><td>−/+ per line, notes, <b>Place order</b> (later <b>Place order again</b>)</td><td>Guarded. Items sorted by design id; body <code>{visitId, items, notes}</code>; key <code>opKey.for("order:&lt;visit&gt;", JSON(body))</code>, so the same body reuses the same key. A 4xx clears the key; a 5xx or network error keeps it.</td><td><code>POST /v1/orders</code></td><td>tx: idempotency row, lock visit, price at current rates, Order + OrderItems, DocSequence, AuditLog, outbox <code>order.created</code></td><td>sync(<code>order.created</code>) = orders, order, visit, admin-visit, today, shop, shops, agent, agents, home, dashboard, activity, profile. Also called on failure, so an order that did land still shows. Then the "Order booked" screen.</td></tr>
+<tr><td>Order booked</td><td><b>Back to visit</b> · <b>Book another order</b></td><td>Clears <code>orderDone</code> from the draft; navigates, or returns to browse.</td><td>—</td><td>—</td><td>—</td></tr>
+</tbody></table>
+
+<h3 data-toc="6.6">Field: memo, retailer acknowledgement, return, complete</h3>
+<table class="dense">
+<colgroup><col style="width:9%"><col style="width:14%"><col style="width:20%"><col style="width:16%"><col style="width:23%"><col style="width:18%"></colgroup>
+<thead><tr><th>Screen</th><th>Control</th><th>What the browser does</th><th>Endpoint(s)</th><th>Server-side effect</th><th>Refreshes afterwards</th></tr></thead>
+<tbody>
+<tr><td>Sale</td><td>Mode tab <b>Order</b> / <b>Memo</b></td><td><code>router.replace(?mode=)</code>. Memo mode lists the agent's exact pieces from <code>visit.bag</code>. Draft pieces that left the bag are dropped automatically.</td><td>(cached <code>GET /v1/visits/:id</code>)</td><td>—</td><td>—</td></tr>
+<tr><td>Sale: memo</td><td>Piece rows (checkbox), bag search, <b>Review memo</b></td><td>Local draft (piece ids).</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>Review memo</td><td>Due back <b>3 days</b> / <b>5 days</b> / <b>7 days</b>, calendar (tomorrow…+90), remove ✕, notes</td><td>Local draft; default due date is today + 5.</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>Review memo</td><td><b>Leave N pieces on memo</b></td><td>Guarded. Body <code>{visitId, pieceIds (sorted), dueDate, notes}</code>; key <code>opKey.for("memo:&lt;visit&gt;", JSON(body))</code>.</td><td><code>POST /v1/memos</code></td><td>tx: Memo, custody AGENT → SHOP per piece (locks, CustodyEvent, seq + 1), MemoItems valued now, ack token and code, AuditLog, outbox <code>sample.custody_changed</code> + <code>memo.created</code></td><td>sync(<code>memo.created</code>) = <b>C</b>; shows the ack screen. On <code>PIECE_NOT_IN_YOUR_CUSTODY</code> or <code>PIECE_ALREADY_ON_MEMO</code> it removes those pieces from the draft and syncs <code>piece.moved</code>.</td></tr>
+<tr><td>Ack screen (agent)</td><td>QR code; <b>Copy link</b>; <b>Retailer page</b>; <b>Skip for now, back to visit</b></td><td>Shows the QR of <code>ack.url</code>. Polls <code>["visit", id]</code> every 3 s until the memo shows ACKNOWLEDGED.</td><td><code>GET /v1/visits/:id</code> (poll)</td><td>read</td><td>When ACKNOWLEDGED appears: sync(<code>memo.acknowledged</code>) = memos, memo, visit, admin-visit, shop, activity; "Custody confirmed"</td></tr>
+<tr><td>Ack screen (agent)</td><td>6-digit code boxes (auto-submit on the 6th digit)</td><td>Guarded verify; clears the boxes on error.</td><td><code>POST /v1/memos/:id/ack/verify</code></td><td>tx: memo lock; match → ACKNOWLEDGED (OTP) + AuditLog; miss → attempts + 1, lock at 5</td><td>sync(<code>memo.acknowledged</code>); toasts for wrong or locked codes</td></tr>
+<tr><td>Visit timeline</td><td><b>Show QR again</b> (pending memo)</td><td>Reissues the link, then opens the ack drawer.</td><td><code>POST /v1/memos/:id/ack/link</code></td><td>new token, code hash, expiry; attempts reset</td><td>— (the drawer polls the visit)</td></tr>
+<tr><td><code>/ack/[token]</code> (retailer)</td><td>(page load)</td><td>Plain <code>fetch</code> (no cookies or refresh); renders pieces, total, code; handles invalid, expired (410) and error states.</td><td><code>GET /v1/public/memo-ack/:token</code></td><td>read</td><td>—</td></tr>
+<tr><td><code>/ack/[token]</code> (retailer)</td><td><b>Confirm receipt</b></td><td>POST <code>{confirm:true}</code>; shows the receipt.</td><td><code>POST /v1/public/memo-ack/:token</code></td><td>guarded update → ACKNOWLEDGED (QR_CONFIRM); AuditLog (actor null, IP)</td><td>The agent's 3 s poll and admin polls pick it up.</td></tr>
+<tr><td>Visit workspace</td><td><b>Return samples</b> (action list) or memo <b>Return</b> → tick pieces → <b>Return N pieces</b></td><td>Guarded. One call per memo; key <code>opKey.for("return:&lt;memo&gt;", ids)</code>.</td><td><code>POST /v1/memos/:id/return</code> (×memos)</td><td>tx: memo lock, custody SHOP → AGENT, MemoItem RETURNED, memo status, AuditLog, outbox ×2</td><td>sync(<code>memo.returned</code>) = <b>C</b>, also on failure ("some memos may have gone through"); the return then shows on the visit timeline from <code>GET /visits/:id</code> <code>returns</code></td></tr>
+<tr><td>Visit workspace, "Samples at this shop"</td><td>Memo <b>Sell</b> → tick pieces → <b>Book order for N pieces</b> → <b>Done</b></td><td>Drawer <code>SellFromMemoDrawer</code>; guarded; body <code>{pieceIds (sorted), visitId}</code>; key <code>opKey.for("convert:&lt;memo&gt;", ids)</code>. Shows the server-created order (number, lines, total, status).</td><td><code>POST /v1/memos/:id/convert</code></td><td>tx: memo lock, custody SHOP → SOLD, Order + OrderItems at today's rate (<code>sourceMemoId</code>, this visit), MemoItem CONVERTED, memo status, AuditLog, outbox <code>sample.custody_changed</code> + <code>order.created</code> + <code>memo.converted</code></td><td>sync(<code>memo.converted</code>) = <b>C</b> + orders, order; the order awaits approval on admin Orders</td></tr>
+<tr><td>Visit workspace, "Samples at this shop"</td><td>Memo <b>Extend</b> → date (suggests +7 days, ≤ today+90) and reason → <b>Extend to &lt;date&gt;</b></td><td>Drawer <code>ExtendMemoDrawer</code>; guarded; no key.</td><td><code>POST /v1/memos/:id/extend</code></td><td>MemoExtension, due date, re-arm overdue, AuditLog, outbox <code>memo.extended</code></td><td>sync(<code>memo.extended</code>) = memos, memo, home, dashboard, shop, visit, admin-visit, activity</td></tr>
+<tr><td>Visit workspace</td><td><b>Complete visit</b> → drawer (summary) → <b>Complete visit</b></td><td>Disabled without a proof. Attaches the current fix if any; no key; <code>VISIT_ALREADY_COMPLETED</code> is treated as success.</td><td><code>POST /v1/visits/:id/complete</code></td><td>tx: lock, proof ≥ 1, Visit → COMPLETED, outbox <code>visit.completed</code></td><td>sync(<code>visit.completed</code>) = <b>V</b> + profile; <code>router.push("/field/today")</code></td></tr>
+</tbody></table>
+
+<h3 data-toc="6.7">Admin: Home, search, visits and routes</h3>
+<table class="dense">
+<colgroup><col style="width:9%"><col style="width:14%"><col style="width:20%"><col style="width:16%"><col style="width:23%"><col style="width:18%"></colgroup>
+<thead><tr><th>Screen</th><th>Control</th><th>What the browser does</th><th>Endpoint(s)</th><th>Server-side effect</th><th>Refreshes afterwards</th></tr></thead>
+<tbody>
+<tr><td><code>/admin</code> Home</td><td>(page load)</td><td>Query <code>["home", date]</code> polled every 10 s. The sidebar rate strip reads <code>["gold-rates"]</code>.</td><td><code>GET /v1/admin/home</code>, <code>GET /v1/admin/gold-rates</code></td><td>read; opportunistic dispatcher kick (≤1 per 10 s)</td><td>—</td></tr>
+<tr><td>Home</td><td>Date <b>‹</b> / <b>›</b> / <b>Back to today</b></td><td>Changes the <code>date</code> in the key.</td><td><code>GET /v1/admin/home?date=</code></td><td>read</td><td>—</td></tr>
+<tr><td>Home</td><td>Attention item, activity row, check-in row, agent row, map marker, <b>All visits</b> / <b>View all</b></td><td>Navigates to the record (<code>/admin/visits/:id</code>, <code>/memos/:id</code>, <code>/orders/:id</code>, <code>/shops/:id</code>, <code>/agents/:id</code>, <code>/integrations</code>).</td><td>record GET (polled 15–20 s)</td><td>read</td><td>—</td></tr>
+<tr><td>Any admin page</td><td>⌘K / Search box; result; "Go to" items</td><td>Debounced 150 ms, ≥2 chars, key <code>["search", q]</code>, stale 15 s; selecting navigates.</td><td><code>GET /v1/admin/search?q=</code></td><td>read</td><td>—</td></tr>
+<tr><td>Home · Visits list · Agents list · Agent record (<b>Assign visit</b>, <b>Add stop</b>) · Shop record</td><td><b>Assign visit</b> → dialog (shop, agent, date) → <b>Assign visit</b></td><td>Loads shop options and agents, plus a route preview for the chosen agent and date; blocks a duplicate locally.</td><td><code>GET /v1/admin/shops</code>, <code>GET /v1/admin/agents</code>, <code>GET /v1/admin/visits?date&amp;agentId</code> → <code>POST /v1/admin/assignments</code></td><td>tx: Visit PLANNED (sequence max + 1), AuditLog; no webhook</td><td>sync(<code>visit.assigned</code>) = <b>V</b>; the agent's Today shows it on the next poll or focus</td></tr>
+<tr><td><code>/admin/visits</code></td><td>Filters, row, bulk <b>Copy row</b></td><td>Query <code>["admin-visits", range]</code> polled every 15 s; rows open the record; copy is clipboard only.</td><td><code>GET /v1/admin/visits?…</code>, <code>GET /v1/admin/agents</code></td><td>read</td><td>—</td></tr>
+<tr><td>Visit record · Agent record route</td><td><b>Remove from route</b> (trash, with <code>confirm()</code>)</td><td>Only for PLANNED visits.</td><td><code>DELETE /v1/admin/assignments/:visitId</code></td><td>Visit → CANCELLED, AuditLog</td><td>sync(<code>visit.assigned</code>) = <b>V</b></td></tr>
+<tr><td><code>/admin/agents</code></td><td><b>Add agent</b> → name, work email, phone, home area, temporary password (≥8) → <b>Add agent</b></td><td><code>useMutation</code>; navigates to the new agent's record.</td><td><code>POST /v1/admin/agents</code></td><td>User FIELD_AGENT (bcrypt), AuditLog</td><td>sync(<code>agent.saved</code>) = agents, agent, home, dashboard</td></tr>
+<tr><td>Agent record</td><td><b>Deactivate agent</b> / <b>Reactivate agent</b> (icon) → confirm</td><td>Mutation with <code>{active}</code>. A deactivated agent can no longer sign in or be assigned (Assign is disabled).</td><td><code>PATCH /v1/admin/agents/:id</code></td><td>User.active; on deactivate, all refresh tokens revoked; AuditLog</td><td>sync(<code>agent.saved</code>)</td></tr>
+<tr><td>Visit record</td><td><b>Copy link</b>, tabs</td><td>Clipboard; record query polled every 15 s.</td><td><code>GET /v1/admin/visits/:id</code></td><td>read</td><td>—</td></tr>
+</tbody></table>
+
+<h3 data-toc="6.8">Admin: orders, memos, samples, catalog, gold rate</h3>
+<table class="dense">
+<colgroup><col style="width:9%"><col style="width:14%"><col style="width:20%"><col style="width:16%"><col style="width:23%"><col style="width:18%"></colgroup>
+<thead><tr><th>Screen</th><th>Control</th><th>What the browser does</th><th>Endpoint(s)</th><th>Server-side effect</th><th>Refreshes afterwards</th></tr></thead>
+<tbody>
+<tr><td>Order record</td><td><b>Approve order</b></td><td><code>useWrite</code> mutation; the button shows "Approving…".</td><td><code>POST /v1/admin/orders/:id/approve</code></td><td>guarded update SUBMITTED → APPROVED, AuditLog, outbox <code>order.approved</code></td><td>sync(<code>order.decided</code>) = orders, order, home, dashboard, shop, shops, admin-visit, visit, activity</td></tr>
+<tr><td>Order record</td><td><b>Reject</b> → reason (≥3 chars) → <b>Reject order</b></td><td>Mutation with <code>{reason}</code>.</td><td><code>POST /v1/admin/orders/:id/reject</code></td><td>→ REJECTED + reason, AuditLog, outbox <code>order.rejected</code></td><td>sync(<code>order.decided</code>)</td></tr>
+<tr><td><code>/admin/orders</code></td><td>Select rows → bulk approve → <b>Approve</b></td><td>One batch call with the selected ids; if any fail, the dialog stays open with per-order results.</td><td><code>POST /v1/admin/orders/approve</code></td><td>each order through <code>decide()</code> in its own tx: APPROVED, AuditLog, outbox <code>order.approved</code></td><td>sync(<code>order.decided</code>)</td></tr>
+<tr><td>Memo record</td><td><b>Extend due date</b> → calendar, reason → <b>Extend to &lt;date&gt;</b></td><td>Mutation.</td><td><code>POST /v1/admin/memos/:id/extend</code></td><td>MemoExtension, due date, re-arm overdue, AuditLog, outbox <code>memo.extended</code></td><td>sync(<code>memo.extended</code>) = memos, memo, home, dashboard, shop, visit, admin-visit, activity</td></tr>
+<tr><td><code>/admin/samples</code> (bulk) · sample record · design sheet</td><td><b>Issue to agent</b> → pick agent → <b>Issue to &lt;agent&gt;</b></td><td>Only vault pieces can be selected for issue.</td><td><code>POST /v1/admin/pieces/issue</code></td><td>tx: custody VAULT → AGENT, CustodyEvent, AuditLog, outbox <code>sample.custody_changed</code></td><td>sync(<code>piece.moved</code>) = <b>C</b></td></tr>
+<tr><td>Agent record</td><td><b>Issue samples</b> → tick vault pieces → <b>Issue samples</b></td><td>Loads the vault list for the dialog.</td><td><code>GET /v1/admin/pieces?custodianType=VAULT</code> → <code>POST /v1/admin/pieces/issue</code></td><td>as above</td><td>sync(<code>piece.moved</code>) on settle</td></tr>
+<tr><td>Samples · sample record · design sheet · agent bag</td><td><b>Return to vault</b> / <b>Return N to vault</b></td><td>Only pieces in agents' bags can be selected.</td><td><code>POST /v1/admin/pieces/return-to-vault</code></td><td>custody AGENT → VAULT, outbox <code>sample.custody_changed</code></td><td>sync(<code>piece.moved</code>) = <b>C</b></td></tr>
+<tr><td><code>/admin/catalog</code></td><td><b>New design</b> / design tile → sheet → <b>Add design</b> / <b>Save design</b></td><td>Create or patch.</td><td><code>POST /v1/admin/designs</code> · <code>PATCH /v1/admin/designs/:id</code></td><td>JewelryDesign, AuditLog</td><td>sync(<code>design.saved</code>) = designs, catalog, pieces</td></tr>
+<tr><td>Design sheet</td><td>Count → <b>Add to vault</b></td><td>Intake of N pieces.</td><td><code>POST /v1/admin/designs/:id/pieces</code></td><td>N SamplePieces in VAULT + INTAKE events, DocSequence, AuditLog (no webhook)</td><td>sync(<code>design.saved</code>, <code>piece.moved</code>)</td></tr>
+<tr><td><code>/admin/settings</code> Gold rate</td><td><b>Set rate</b> → modal (preview of affected designs and pieces) → <b>Set 22K to ₹X/g</b></td><td><code>GoldRateSettings</code> (<code>admin-v2/sales/gold-rate.tsx</code>), <code>useWrite</code>.</td><td><code>POST /v1/admin/gold-rates</code></td><td>append GoldRate, AuditLog (no webhook)</td><td>sync(<code>gold_rate.set</code>) = gold-rates, catalog, designs, pieces, piece, home, dashboard, profile, shops, shop, agents, agent, activity</td></tr>
+</tbody></table>
+
+<h3 data-toc="6.9">Admin: shops and assigned agents</h3>
+<table class="dense">
+<colgroup><col style="width:9%"><col style="width:14%"><col style="width:20%"><col style="width:16%"><col style="width:23%"><col style="width:18%"></colgroup>
+<thead><tr><th>Screen</th><th>Control</th><th>What the browser does</th><th>Endpoint(s)</th><th>Server-side effect</th><th>Refreshes afterwards</th></tr></thead>
+<tbody>
+<tr><td><code>/admin/shops</code></td><td><b>New shop</b> → sheet (geofence map preview) → <b>Create shop</b></td><td>Client validation (code required, radius 20–1000 m, ₹ to paise without floats).</td><td><code>POST /v1/admin/shops</code></td><td>Shop, AuditLog</td><td>sync(<code>shop.saved</code>) = shops, shop, home, dashboard, today; navigates to the new shop</td></tr>
+<tr><td>Shop record</td><td>Pencil <b>Edit shop</b> → <b>Save shop</b></td><td>Patch with the same form.</td><td><code>PATCH /v1/admin/shops/:id</code></td><td>Shop, AuditLog (before and after)</td><td>sync(<code>shop.saved</code>)</td></tr>
+<tr><td>Shop record</td><td>"Assigned agent" select</td><td>Immediate mutation on change (empty value → <code>null</code>).</td><td><code>PATCH /v1/admin/shops/:id {assignedAgentId}</code></td><td>Shop, AuditLog</td><td>sync(<code>shop.saved</code>, <code>agent.saved</code>)</td></tr>
+<tr><td><code>/admin/shops</code></td><td>Select rows → <b>Assign agent</b> → agent / <b>Remove assignment</b></td><td>N PATCH calls via <code>allSettled</code>.</td><td><code>PATCH /v1/admin/shops/:id</code> ×N</td><td>as above</td><td>sync(<code>shop.saved</code>, <code>agent.saved</code>) on settle</td></tr>
+</tbody></table>
+
+<h3 data-toc="6.10">Admin: webhooks and integrations</h3>
+<table class="dense">
+<colgroup><col style="width:9%"><col style="width:14%"><col style="width:20%"><col style="width:16%"><col style="width:23%"><col style="width:18%"></colgroup>
+<thead><tr><th>Screen</th><th>Control</th><th>What the browser does</th><th>Endpoint(s)</th><th>Server-side effect</th><th>Refreshes afterwards</th></tr></thead>
+<tbody>
+<tr><td><code>/admin/integrations</code></td><td>(page load)</td><td>Queries: webhooks (15 s), event types (once), deliveries as an infinite query of 50-row cursor pages (loaded pages refetched every 5 s), the selected delivery (5 s), received (5 s).</td><td><code>GET /v1/admin/webhooks</code>, <code>…/event-types</code>, <code>…/deliveries?limit=50&amp;cursor=</code>, <code>…/received</code></td><td>read; deliveries GET kicks the dispatcher</td><td>—</td></tr>
+<tr><td>Integrations</td><td><b>Add endpoint</b> → URL, description, events → <b>Add endpoint</b></td><td>Mutation; then a one-time secret modal (<b>I've saved it</b>).</td><td><code>POST /v1/admin/webhooks</code></td><td>WebhookEndpoint (secret encrypted), AuditLog</td><td>sync(<code>webhook.changed</code>) = webhooks, deliveries, delivery, received, home</td></tr>
+<tr><td>Endpoint panel</td><td><b>Reveal</b> / <b>Hide</b></td><td>Fetches the secret and hides it again after 30 s; no cache.</td><td><code>GET /v1/admin/webhooks/:id/secret</code></td><td>AuditLog <code>webhook.reveal_secret</code></td><td>—</td></tr>
+<tr><td>Endpoint panel</td><td><b>Rotate</b> → <b>Rotate secret</b></td><td>Confirm modal; shows the new secret once.</td><td><code>POST /v1/admin/webhooks/:id/rotate-secret</code></td><td>new encrypted secret, AuditLog</td><td>sync(<code>webhook.changed</code>)</td></tr>
+<tr><td>Endpoint panel</td><td><b>Send test event</b> (needs Enabled)</td><td>Mutation; opens the returned delivery's detail (polled 5 s).</td><td><code>POST /v1/admin/webhooks/:id/test</code></td><td>outbox <code>ping</code> targeted at this endpoint, delivery, synchronous signed attempt, WebhookAttempt</td><td>sync(<code>webhook.changed</code>)</td></tr>
+<tr><td>Endpoint panel</td><td>Enabled switch · <b>Edit URL</b> → <b>Save</b> · events → <b>Save events</b></td><td>PATCH with the changed field.</td><td><code>PATCH /v1/admin/webhooks/:id</code></td><td>WebhookEndpoint, AuditLog</td><td>sync(<code>webhook.changed</code>)</td></tr>
+<tr><td>Endpoint panel</td><td>Trash → <b>Delete endpoint</b></td><td>Confirm modal; deselects the endpoint.</td><td><code>DELETE /v1/admin/webhooks/:id</code></td><td>deactivate; PENDING/FAILED → DEAD; AuditLog</td><td>sync(<code>webhook.changed</code>)</td></tr>
+<tr><td>Deliveries table · delivery detail</td><td><b>Retry</b> (FAILED or DEAD rows)</td><td>Mutation; toast "Retry sent".</td><td><code>POST /v1/admin/webhooks/deliveries/:id/retry</code></td><td>atomic reset + claim, immediate signed attempt, WebhookAttempt</td><td>sync(<code>webhook.changed</code>)</td></tr>
+</tbody></table>
+</section>
+
+<!-- ============================================================ 7 FLOWCHARTS -->
+<section class="chapter" id="s7">
+<h2 data-toc="7"><span class="num">7</span>Flowcharts</h2>
+<p class="lead">Rendered from the code paths above. State names are the enum values stored in Postgres.</p>
+
+<h3 data-toc="7.1">Request lifecycle</h3>
+<figure data-maxh="212">
+<script type="text/plain" class="mmd" data-id="fig-lifecycle">
+flowchart TD
+  A["Screen calls api(path, opts)<br/>lib/api.ts"] --> B["fetch /api/v1/…<br/>same origin · cookies jr_at / jr_rt"]
+  B --> C["Next.js rewrite<br/>→ API_ORIGIN/v1/…"]
+  C --> D["Nest: helmet · cookie-parser · pino<br/>request id = X-Request-Id or req_ULID"]
+  D --> E{"Throttler:<br/>within limit?"}
+  E -- no --> E1["429 RATE_LIMITED"]
+  E -- yes --> F{"AuthGuard:<br/>public, or valid JWT<br/>with permission?"}
+  F -- "403" --> F5["FORBIDDEN"]
+  F -- "401" --> R{"browser: /auth/* path<br/>or already retried?"}
+  R -- no --> RF["single-flight POST /auth/refresh<br/>rotates jr_rt, new jr_at"]
+  RF -->|"retry once"| B
+  R -- yes --> L["redirect /login?next=…"]
+  F -- ok --> G["zod parse body / query<br/>400 VALIDATION_FAILED on error"]
+  G --> NX["service call<br/>(continues in Figure 3b)"]
+</script>
+<figcaption><b>Figure 3a — Request lifecycle, part 1: transport, auth and validation.</b> Every call, read or write, passes these steps. A 401 is refreshed once in the browser and replayed transparently.</figcaption>
+</figure>
+<figure data-maxh="232">
+<script type="text/plain" class="mmd" data-id="fig-lifecycle2">
+flowchart TD
+  H{"Idempotency-Key<br/>header?"}
+  H -- "missing on order / memo /<br/>return / convert" --> H1["400 IDEMPOTENCY_KEY_REQUIRED"]
+  H -- "missing, optional route" --> K
+  H -- present --> I["BEGIN · INSERT IdempotencyKey<br/>ON CONFLICT DO NOTHING"]
+  I --> J{"row inserted?"}
+  J -- "no: duplicate" --> J1{"same fingerprint<br/>and user?"}
+  J1 -- yes --> J2["return stored response"]
+  J1 -- no --> J3["422 IDEMPOTENCY_KEY_REUSED"]
+  J -- yes --> K["business logic in the tx<br/>FOR UPDATE locks · guarded updates<br/>DB invariants"]
+  K --> LL["INSERT OutboxEvent + AuditLog<br/>store response on key row"]
+  LL --> M{"COMMIT?"}
+  M -- "no" --> M1["ROLLBACK, key row too<br/>{ok:false, error, requestId}"]
+  M -- yes --> N["{ok:true, data}<br/>201 / 200 + x-request-id"]
+  N --> O["post-commit interceptor<br/>Dispatcher.kick() via waitUntil"]
+  N --> P["browser: useSync(change)<br/>invalidate AFFECTS keys"]
+  O --> Q["fan-out → signed POSTs<br/>(Figure 9)"]
+</script>
+<figcaption><b>Figure 3b — Request lifecycle, part 2: idempotency, transaction, outbox, response, post-commit dispatch</b> (mutating calls). Visit transitions (check-in, proof, complete) take the idempotency branch when the client sends a key; otherwise they run in a plain transaction.</figcaption>
+</figure>
+
+<h3 data-toc="7.2">Field visit flow</h3>
+<figure data-maxh="232">
+<script type="text/plain" class="mmd" data-id="fig-visit">
+flowchart TD
+  T["Today · GET /field/today"] --> SO{"earlier visit<br/>still open?"}
+  SO -- yes --> SO1["Resume and<br/>complete it first"]
+  SO -- no --> OV["Open visit · GET /visits/:id<br/>resume.nextStep"]
+  OV --> BL{"blocked?"}
+  BL -- "not today /<br/>other visit open" --> BL1["Check in disabled<br/>link to open visit"]
+  BL -- no --> GPS{"GPS fix?"}
+  GPS -- "denied /<br/>timeout" --> GD["Retry location"]
+  GD -- "demo tenant" --> SIM["Simulate arrival<br/>recorded SIMULATED"]
+  GPS -- yes --> GF["POST geofence-check<br/>every 5 s, after 15 m move"]
+  GF --> IN{"inside?"}
+  IN -- no --> OUT["Outside the zone<br/>Check in disabled"]
+  OUT -.-> GF
+  IN -- yes --> CI["Check in · POST /check-in + key"]
+  CI --> CIR{"result"}
+  CIR -- "network error:<br/>retry, same key" --> CI
+  CIR -- "409 outside" --> OUT
+  CIR -- "200" --> PH["Arrival photo<br/>JPEG + SHA-256 saved"]
+  SIM --> PH
+  PH --> UP["proof-token → upload bytes"]
+  UP --> UPR{"ok?"}
+  UPR -- "no: retry, same<br/>bytes and key" --> UP
+  UPR -- yes --> AT["POST /visits/:id/proofs<br/>visit → ACTIVE"]
+  AT --> WS["Workspace (Figure 4b)"]
+</script>
+<figcaption><b>Figure 4a — Field visit flow, part 1: Today → geofence → check-in → arrival photo.</b> Decision points for an earlier open visit, GPS denied, outside the fence, a network failure on check-in and upload failure. Every stage is re-derived from <code>GET /visits/:id</code>, so a reload at any point lands on the same step.</figcaption>
+</figure>
+<figure data-maxh="232">
+<script type="text/plain" class="mmd" data-id="fig-visit2">
+flowchart TD
+  WS["Workspace · Sell and complete"] --> ORD["Catalog → Place order<br/>POST /orders + key(body)"]
+  ORD --> DUP{"timeout or<br/>double submit?"}
+  DUP -- "yes: same key" --> ORD2["stored response<br/>one order only"]
+  DUP -- "201" --> MEMO["Leave on memo · exact tags, due date<br/>POST /memos + key"]
+  ORD2 --> MEMO
+  MEMO --> MR{"pieces still<br/>in the bag?"}
+  MR -- "409" --> MR1["drop those pieces<br/>sync piece.moved"]
+  MR1 -.-> MEMO
+  MR -- "201" --> ACK["QR of ack.url<br/>poll visit every 3 s"]
+  ACK --> AK{"retailer"}
+  AK -- "Confirm receipt" --> AK1["public confirm<br/>QR_CONFIRM"]
+  AK -- "reads code" --> AK2["ack/verify<br/>OTP, 5 tries"]
+  AK -- "skip" --> RET
+  AK1 --> RET["Return · Sell · Extend a memo (optional)<br/>/memos/:id/return · convert · extend"]
+  AK2 --> RET
+  RET --> CP["Complete visit<br/>POST /visits/:id/complete"]
+  CP --> CPR{"proof<br/>attached?"}
+  CPR -- no --> X["409 PROOF_REQUIRED"]
+  CPR -- yes --> DONE["COMPLETED · back to Today"]
+</script>
+<figcaption><b>Figure 4b — Field visit flow, part 2: catalog → order → memo → retailer acknowledgement → return → complete.</b> Shown in the usual order; in the app, order, memo, return and note are independent actions on the workspace and can be repeated or skipped. Duplicate submits are absorbed by the persisted idempotency key. Drafts (cart, memo picks, notes, pending photo, keys) live in sessionStorage per visit and are cleared when the server confirms.</figcaption>
+</figure>
+
+<h3 data-toc="7.3">Custody state machine for a sample piece</h3>
+<figure>
+<script type="text/plain" class="mmd" data-id="fig-custody">
+stateDiagram-v2
+  [*] --> VAULT : INTAKE · POST /admin/designs/{id}/pieces
+  VAULT --> AGENT : ISSUE_TO_AGENT · POST /admin/pieces/issue
+  AGENT --> VAULT : RETURN_TO_VAULT · POST /admin/pieces/return-to-vault
+  AGENT --> SHOP : MEMO_HANDOVER · POST /memos
+  SHOP --> AGENT : MEMO_RETURN · POST /memos/{id}/return
+  SHOP --> SOLD : CONVERTED_TO_SALE · POST /memos/{id}/convert
+  SOLD --> [*]
+  LOST : LOST (schema only)
+  note right of LOST
+    LOST and reason ADJUSTMENT exist in the enums,
+    but no endpoint writes them today.
+  end note
+</script>
+<figcaption><b>Figure 5 — Custody of one physical piece</b> (for example <code>AJ-S-000123</code>). Every move goes through <code>CustodyService.move()</code>: lock the pieces <code>FOR UPDATE</code> in id order, verify the expected current custodian (else 409 with the specific code), update the piece, append a <code>CustodyEvent</code> with <code>seq+1</code>, emit one <code>sample.custody_changed</code>, and audit. MEMO_RETURN goes back to the memo's agent.</figcaption>
+</figure>
+
+<h3 data-toc="7.4">Memo state machine</h3>
+<figure>
+<script type="text/plain" class="mmd" data-id="fig-memo">
+stateDiagram-v2
+  [*] --> Open : POST /memos · all items OUT
+  state "Open memo · stored ACTIVE or PARTIALLY_RETURNED" as Open {
+    ACTIVE --> DUE_SOON : 2 days or less to due date
+    DUE_SOON --> OVERDUE : due date passed (IST) · memo.overdue once
+    OVERDUE --> ACTIVE : extend · memo.extended · re-arms overdue
+    DUE_SOON --> ACTIVE : extend
+    ACTIVE --> PARTIALLY_RETURNED : some items returned or converted
+  }
+  Open --> RETURNED : nothing OUT, at least one RETURNED
+  Open --> CONVERTED_TO_ORDER : every item CONVERTED
+  RETURNED --> [*]
+  CONVERTED_TO_ORDER --> [*]
+</script>
+<figcaption><b>Figure 6 — Memo lifecycle.</b> Stored <code>status</code> comes from <code>nextMemoStatus()</code>: all items OUT → ACTIVE; some OUT → PARTIALLY_RETURNED; none OUT → CONVERTED_TO_ORDER only if every item is CONVERTED, otherwise RETURNED (so a mix of returned and sold closes as RETURNED). DUE_SOON and OVERDUE are <em>display</em> states derived on read by <code>memoDisplayStatus()</code> and also apply to partially returned memos. "EXTENDED" is not a status: an extension writes a <code>MemoExtension</code> row and the view sets <code>extended: true</code>. Acknowledgement (<code>ackStatus</code> PENDING → ACKNOWLEDGED) is independent of these states.</figcaption>
+</figure>
+
+<div>
+<div>
+<h3 data-toc="7.5">Order state machine</h3>
+<figure data-maxh="70">
+<script type="text/plain" class="mmd" data-id="fig-order">
+stateDiagram-v2
+  [*] --> SUBMITTED : POST /orders<br/>or POST /memos/{id}/convert
+  SUBMITTED --> APPROVED : POST /admin/orders/{id}/approve
+  SUBMITTED --> REJECTED : POST /admin/orders/{id}/reject<br/>(reason required)
+  APPROVED --> [*]
+  REJECTED --> [*]
+</script>
+<figcaption><b>Figure 7 — Order lifecycle.</b> Decisions are one-shot (<code>updateMany … WHERE status='SUBMITTED'</code>; a second gives <code>409 ORDER_ALREADY_DECIDED</code>). Prices are frozen at creation and never change. <code>DRAFT</code> exists in the enum, but no code creates it.</figcaption>
+</figure>
+</div>
+<div>
+<h3 data-toc="7.6">Visit state machine</h3>
+<figure data-maxh="95">
+<script type="text/plain" class="mmd" data-id="fig-visitsm">
+stateDiagram-v2
+  [*] --> PLANNED : POST /admin/assignments
+  PLANNED --> CHECKED_IN : POST /visits/{id}/check-in<br/>today, inside fence (or simulated)
+  CHECKED_IN --> ACTIVE : first POST /visits/{id}/proofs
+  ACTIVE --> COMPLETED : POST /visits/{id}/complete<br/>(at least one proof)
+  PLANNED --> MISSED : IST day passed<br/>dispatcher markMissed()
+  PLANNED --> CANCELLED : DELETE /admin/assignments/{id}
+  COMPLETED --> [*]
+  MISSED --> [*]
+  CANCELLED --> [*]
+</script>
+<figcaption><b>Figure 8 — Visit lifecycle.</b> CHECKED_IN and ACTIVE are the "open" states: at most one per agent (partial unique index). Complete needs at least one proof, and the first proof moves the visit to ACTIVE, so COMPLETED is reached from ACTIVE in practice.</figcaption>
+</figure>
+</div>
+</div>
+
+<h3 data-toc="7.7">Webhook delivery pipeline</h3>
+<figure data-maxh="218">
+<script type="text/plain" class="mmd" data-id="fig-webhook">
+flowchart TD
+  S["State-change transaction<br/>writes OutboxEvent (fannedOutAt null)"] --> TR{"trigger"}
+  TR -- "post-commit kick" --> RUN
+  TR -- "Home / Dashboard / Deliveries read<br/>(at most 1 per 10 s)" --> RUN
+  TR -- "cron, daily" --> RUN
+  RUN["Dispatcher.runOnce()<br/>single-flight per instance"] --> FO["fanOut · FOR UPDATE SKIP LOCKED<br/>one delivery per subscribed active endpoint"]
+  FO --> CL["claim due PENDING / FAILED<br/>lockedUntil = now + 30 s"]
+  CL --> EN{"endpoint<br/>active?"}
+  EN -- no --> DEAD1["DEAD<br/>endpoint disabled, no attempt"]
+  EN -- yes --> POST["signed POST · 10 s timeout<br/>sha256=HMAC(secret, ts.body)"]
+  POST --> OK{"2xx?"}
+  OK -- yes --> SUC["SUCCEEDED<br/>+ WebhookAttempt"]
+  OK -- no --> N{"attempts<br/>so far"}
+  N -- "1 to 6" --> F["FAILED · next attempt after<br/>30 s · 2 min · 10 min · 30 min · 2 h · 6 h"]
+  F --> CL
+  N -- "7" --> DEAD["DEAD (dead letter)"]
+  DEAD --> MR["Manual Retry<br/>reset + claim atomically"]
+  DEAD1 --> MR
+  MR --> POST
+</script>
+<figcaption><b>Figure 9 — Outbox → delivery → retries.</b> One immediate attempt plus six retries after 30 s, 2 min, 10 min, 30 min, 2 h and 6 h; the 7th failure is DEAD. Each attempt records the headers actually sent (never the secret), status, latency and up to 2000 chars of the response. Back-off times are earliest-next-attempt; the attempt itself waits for the next trigger (§1.3).</figcaption>
+</figure>
+
+<div class="wide">
+<h3 data-toc="7.8">Sequence: Rahul leaves AJ-S-000123 on memo at Sharma Jewellers</h3>
+<figure data-maxh="140">
+<script type="text/plain" class="mmd" data-id="fig-seq">
+sequenceDiagram
+  autonumber
+  participant B as Browser<br/>(Rahul)
+  participant N as Next.js
+  participant A as NestJS API
+  participant P as Postgres
+  participant D as Dispatcher
+  participant W as Webhook<br/>receiver
+  participant H as Admin Home<br/>(Priya)
+  B->>N: POST /api/v1/memos<br/>Idempotency-Key
+  N->>A: POST /v1/memos<br/>(throttle · auth · zod)
+  A->>P: BEGIN · idempotency key<br/>lock Visit · insert MEMO-2026-000NN
+  A->>P: lock AJ-S-000123 (held by Rahul?)<br/>→ SHOP Sharma · CustodyEvent
+  A->>P: Outbox custody_changed · MemoItem OUT<br/>ack token · Outbox memo.created · COMMIT
+  A-->>B: 201 {memo, ack.url}
+  B->>B: sync memo.created<br/>show QR
+  A-)D: post-commit kick
+  D->>P: fan out · claim
+  D->>W: signed POST memo.created
+  W-->>D: 200 → Attempt SUCCEEDED
+  loop every 10 s
+    H->>A: GET /admin/home
+    A-->>H: activity: Rahul left 1 sample at Sharma
+  end
+</script>
+<figcaption><b>Figure 10 — One memo handover across all components.</b> Steps 3–5 are one transaction: if any check fails (piece not in Rahul's bag, piece already on a memo, no gold rate), everything rolls back, including the idempotency row, and the browser shows the error with the draft intact.</figcaption>
+</figure>
+</div>
+</section>
+
+<!-- ============================================================ 8 SYNC & CONSISTENCY -->
+<section class="chapter" id="s8">
+<h2 data-toc="8"><span class="num">8</span>Sync and consistency</h2>
+
+<h3 data-toc="8.1">The backend is the source of truth</h3>
+<p>The web holds no derived business state. After a write, it calls <code>useSync()(change)</code>, which invalidates every query key in <code>AFFECTS[change]</code> (<code>lib/sync.ts</code>). The server then answers with fresh numbers: bag values, memo exposure, shop status and attention items are all computed server-side. Keys are prefixes, so <code>["visit"]</code> refreshes every visit query. Local state is limited to drafts and UX: cart, memo picks, notes, the pending photo and idempotency keys in sessionStorage, plus the GPS fix. Pieces in a draft that the server no longer shows in the bag are dropped before submit. Cross-user freshness (agent writes, manager watches, or the reverse) comes from polling and refetch-on-focus:</p>
+<table class="dense">
+  <thead><tr><th style="width:38%">Query (key)</th><th style="width:16%">Interval</th><th>Notes</th></tr></thead>
+  <tbody>
+  <tr><td>Field Today <code>["today"]</code></td><td>60 s + focus</td><td>Picks up new assignments and ack changes.</td></tr>
+  <tr><td>Field visit <code>["visit", id]</code></td><td>focus; 3 s on the ack screen</td><td>3 s polling stops once ACKNOWLEDGED.</td></tr>
+  <tr><td>Geofence <code>["geofence", id]</code></td><td>5 s (foreground)</td><td>Plus 600 ms after moving ≥15 m; <code>staleTime: 0</code>.</td></tr>
+  <tr><td>Catalog <code>["catalog", …]</code></td><td>stale 30 s</td><td>Invalidated by <code>gold_rate.set</code>, <code>design.saved</code> and custody changes.</td></tr>
+  <tr><td>Admin Home <code>["home", date]</code></td><td>10 s</td><td>Also kicks the dispatcher (≤1 per 10 s).</td></tr>
+  <tr><td>Admin visits list and records; orders list and record; shop and agent records</td><td>15 s</td><td><code>admin-visits</code>, <code>admin-visit</code>, <code>orders</code>, <code>order</code>, <code>shop</code>, <code>agent</code>.</td></tr>
+  <tr><td>Memos, pieces, piece and memo records</td><td>20 s</td><td></td></tr>
+  <tr><td>Shops list · agents list and agent record</td><td>30 s · 15 s</td><td>Agent rows come from the single v2 <code>GET /admin/agents</code>.</td></tr>
+  <tr><td>Webhooks · deliveries (cursor pages) · delivery · received</td><td>15 s · 5 s · 5 s · 5 s</td><td>A delivery's state is visible within about 5 s of an attempt.</td></tr>
+  <tr><td>Everything else (TanStack default)</td><td>stale 10 s + focus</td><td>No retry on 4xx; up to 2 retries on 5xx or network errors.</td></tr>
+  </tbody>
+</table>
+
+<h3 data-toc="8.2">Race and duplicate protections</h3>
+<table class="dense">
+  <thead><tr><th style="width:24%">Race</th><th>Protection (where)</th><th style="width:13%">Proven by</th></tr></thead>
+  <tbody>
+  <tr><td>Double tap on a primary action</td><td><code>useGuard()</code> ignores a second run before React re-renders; buttons disable while pending.</td><td>client code</td></tr>
+  <tr><td>Retry after timeout (order, memo, return)</td><td>Persisted <code>opKey</code> plus server idempotency in the same transaction; <code>clientOpId</code> unique backstop.</td><td>tests 3, F6, F7, F9</td></tr>
+  <tr><td>Concurrent double check-in</td><td>Visit row <code>FOR UPDATE</code>; partial unique index "one open visit per agent"; unique violation mapped to 409.</td><td>tests 1, 1b, F4</td></tr>
+  <tr><td>Same piece on two memos</td><td>Pieces locked <code>FOR UPDATE ORDER BY id</code> (deadlock-free), custodian verified; partial unique index on OUT memo items.</td><td>tests 4, 5, F8, F9</td></tr>
+  <tr><td>Issue a held piece, or two admins issue the same piece</td><td><code>CustodyService.move</code> verifies <code>from = VAULT</code> under lock; gap-free <code>(pieceId, seq)</code> unique.</td><td>F10</td></tr>
+  <tr><td>Approve and reject at once</td><td><code>updateMany … WHERE status='SUBMITTED'</code>, one winner, one audit row. Batch approve reuses it per order.</td><td>tests 9, R4</td></tr>
+  <tr><td>Gold rate changes mid-order</td><td>Rates read once per transaction; lines and snapshot use the same map; OrderItem is append-only.</td><td>tests 8, F11</td></tr>
+  <tr><td>Two dispatchers (instances or cron)</td><td><code>FOR UPDATE SKIP LOCKED</code> on fan-out and claim; <code>lockedUntil</code> lease; unique (endpoint, event); single-flight per instance; manual retry resets and claims in one statement.</td><td>tests 7, F12</td></tr>
+  <tr><td>Overdue event spam</td><td><code>updateMany … WHERE overdueNotifiedAt IS NULL</code> per memo; extension resets it.</td><td>F13</td></tr>
+  <tr><td>Return or sale in a later visit</td><td>Attributed to the caller's open visit at the memo's shop (custody event, outbox, converted order).</td><td>F14</td></tr>
+  </tbody>
+</table>
+
+<h3 data-toc="8.3">Failure handling</h3>
+<table class="dense">
+  <thead><tr><th style="width:20%">Failure</th><th>What happens</th><th style="width:15%">Proven by</th></tr></thead>
+  <tbody>
+  <tr><td>Bad or far GPS fix</td><td>Server-side distance check; accuracy slack capped at 50 m, so a wildly inaccurate fix cannot widen the fence. Missing accuracy earns no slack and is never VERIFIED (LOW_ACCURACY). The UI enables Check in only on a fresh server verdict.</td><td>test 2, F3</td></tr>
+  <tr><td>GPS denied, unavailable or timing out</td><td><code>useFieldGeo</code> maps each case to specific copy with <b>Retry location</b>. A demo tenant offers <b>Simulate arrival</b>, recorded SIMULATED and flagged on Home.</td><td>F16 (seed demos)</td></tr>
+  <tr><td>Upload failure</td><td>Prepared bytes, checksum and key are persisted. Retry resumes from the failed step with the same bytes and key. The server dedupes on (visit, checksum), and direct uploads upsert by key.</td><td>client + unique index</td></tr>
+  <tr><td>API error mid-submit, retry</td><td>The error rolls back the key row, so the retry re-executes rather than replaying an error. A 5xx keeps the client key; a 4xx clears it.</td><td>F6</td></tr>
+  <tr><td>Refresh mid-visit</td><td><code>resume</code> block from <code>GET /visits/:id</code>; drafts in sessionStorage; a pending photo comes back as "retry". A visit left open on an earlier day is surfaced on Today.</td><td>F5, F15; AUDIT #4–5</td></tr>
+  <tr><td>Session expiry</td><td>A 401 triggers single-flight refresh and one retry; the upload XHR refreshes via <code>/auth/me</code>; otherwise redirect with <code>?next=</code>.</td><td>client code</td></tr>
+  <tr><td>Tenant isolation</td><td>tenantId only from the JWT; every query filtered; foreign ids 404 on every v1 and v2 read and write; lists, search and home never contain them.</td><td>test 6, F1</td></tr>
+  <tr><td>Webhook endpoint down</td><td>FAILED with back-off → visible in Deliveries and as a Home attention item → manual retry after fixing the URL → SUCCEEDED.</td><td>test 7, F12</td></tr>
+  </tbody>
+</table>
+<p class="small"><b>Test assets.</b> <code>apps/api/test/api.test.ts</code> (10 invariants), <code>apps/api/test/failures.test.ts</code> (F1–F16), <code>apps/api/test/records.test.ts</code> (R1–R4: record activity, agent-held piece location, delivery paging, batch approve) on real Postgres via <code>test/harness.ts</code>; <code>packages/shared/src/pricing.test.ts</code> (4); <code>apps/api/scripts/e2e-smoke.ts</code> (the brief's 28 steps over HTTP with sample <code>AJ-S-000123</code>, re-runnable); findings and fixes in <code>docs/AUDIT.md</code> (19 findings). These were not run for this report.</p>
+</section>
+
+<!-- ============================================================ 9 APPENDIX -->
+<section class="chapter" id="s9">
+<h2 data-toc="9"><span class="num">9</span>Appendix</h2>
+
+<h3 data-toc="9.1">Environment variables</h3>
+<table class="dense">
+  <thead><tr><th style="width:26%">Variable</th><th style="width:10%">App</th><th>Purpose (validated in <code>apps/api/src/env.ts</code> with zod)</th></tr></thead>
+  <tbody>
+  <tr><td><code>API_ORIGIN</code></td><td>web</td><td>Where <code>/api/*</code> is proxied (default <code>http://localhost:4000</code>).</td></tr>
+  <tr><td><code>NODE_ENV</code> · <code>PORT</code></td><td>api</td><td>development|test|production (production → secure cookies, https-only webhooks) · default 4000.</td></tr>
+  <tr><td><code>DATABASE_URL</code> · <code>DATABASE_URL_DIRECT</code></td><td>api</td><td>Pooled URL for the app · direct URL for <code>prisma migrate</code> (defaults to <code>DATABASE_URL</code>).</td></tr>
+  <tr><td><code>JWT_ACCESS_SECRET</code></td><td>api</td><td>HMAC key for access JWTs (≥16 chars).</td></tr>
+  <tr><td><code>JWT_REFRESH_SECRET</code></td><td>api</td><td>Required (≥16) but currently unused; refresh tokens are opaque and hashed.</td></tr>
+  <tr><td><code>APP_ENCRYPTION_KEY</code></td><td>api</td><td>32-byte base64 AES-256-GCM key for webhook secrets at rest.</td></tr>
+  <tr><td><code>APP_SECRET</code></td><td>api</td><td>HMAC key for retailer ack codes and their hashes.</td></tr>
+  <tr><td><code>CRON_SECRET</code></td><td>api</td><td>Guards <code>/v1/internal/dispatch</code> and <code>/v1/internal/seed</code> (header or Bearer).</td></tr>
+  <tr><td><code>APP_PUBLIC_URL</code> · <code>API_PUBLIC_URL</code></td><td>api</td><td>Web origin for ack links and QR codes and absolute proof URLs in events · API origin for demo receiver URLs.</td></tr>
+  <tr><td><code>CORS_ORIGINS</code></td><td>api</td><td>Comma-separated allowlist (fallback; the proxy makes calls same-origin).</td></tr>
+  <tr><td><code>BLOB_READ_WRITE_TOKEN</code></td><td>api</td><td>Optional. Enables Vercel Blob client uploads; otherwise direct mode.</td></tr>
+  <tr><td><code>LOG_LEVEL</code></td><td>api</td><td>pino level (default info).</td></tr>
+  </tbody>
+</table>
+
+<h3 data-toc="9.2">Running locally</h3>
+<ul>
+  <li>One command: <code>./scripts/run-local.sh</code> (Node 22+, with Docker or a local Postgres 16). It writes <code>apps/api/.env</code> with fresh secrets, installs dependencies, builds shared and the API, runs <code>prisma migrate deploy</code>, starts the API on :4000, seeds via <code>POST /v1/internal/seed</code>, then starts the web on :3000.</li>
+  <li>Manual: <code>pnpm install</code> → <code>docker compose up -d db</code> → <code>cp apps/api/.env.example apps/api/.env</code> (fill secrets) → <code>pnpm --filter @jewelroute/api db:migrate &amp;&amp; pnpm --filter @jewelroute/api db:seed</code> → <code>pnpm --filter @jewelroute/api dev</code> and <code>pnpm --filter @jewelroute/web dev</code>.</li>
+  <li>Demo logins: <code>rahul@aurum.test</code> / <code>Rahul@2026</code> (field), <code>admin@aurum.test</code> / <code>Aurum@2026</code> (manager). Swagger at <code>http://localhost:4000/docs</code>. Away from Delhi, use <b>Simulate arrival (demo)</b>.</li>
+  <li>Tests: <code>pnpm --filter @jewelroute/api test</code> (needs a test database); e2e: <code>cd apps/api &amp;&amp; BASE_URL=http://localhost:4000 CRON_SECRET=… pnpm e2e</code>.</li>
+  <li>This report: <code>node docs/report/build.mjs</code> (see the header of that file for the Playwright and Mermaid paths).</li>
+</ul>
+
+<h3 data-toc="9.3">Glossary</h3>
+<table class="dense kv">
+  <tbody>
+  <tr><td>Memo</td><td>Consignment note: physical samples left with a retailer until a due date, then returned or bought. Numbered <code>MEMO-YYYY-NNNNN</code>; acknowledged by the retailer through QR or code.</td></tr>
+  <tr><td>Custody / custodian</td><td>Who physically holds a sample right now: the VAULT, an AGENT (their "bag"), a SHOP (on memo), SOLD or LOST. Changes only through the append-only <code>CustodyEvent</code> ledger.</td></tr>
+  <tr><td>Sample piece · tag code</td><td>One physical copy of a design, identified by a tag such as <code>AJ-S-000123</code>, with its own gross and net weight.</td></tr>
+  <tr><td>Design · SKU</td><td>A catalog item (for example a 22K bangle) that defines purity, standard weights and pricing components.</td></tr>
+  <tr><td>Purity</td><td>Gold fineness in karats: K24 (≈99.9%), K22 (≈91.6%), K18 (75%), K14 (≈58.5%). Each purity has its own daily rate per gram.</td></tr>
+  <tr><td>Paise / mg</td><td>Integer units: 1 rupee = 100 paise; 1 gram = 1000 milligrams. Price = net mg × rate (paise per g) ÷ 1000 + making + stones + other, then 3% GST on the order subtotal.</td></tr>
+  <tr><td>Making charge</td><td>Labour charge, either per gram of net weight (paise per g) or a percentage of gold value (basis points).</td></tr>
+  <tr><td>Gross / net weight</td><td>Total weight vs. gold-only weight (excludes stones); pricing uses net.</td></tr>
+  <tr><td>Geofence · verification</td><td>Circle of <code>geofenceRadiusM</code> around a shop; check-in records VERIFIED, LOW_ACCURACY or SIMULATED.</td></tr>
+  <tr><td>Proof</td><td>The arrival photo attached to a visit, stored with its SHA-256 checksum and capture position.</td></tr>
+  <tr><td>IST business date</td><td>The calendar day in Asia/Kolkata used for "today", due dates and missed visits.</td></tr>
+  <tr><td>Outbox · fan-out · dead letter</td><td>Event rows written with each change · creating one delivery per subscribed endpoint · a delivery that failed 7 times (DEAD), recoverable by manual retry.</td></tr>
+  <tr><td>Idempotency key</td><td>A client-chosen id per user action; repeating the request with it returns the original result instead of acting twice.</td></tr>
+  </tbody>
+</table>
+</section>
+
+</body>
+</html>

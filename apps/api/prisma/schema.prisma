@@ -1,0 +1,623 @@
+// JewelRoute — transactional model (PostgreSQL is the source of truth).
+// Money: BigInt paise. Weight: Int milligrams. Every row carries tenantId.
+// Invariants the ORM cannot express live in migrations/0001_init/invariants.sql
+// (partial unique indexes, CHECKs, append-only triggers) — see docs/DOMAIN.md.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  output        = "../generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_DIRECT")
+}
+
+enum Role {
+  FIELD_AGENT
+  ADMIN
+}
+
+enum Purity {
+  K24
+  K22
+  K18
+  K14
+}
+
+enum VisitStatus {
+  PLANNED
+  CHECKED_IN
+  ACTIVE
+  COMPLETED
+  MISSED
+  CANCELLED
+}
+
+enum GeoVerification {
+  VERIFIED
+  LOW_ACCURACY
+  SIMULATED
+}
+
+enum MakingChargeType {
+  PER_GRAM
+  PERCENT
+}
+
+enum CustodianType {
+  VAULT
+  AGENT
+  SHOP
+  SOLD
+  LOST
+}
+
+enum CustodyReason {
+  INTAKE
+  ISSUE_TO_AGENT
+  MEMO_HANDOVER
+  MEMO_RETURN
+  RETURN_TO_VAULT
+  CONVERTED_TO_SALE
+  ADJUSTMENT
+}
+
+enum OrderStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum MemoStatus {
+  ACTIVE
+  PARTIALLY_RETURNED
+  RETURNED
+  CONVERTED_TO_ORDER
+}
+
+enum MemoItemStatus {
+  OUT
+  RETURNED
+  CONVERTED
+}
+
+enum AckStatus {
+  PENDING
+  ACKNOWLEDGED
+}
+
+enum DeliveryStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  DEAD
+}
+
+model Tenant {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  demoMode  Boolean  @default(true) // allows clearly-labelled SIMULATED check-ins for demos
+  createdAt DateTime @default(now())
+
+  users            User[]
+  shops            Shop[]
+  visits           Visit[]
+  designs          JewelryDesign[]
+  pieces           SamplePiece[]
+  goldRates        GoldRate[]
+  orders           Order[]
+  memos            Memo[]
+  webhookEndpoints WebhookEndpoint[]
+  outboxEvents     OutboxEvent[]
+  auditLogs        AuditLog[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  email        String
+  name         String
+  phone        String?
+  role         Role
+  passwordHash String
+  active       Boolean  @default(true)
+  homeArea     String?
+  createdAt    DateTime @default(now())
+
+  refreshTokens RefreshToken[]
+  visits        Visit[]        @relation("AgentVisits")
+  orders        Order[]        @relation("AgentOrders")
+  memos         Memo[]         @relation("AgentMemos")
+  piecesHeld    SamplePiece[]  @relation("PieceAgent")
+  assignedShops Shop[]         @relation("ShopAssignedAgent")
+
+  @@unique([tenantId, email])
+  @@index([tenantId, role])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  tenantId  String
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  userAgent String?
+}
+
+model Shop {
+  id               String   @id @default(cuid())
+  tenantId         String
+  tenant           Tenant   @relation(fields: [tenantId], references: [id])
+  code             String
+  name             String
+  ownerName        String?
+  phone            String?
+  address          String
+  area             String
+  city             String
+  lat              Float
+  lng              Float
+  geofenceRadiusM  Int      @default(100)
+  creditLimitPaise BigInt   @default(0)
+  notes            String?
+  assignedAgentId  String?
+  assignedAgent    User?    @relation("ShopAssignedAgent", fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now())
+
+  visits     Visit[]
+  orders     Order[]
+  memos      Memo[]
+  piecesHere SamplePiece[] @relation("PieceShop")
+
+  @@unique([tenantId, code])
+  @@index([tenantId, city])
+  @@index([tenantId, assignedAgentId])
+}
+
+// A Visit row is created when an admin assigns a shop to an agent for a date
+// (the "VisitAssignment"), then moves PLANNED → CHECKED_IN → ACTIVE → COMPLETED.
+model Visit {
+  id               String           @id @default(cuid())
+  tenantId         String
+  tenant           Tenant           @relation(fields: [tenantId], references: [id])
+  shopId           String
+  shop             Shop             @relation(fields: [shopId], references: [id])
+  agentId          String
+  agent            User             @relation("AgentVisits", fields: [agentId], references: [id])
+  plannedDate      DateTime         @db.Date
+  plannedTime      String? // "HH:MM" IST, optional slot within the day
+  sequence         Int              @default(1)
+  status           VisitStatus      @default(PLANNED)
+  assignedById     String?
+  checkInAt        DateTime?
+  checkInLat       Float?
+  checkInLng       Float?
+  checkInAccuracyM Float?
+  checkInDistanceM Float?
+  verification     GeoVerification?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  completedLat     Float?
+  completedLng     Float?
+  summary          String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  proofs VisitProof[]
+  notes  VisitNote[]
+  orders Order[]
+  memos  Memo[]
+
+  @@unique([tenantId, agentId, shopId, plannedDate])
+  @@index([tenantId, plannedDate])
+  @@index([tenantId, agentId, plannedDate])
+  @@index([tenantId, shopId, plannedDate])
+}
+
+model VisitProof {
+  id             String    @id @default(cuid())
+  tenantId       String
+  visitId        String
+  visit          Visit     @relation(fields: [visitId], references: [id])
+  agentId        String
+  shopId         String
+  objectKey      String
+  url            String
+  contentType    String
+  sizeBytes      Int
+  checksumSha256 String
+  capturedAt     DateTime?
+  uploadedAt     DateTime  @default(now())
+  captureLat     Float?
+  captureLng     Float?
+  checkInLat     Float?
+  checkInLng     Float?
+  distanceM      Float?
+
+  @@unique([visitId, checksumSha256])
+  @@index([tenantId, uploadedAt])
+}
+
+model VisitNote {
+  id        String   @id @default(cuid())
+  tenantId  String
+  visitId   String
+  visit     Visit    @relation(fields: [visitId], references: [id])
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+}
+
+// Append-only: the current rate for a purity is the latest effectiveFrom.
+model GoldRate {
+  id               String   @id @default(cuid())
+  tenantId         String
+  tenant           Tenant   @relation(fields: [tenantId], references: [id])
+  purity           Purity
+  ratePaisePerGram BigInt
+  effectiveFrom    DateTime @default(now())
+  source           String   @default("MANUAL")
+  createdById      String?
+  createdAt        DateTime @default(now())
+
+  @@index([tenantId, purity, effectiveFrom])
+}
+
+model JewelryDesign {
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id])
+  sku               String
+  name              String
+  category          String
+  collection        String
+  purity            Purity
+  grossWeightMg     Int
+  netWeightMg       Int
+  makingChargeType  MakingChargeType @default(PER_GRAM)
+  makingChargeValue BigInt // PER_GRAM: paise per gram; PERCENT: basis points of gold value
+  stoneValuePaise   BigInt           @default(0)
+  otherComponents   Json             @default("[]") // [{label, valuePaise}]
+  imageUrls         String[]
+  description       String?
+  active            Boolean          @default(true)
+  createdAt         DateTime         @default(now())
+
+  pieces     SamplePiece[]
+  orderItems OrderItem[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId, category])
+}
+
+// Every physical sample has exactly one current custodian (CHECK in SQL).
+model SamplePiece {
+  id               String        @id @default(cuid())
+  tenantId         String
+  tenant           Tenant        @relation(fields: [tenantId], references: [id])
+  designId         String
+  design           JewelryDesign @relation(fields: [designId], references: [id])
+  tagCode          String
+  grossWeightMg    Int
+  netWeightMg      Int
+  custodianType    CustodianType @default(VAULT)
+  custodianAgentId String?
+  custodianAgent   User?         @relation("PieceAgent", fields: [custodianAgentId], references: [id])
+  custodianShopId  String?
+  custodianShop    Shop?         @relation("PieceShop", fields: [custodianShopId], references: [id])
+  custodySeq       Int           @default(1)
+  updatedAt        DateTime      @updatedAt
+  createdAt        DateTime      @default(now())
+
+  custodyEvents CustodyEvent[]
+  memoItems     MemoItem[]
+
+  @@unique([tenantId, tagCode])
+  @@index([tenantId, custodianType])
+  @@index([tenantId, custodianAgentId])
+  @@index([tenantId, custodianShopId])
+}
+
+// Append-only custody ledger (trigger blocks UPDATE/DELETE). seq is gap-free per piece.
+model CustodyEvent {
+  id          String         @id @default(cuid())
+  tenantId    String
+  pieceId     String
+  piece       SamplePiece    @relation(fields: [pieceId], references: [id])
+  seq         Int
+  fromType    CustodianType?
+  fromAgentId String?
+  fromShopId  String?
+  toType      CustodianType
+  toAgentId   String?
+  toShopId    String?
+  reason      CustodyReason
+  memoId      String?
+  visitId     String?
+  actorId     String?
+  outboxEventId String? // evt_… of the sample.custody_changed event that announced this move
+  occurredAt  DateTime       @default(now())
+
+  @@unique([pieceId, seq])
+  @@index([tenantId, occurredAt])
+  @@index([tenantId, visitId])
+  @@index([tenantId, memoId])
+}
+
+model Order {
+  id               String      @id @default(cuid())
+  tenantId         String
+  tenant           Tenant      @relation(fields: [tenantId], references: [id])
+  number           String
+  shopId           String
+  shop             Shop        @relation(fields: [shopId], references: [id])
+  agentId          String
+  agent            User        @relation("AgentOrders", fields: [agentId], references: [id])
+  visitId          String?
+  visit            Visit?      @relation(fields: [visitId], references: [id])
+  status           OrderStatus @default(SUBMITTED)
+  clientOpId       String
+  subtotalPaise    BigInt
+  gstPaise         BigInt
+  totalPaise       BigInt
+  goldRateSnapshot Json // [{purity, goldRateId, ratePaisePerGram, effectiveFrom}]
+  notes            String?
+  sourceMemoId     String?
+  decidedById      String?
+  decidedAt        DateTime?
+  rejectionReason  String?
+  createdAt        DateTime    @default(now())
+
+  items OrderItem[]
+
+  @@unique([tenantId, clientOpId])
+  @@unique([tenantId, number])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, visitId])
+  @@index([tenantId, shopId, createdAt])
+}
+
+// Frozen price snapshot; immutable after insert (trigger).
+model OrderItem {
+  id               String        @id @default(cuid())
+  tenantId         String
+  orderId          String
+  order            Order         @relation(fields: [orderId], references: [id])
+  designId         String
+  design           JewelryDesign @relation(fields: [designId], references: [id])
+  pieceId          String?
+  sku              String
+  name             String
+  purity           Purity
+  quantity         Int
+  netWeightMg      Int
+  goldRateId       String
+  ratePaisePerGram BigInt
+  goldValuePaise   BigInt
+  makingPaise      BigInt
+  stonePaise       BigInt
+  otherPaise       BigInt        @default(0)
+  unitPricePaise   BigInt
+  lineTotalPaise   BigInt
+}
+
+model Memo {
+  id                String     @id @default(cuid())
+  tenantId          String
+  tenant            Tenant     @relation(fields: [tenantId], references: [id])
+  number            String
+  shopId            String
+  shop              Shop       @relation(fields: [shopId], references: [id])
+  agentId           String
+  agent             User       @relation("AgentMemos", fields: [agentId], references: [id])
+  visitId           String?
+  visit             Visit?     @relation(fields: [visitId], references: [id])
+  status            MemoStatus @default(ACTIVE)
+  clientOpId        String
+  dueDate           DateTime   @db.Date
+  notes             String?
+  totalValuePaise   BigInt
+  ackStatus         AckStatus  @default(PENDING)
+  ackTokenHash      String?    @unique
+  ackCodeHash       String?
+  ackAttempts       Int        @default(0)
+  ackAt             DateTime?
+  ackMethod         String? // QR_CONFIRM | OTP
+  ackTokenExpiresAt DateTime?
+  overdueNotifiedAt DateTime?
+  closedAt          DateTime?
+  createdAt         DateTime   @default(now())
+
+  items      MemoItem[]
+  extensions MemoExtension[]
+
+  @@unique([tenantId, clientOpId])
+  @@unique([tenantId, number])
+  @@index([tenantId, status, dueDate])
+  @@index([tenantId, visitId])
+  @@index([tenantId, shopId])
+}
+
+model MemoItem {
+  id         String         @id @default(cuid())
+  tenantId   String
+  memoId     String
+  memo       Memo           @relation(fields: [memoId], references: [id])
+  pieceId    String
+  piece      SamplePiece    @relation(fields: [pieceId], references: [id])
+  valuePaise BigInt // valuation at handover (today's rate), exposure only
+  status     MemoItemStatus @default(OUT)
+  returnedAt DateTime?
+  createdAt  DateTime       @default(now())
+  // partial unique (pieceId) WHERE status = 'OUT' lives in invariants.sql
+
+  @@index([memoId])
+  @@index([tenantId, pieceId])
+}
+
+model MemoExtension {
+  id          String   @id @default(cuid())
+  tenantId    String
+  memoId      String
+  memo        Memo     @relation(fields: [memoId], references: [id])
+  fromDueDate DateTime @db.Date
+  toDueDate   DateTime @db.Date
+  reason      String?
+  actorId     String
+  createdAt   DateTime @default(now())
+}
+
+model WebhookEndpoint {
+  id              String   @id @default(cuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  url             String
+  description     String?
+  secretEncrypted String // AES-256-GCM with APP_ENCRYPTION_KEY
+  secretLast4     String
+  events          String[]
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  deliveries WebhookDelivery[]
+}
+
+// Transactional outbox: written in the same transaction as the state change.
+// Also feeds the admin activity stream.
+model OutboxEvent {
+  id               String    @id // evt_<ulid>
+  tenantId         String
+  tenant           Tenant    @relation(fields: [tenantId], references: [id])
+  type             String
+  aggregateType    String
+  aggregateId      String
+  actorId          String?
+  payload          Json
+  createdAt        DateTime  @default(now())
+  fannedOutAt      DateTime?
+  targetEndpointId String? // set for `ping` test events: deliver to this endpoint only
+
+  deliveries WebhookDelivery[]
+
+  @@index([tenantId, createdAt])
+  @@index([fannedOutAt])
+  @@index([tenantId, aggregateType, aggregateId])
+}
+
+model WebhookDelivery {
+  id             String          @id @default(cuid())
+  tenantId       String
+  endpointId     String
+  endpoint       WebhookEndpoint @relation(fields: [endpointId], references: [id])
+  eventId        String
+  event          OutboxEvent     @relation(fields: [eventId], references: [id])
+  status         DeliveryStatus  @default(PENDING)
+  attempts       Int             @default(0)
+  nextAttemptAt  DateTime        @default(now())
+  lockedUntil    DateTime?
+  lastStatusCode Int?
+  lastLatencyMs  Int?
+  lastError      String?
+  deliveredAt    DateTime?
+  createdAt      DateTime        @default(now())
+
+  attemptLog WebhookAttempt[]
+
+  @@unique([endpointId, eventId])
+  @@index([status, nextAttemptAt])
+  @@index([tenantId, createdAt])
+}
+
+model WebhookAttempt {
+  id           String          @id @default(cuid())
+  deliveryId   String
+  delivery     WebhookDelivery @relation(fields: [deliveryId], references: [id])
+  attemptNo    Int
+  statusCode   Int?
+  latencyMs    Int?
+  error        String?
+  responseBody String?
+  requestHeaders Json? // headers actually sent (incl. signature, never the secret)
+  createdAt    DateTime        @default(now())
+}
+
+// Received by the built-in demo receiver (/v1/dev/webhook-receiver) so the demo
+// can prove signature verification end to end without a third-party service.
+model ReceivedWebhook {
+  id            String   @id @default(cuid())
+  tenantId      String?
+  endpointId    String?
+  endpointToken String
+  deliveryId    String?
+  headers       Json?
+  eventId       String?
+  eventType     String?
+  signatureOk   Boolean
+  body          Json
+  receivedAt    DateTime @default(now())
+}
+
+// Fallback object storage for visit proofs when BLOB_READ_WRITE_TOKEN is not configured
+// (local dev / self-hosting). Production uses Vercel Blob with client tokens.
+model StoredFile {
+  id           String   @id @default(cuid())
+  tenantId     String
+  objectKey    String
+  contentType  String
+  sizeBytes    Int
+  sha256       String
+  bytes        Bytes
+  uploadedById String
+  createdAt    DateTime @default(now())
+
+  @@unique([tenantId, objectKey])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  requestId  String?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, createdAt])
+}
+
+model IdempotencyKey {
+  tenantId       String
+  key            String
+  userId         String
+  fingerprint    String
+  responseStatus Int?
+  responseBody   Json?
+  createdAt      DateTime @default(now())
+
+  @@id([tenantId, key])
+}
+
+model DocSequence {
+  tenantId String
+  kind     String // ORD | MEMO
+  year     Int
+  next     Int    @default(1)
+
+  @@id([tenantId, kind, year])
+}

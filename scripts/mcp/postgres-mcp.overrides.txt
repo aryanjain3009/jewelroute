@@ -1,0 +1,5 @@
+# uv overrides for postgres-mcp 0.3.0 (checked 2026-10-21, docs/brain/learnings.md L0011):
+# - its pin pglast==7.2.0 no longer resolves from PyPI; 7.21 is the same major (PG17 parser)
+# - mcp 2.x renamed FastMCP; postgres-mcp 0.3.0 needs the 1.x SDK
+pglast==7.21
+mcp<2

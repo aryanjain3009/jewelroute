@@ -1,0 +1,125 @@
+// Mirrors docs/CONTRACT.md "Shared shapes". Keep in sync with the contract.
+export type Role = "FIELD_AGENT" | "ADMIN";
+export type Purity = "K24" | "K22" | "K18" | "K14";
+export type VisitStatus = "PLANNED" | "CHECKED_IN" | "ACTIVE" | "COMPLETED" | "MISSED" | "CANCELLED";
+export type Verification = "VERIFIED" | "LOW_ACCURACY" | "SIMULATED";
+export type MemoDisplayStatus = "ACTIVE" | "DUE_SOON" | "OVERDUE" | "PARTIALLY_RETURNED" | "RETURNED" | "CONVERTED_TO_ORDER";
+export type OrderStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED";
+export type CustodianType = "VAULT" | "AGENT" | "SHOP" | "SOLD" | "LOST";
+export type DeliveryStatus = "PENDING" | "SUCCEEDED" | "FAILED" | "DEAD";
+
+export interface Tenant { id: string; slug: string; name: string; demoMode: boolean }
+export interface User { id: string; name: string; email: string; role: Role; phone?: string; tenant: Tenant }
+export interface Ref { id: string; name: string }
+export interface Shop { id: string; code: string; name: string; ownerName?: string; phone?: string; address: string; area: string; city: string; lat: number; lng: number; geofenceRadiusM: number; creditLimitPaise: number }
+export interface VisitSummary {
+  id: string; sequence: number; plannedDate: string; status: VisitStatus; shop: Shop;
+  checkInAt?: string; verification?: Verification; checkInDistanceM?: number; completedAt?: string;
+  activeMemoCount: number; activeMemoValuePaise: number; proofCount: number; orderCount: number;
+  agent?: Ref;
+}
+export interface Proof { id: string; url: string; contentType: string; sizeBytes: number; checksumSha256: string; capturedAt?: string; uploadedAt: string; captureLat?: number; captureLng?: number; checkInLat?: number; checkInLng?: number; distanceM?: number }
+export interface PriceBreakdown { purity: Purity; netWeightMg: number; ratePaisePerGram: number; goldRateId: string; rateEffectiveFrom: string; goldValuePaise: number; makingPaise: number; stonePaise: number; otherPaise: number; unitPricePaise: number; gstPaise: number; totalWithGstPaise: number }
+export interface Custodian { type: CustodianType; agentId?: string; agentName?: string; shopId?: string; shopName?: string }
+export interface Piece { id: string; tagCode: string; designId: string; sku: string; name: string; imageUrl?: string; purity: Purity; grossWeightMg: number; netWeightMg: number; custodianType: CustodianType; custodian: Custodian; valuePaise: number }
+export interface Design {
+  id: string; sku: string; name: string; category: string; collection: string; purity: Purity; grossWeightMg: number; netWeightMg: number;
+  makingChargeType: "PER_GRAM" | "PERCENT"; makingChargeValue: number; stoneValuePaise: number; otherComponents: { label: string; valuePaise: number }[];
+  imageUrls: string[]; description?: string; price: PriceBreakdown; availablePieces?: Piece[]; pieces?: Piece[];
+}
+export interface OrderItem { id: string; designId: string; sku: string; name: string; purity: Purity; quantity: number; netWeightMg: number; ratePaisePerGram: number; goldValuePaise: number; makingPaise: number; stonePaise: number; otherPaise: number; unitPricePaise: number; lineTotalPaise: number; imageUrl?: string }
+export interface Order {
+  id: string; number: string; status: OrderStatus; shop: Ref & { area?: string }; agent: Ref; visitId?: string;
+  subtotalPaise: number; gstPaise: number; totalPaise: number;
+  goldRateSnapshot: { purity: Purity; goldRateId: string; ratePaisePerGram: number; effectiveFrom: string }[];
+  items: OrderItem[]; notes?: string; decidedBy?: Ref; decidedAt?: string; rejectionReason?: string; createdAt: string;
+}
+export interface MemoItem { id: string; status: "OUT" | "RETURNED" | "CONVERTED"; valuePaise: number; returnedAt?: string; piece: Piece }
+export interface Memo {
+  id: string; number: string; status: "ACTIVE" | "PARTIALLY_RETURNED" | "RETURNED" | "CONVERTED_TO_ORDER"; displayStatus: MemoDisplayStatus; extended: boolean;
+  shop: Ref & { area?: string }; agent: Ref; visitId?: string; dueDate: string; daysToDue: number; notes?: string;
+  totalValuePaise: number; outstandingValuePaise: number; ackStatus: "PENDING" | "ACKNOWLEDGED"; ackAt?: string; ackMethod?: string;
+  items: MemoItem[]; extensions: { fromDueDate: string; toDueDate: string; reason?: string; createdAt: string }[]; createdAt: string;
+}
+export interface ActivityItem { id: string; type: string; title: string; amountPaise?: number; actor?: Ref; shop?: Ref; entity: { type: string; id: string }; createdAt: string }
+export interface GoldRateRow { purity: Purity; ratePaisePerGram: number; goldRateId: string; effectiveFrom: string; createdBy?: Ref | null }
+
+// ---- v2 (docs/CONTRACT.md "v2 — Attio-style IA"); additive ----
+export type ProofState = "VERIFIED" | "LOW_ACCURACY" | "SIMULATED" | "MISSING" | "NOT_STARTED";
+export interface VisitOutcome { orderCount: number; orderValuePaise: number; memoCount: number; memoValuePaise: number; returnedCount: number }
+export type AdminVisitRow = VisitSummary & {
+  agent: Ref; plannedTime?: string; durationMin?: number; proofState: ProofState; outcome: VisitOutcome;
+  checkInLat?: number; checkInLng?: number; checkInAccuracyM?: number; startedAt?: string; summary?: string;
+};
+export interface CustodyParty { type: CustodianType; id?: string; label: string }
+export interface CustodyEventRow {
+  id: string; seq: number; pieceId: string; tagCode: string; pieceName: string;
+  from: CustodyParty; to: CustodyParty; reason: string; occurredAt: string; actor: Ref;
+  location?: { lat: number; lng: number; label: string; distanceM?: number; verification?: Verification };
+  visit?: { id: string; shopName: string }; proof?: { id: string; url: string }; memo?: { id: string; number: string };
+  eventId?: string;
+}
+export type PieceStatus = "IN_VAULT" | "WITH_AGENT" | "ON_MEMO" | "OVERDUE" | "SOLD" | "LOST";
+/** Where an agent-held piece is (API-resolved; AGENT custody only). Render `label`. */
+export interface PieceLocation { kind: "IN_VISIT" | "LAST_CHECK_IN" | "FIELD_BAG"; label: string; shop?: Ref; visitId?: string; lat?: number; lng?: number; verification?: Verification; at?: string }
+export type PieceRow = Piece & { status: PieceStatus; memo?: { id: string; number: string; dueDate: string }; lastMovedAt: string; collection: string; location?: PieceLocation };
+export type AttentionKind = "MEMO_OVERDUE" | "MEMO_DUE_TODAY" | "VISIT_MISSED" | "PROOF_MISSING" | "PROOF_SIMULATED" | "ORDER_PENDING" | "WEBHOOK_FAILING";
+export interface AttentionItem {
+  id: string; kind: AttentionKind; severity: "high" | "medium"; title: string; subtitle: string; amountPaise?: number; at: string;
+  entity: { type: "memo" | "visit" | "order" | "webhook" | "shop"; id: string };
+}
+export type ShopStatus = "ACTIVE" | "MEMO_OVERDUE" | "DORMANT" | "NEW";
+export type ShopRow = Shop & {
+  assignedAgent?: Ref; lastVisitAt?: string; lastVisitAgent?: Ref; openOrdersPaise: number;
+  activeMemoCount: number; activeMemoValuePaise: number; samplesHereCount: number; samplesHereValuePaise: number;
+  nextVisit?: { id: string; date: string; plannedTime?: string; agent: Ref }; status: ShopStatus;
+};
+export type AuditRefType = "user" | "shop" | "order" | "memo" | "piece" | "visit" | "design" | "webhook";
+/** Human audit row: render `actor.name` + `summary`; `refs` labels any id in before/after. */
+export interface AuditRow {
+  id: string; action: string; actor: Ref; actorName?: string; summary?: string; entityType: string; entityId: string;
+  entity?: { type: AuditRefType; id: string; name: string }; before: unknown; after: unknown;
+  refs?: Record<string, { type: AuditRefType; name: string }>; requestId?: string; createdAt: string;
+}
+export interface MapCheckIn { visitId: string; agentName: string; shopName: string; lat: number; lng: number; at: string; verification: Verification; distanceM: number; status?: VisitStatus }
+export interface MapShop { id: string; name: string; area?: string; lat: number; lng: number; visitStatus?: VisitStatus; piecesHere: number }
+export interface HomeAgent { id: string; name: string; visitsPlanned: number; visitsCompleted: number; currentVisit?: string; ordersValuePaise: number; bagValuePaise: number; bagCount?: number; lastCheckInAt?: string }
+export interface AdminHome {
+  user: Ref; date: string;
+  metrics: {
+    ordersToday: { count: number; valuePaise: number }; visits: { completed: number; planned: number; inProgress: number };
+    samplesOutside: { count: number; valuePaise: number }; overdueMemos: { count: number; valuePaise: number }; pendingApprovals: { count: number; valuePaise: number };
+  };
+  map: { shops: MapShop[]; checkIns: MapCheckIn[] };
+  attention: AttentionItem[]; activity: ActivityItem[]; agents: HomeAgent[];
+}
+export interface ShopRecord {
+  shop: ShopRow & { ownerName?: string; phone?: string; address: string; notes?: string; creditLimitPaise: number };
+  visits: AdminVisitRow[]; orders: Order[]; memos: Memo[]; pieces: PieceRow[]; activity: ActivityItem[];
+}
+export interface VisitNote { id: string; body: string; author: Ref; createdAt: string }
+export interface AdminVisitRecord {
+  visit: VisitSummary & { agent?: Ref; startedAt?: string; completedAt?: string; summary?: string; checkInLat?: number; checkInLng?: number; checkInAccuracyM?: number };
+  shop: Shop; agent?: Ref; proofs: Proof[]; notes: VisitNote[]; orders: Order[]; memosCreated: Memo[];
+  shopContext: { previousOrders: Order[]; activeMemos: Memo[]; lastVisit?: { id: string; completedAt: string; agentName: string } };
+  row?: AdminVisitRow; audit?: AuditRow[]; activity?: ActivityItem[]; custody?: CustodyEventRow[]; returns?: VisitReturn[];
+}
+export interface AgentRecord {
+  agent: Ref & { email: string; phone?: string; active: boolean; homeArea?: string; lastCheckInAt?: string };
+  today: AdminVisitRow[]; bag: PieceRow[]; memos: Memo[]; orders: Order[]; activity: ActivityItem[];
+}
+/** v2 `GET /admin/agents` row — one call, no client-side merging. */
+export interface AgentListRow {
+  id: string; name: string; email: string; phone?: string; active: boolean; homeArea?: string;
+  today: { planned: number; completed: number; inProgress: number };
+  currentVisit?: { id: string; shopName: string; since: string }; nextVisit?: { id: string; shopName: string; plannedTime?: string };
+  bag: { count: number; valuePaise: number }; openMemos: { count: number; valuePaise: number; overdueCount: number };
+  ordersToday: { count: number; valuePaise: number }; lastCheckInAt?: string;
+}
+// v2 sales records (orders / memos / pieces)
+export interface OrderRecord { order: Order; visit?: AdminVisitRow; history: AuditRow[]; activity: ActivityItem[] }
+export type MemoRow = Memo & { pieceCount: number; issuedAt: string; outstandingCount?: number };
+export interface MemoRecord { memo: MemoRow; custody: CustodyEventRow[]; visit?: AdminVisitRow; history: AuditRow[]; activity: ActivityItem[] }
+export interface PieceRecord { piece: PieceRow; design: Design; events: CustodyEventRow[]; activity: ActivityItem[] }
+/** Memo returns made during a visit (`GET /visits/:id` and `/admin/visits/:id`). */
+export interface VisitReturn { memoId: string; memoNumber: string; eventId?: string; at: string; pieces: { id: string; tagCode: string; name: string }[] }

@@ -1,0 +1,22 @@
+{
+  "feature": "NNN-slug",
+  "tier": "T2",
+  "base": null,
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "<imperative title>",
+      "tier": "T2",
+      "files": ["apps/api/src/modules/<x>.ts", "apps/api/test/api.test.ts"],
+      "read_first": ["AGENTS.md", "apps/api/AGENTS.md", "docs/brain/clusters/<cluster>.md", ".claude/rules/<rule>.md"],
+      "action": "<2-3 sentences: what to change and why>",
+      "verify": "pnpm --filter @jewelroute/api test",
+      "acceptance": ["<test 10 asserts …>", "<T3: test 10 fails on base with …>"],
+      "invariant_ids": [],
+      "attempts": 0,
+      "passes": false,
+      "verified_by": null,
+      "notes": ""
+    }
+  ]
+}

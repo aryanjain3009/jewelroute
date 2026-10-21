@@ -1,0 +1,179 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+/* JewelRoute design tokens — warm-white paper, near-black ink, one restrained gold.
+   Gold is reserved for value (money, purity, custody) — never for decoration.
+   Strong colour is reserved for things that need action (overdue, pending, outside fence). */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-ui);
+  --font-heading: var(--font-ui);
+  --font-display: var(--font-serif);
+  --font-mono: var(--font-ui);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* JewelRoute semantic palette */
+  --color-paper: var(--jr-paper);
+  --color-surface: var(--jr-surface);
+  --color-sunken: var(--jr-sunken);
+  --color-ink: var(--jr-ink);
+  --color-ink-2: var(--jr-ink-2);
+  --color-ink-3: var(--jr-ink-3);
+  --color-line: var(--jr-line);
+  --color-line-strong: var(--jr-line-strong);
+  --color-gold: var(--jr-gold);
+  --color-gold-ink: var(--jr-gold-ink);
+  --color-gold-soft: var(--jr-gold-soft);
+  --color-verified: var(--jr-verified);
+  --color-verified-soft: var(--jr-verified-soft);
+  --color-warn: var(--jr-warn);
+  --color-warn-soft: var(--jr-warn-soft);
+  --color-danger: var(--jr-danger);
+  --color-danger-soft: var(--jr-danger-soft);
+  --color-info: var(--jr-info);
+  --color-info-soft: var(--jr-info-soft);
+  --color-sidebar-bg: var(--jr-sidebar);
+  --color-hover: var(--jr-hover);
+  --color-active: var(--jr-active);
+  --color-selected: var(--jr-selected);
+  --color-blue: var(--jr-blue);
+  --color-warm: var(--jr-warm);
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-2xl: 18px;
+  --radius-3xl: 24px;
+  --radius-4xl: 32px;
+
+  --shadow-hairline: 0 0 0 1px var(--jr-line);
+  --shadow-float: 0 1px 2px rgb(25 23 20 / 0.04), 0 8px 24px -8px rgb(25 23 20 / 0.12);
+}
+
+:root {
+  --jr-paper: #ffffff;
+  --jr-surface: #ffffff;
+  --jr-sunken: #f7f7f8;
+  --jr-ink: #1c1d1f;
+  --jr-ink-2: #6e6f73;
+  --jr-ink-3: #9b9ca0;
+  --jr-line: #ececec;
+  --jr-line-strong: #e3e3e3;
+  --jr-gold: #b08a35;        /* fills, rules, dots */
+  --jr-gold-ink: #85661f;    /* gold text on paper (AA) */
+  --jr-gold-soft: #f4eddc;
+  --jr-verified: #2c7a54;
+  --jr-verified-soft: #e5f2ea;
+  --jr-warn: #a8661a;
+  --jr-warn-soft: #faeedd;
+  --jr-danger: #b23a2b;
+  --jr-danger-soft: #f9e6e2;
+  --jr-info: #2f5f8f;
+  --jr-info-soft: #e6eef6;
+  /* Attio-grade chrome */
+  --jr-sidebar: #fbfbfa;
+  --jr-hover: #f7f7f8;
+  --jr-active: #efefef;
+  --jr-selected: #eef3fe;
+  --jr-blue: #2f6bf2;
+  --jr-warm: #fcfbf8; /* landing only */
+
+  --background: var(--jr-paper);
+  --foreground: var(--jr-ink);
+  --card: var(--jr-surface);
+  --card-foreground: var(--jr-ink);
+  --popover: var(--jr-surface);
+  --popover-foreground: var(--jr-ink);
+  --primary: var(--jr-ink);
+  --primary-foreground: #ffffff;
+  --secondary: var(--jr-sunken);
+  --secondary-foreground: var(--jr-ink);
+  --muted: var(--jr-sunken);
+  --muted-foreground: var(--jr-ink-2);
+  --accent: var(--jr-sunken);
+  --accent-foreground: var(--jr-ink);
+  --destructive: var(--jr-danger);
+  --border: var(--jr-line);
+  --input: var(--jr-line-strong);
+  --ring: var(--jr-blue);
+  --chart-1: #191714;
+  --chart-2: #b08a35;
+  --chart-3: #2c7a54;
+  --chart-4: #2f5f8f;
+  --chart-5: #8f897d;
+  --radius: 10px;
+  --sidebar: var(--jr-paper);
+  --sidebar-foreground: var(--jr-ink);
+  --sidebar-primary: var(--jr-ink);
+  --sidebar-primary-foreground: #fcfbf8;
+  --sidebar-accent: var(--jr-sunken);
+  --sidebar-accent-foreground: var(--jr-ink);
+  --sidebar-border: var(--jr-line);
+  --sidebar-ring: var(--jr-gold);
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  html { @apply font-sans; -webkit-text-size-adjust: 100%; }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss03"; font-size: 14px; letter-spacing: -0.003em;
+    text-rendering: optimizeLegibility;
+  }
+  /* Numbers line up everywhere: money, grams, distances. */
+  /* Schibsted Grotesk's tnum set swaps in typewriter-style alternates, so keep proportional lining figures and right-align money columns instead. */
+  .num, td, [data-num] { font-variant-numeric: lining-nums proportional-nums; font-feature-settings: "tnum" 0; }
+  :focus-visible { outline: 2px solid var(--jr-blue); outline-offset: 1px; }
+  ::selection { background: var(--jr-gold-soft); }
+}
+
+@layer utilities {
+  .font-display { font-family: var(--font-serif), ui-serif, Georgia, serif; font-optical-sizing: auto; }
+  .hairline { box-shadow: var(--shadow-hairline); }
+  .shadow-float { box-shadow: var(--shadow-float); }
+  .safe-bottom { padding-bottom: max(env(safe-area-inset-bottom), 12px); }
+  .scrollbar-none { scrollbar-width: none; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* MapLibre chrome tuned to the palette */
+.maplibregl-ctrl-group { border-radius: 10px !important; box-shadow: var(--shadow-float) !important; border: 1px solid var(--jr-line); }
+.maplibregl-ctrl-attrib { font-size: 10px; background: rgb(252 251 248 / 0.8) !important; }
+.maplibregl-popup-content { border-radius: 12px; box-shadow: var(--shadow-float); padding: 10px 12px; font-family: var(--font-ui); }

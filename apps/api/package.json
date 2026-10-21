@@ -1,0 +1,55 @@
+{
+  "name": "@jewelroute/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "pnpm --filter @jewelroute/shared build && prisma generate && node scripts/migrate-on-vercel.cjs && tsc -p tsconfig.build.json",
+    "vercel-build": "pnpm run build",
+    "dev": "tsc -p tsconfig.build.json && concurrently -k -n tsc,api \"tsc -p tsconfig.build.json --watch --preserveWatchOutput\" \"node --watch dist/main.js\"",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:seed": "tsx prisma/seed.ts",
+    "test": "tsc -p tsconfig.build.json && node --import tsx --test --test-concurrency=1 test/*.test.ts",
+    "e2e": "tsx scripts/e2e-smoke.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@jewelroute/shared": "workspace:*",
+    "@nestjs/common": "11.1.6",
+    "@nestjs/core": "11.1.6",
+    "@nestjs/platform-express": "11.1.6",
+    "@nestjs/swagger": "11.2.0",
+    "@nestjs/throttler": "6.4.0",
+    "@prisma/client": "6.19.3",
+    "@vercel/blob": "^0.27.0",
+    "@vercel/functions": "^2.2.0",
+    "bcryptjs": "^3.0.2",
+    "cookie-parser": "^1.4.7",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "nestjs-pino": "^4.4.0",
+    "pino": "^9.7.0",
+    "pino-http": "^10.5.0",
+    "prisma": "6.19.3",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "ulid": "^3.0.1",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.9",
+    "@types/express": "^5.0.3",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^22.10.0",
+    "concurrently": "^9.2.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm run build",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api"
+    }
+  ],
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 60,
+      "includeFiles": "{dist/**,generated/prisma/**}"
+    }
+  },
+  "crons": [
+    {
+      "path": "/v1/internal/dispatch",
+      "schedule": "0 3 * * *"
+    }
+  ],
+  "outputDirectory": "public"
+}
