@@ -245,7 +245,8 @@ model Visit {
   orders Order[]
   memos  Memo[]
 
-  @@unique([tenantId, agentId, shopId, plannedDate])
+  // Migration 20261022000200 owns the partial unique index that permits audit-only
+  // CANCELLED rows but prevents two active assignments for a tenant + shop + day.
   @@index([tenantId, plannedDate])
   @@index([tenantId, agentId, plannedDate])
   @@index([tenantId, shopId, plannedDate])
