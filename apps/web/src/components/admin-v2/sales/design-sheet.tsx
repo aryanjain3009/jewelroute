@@ -41,7 +41,8 @@ const inputCls = "h-8 border-line-strong text-[14px]";
 export function DesignSheet({ design, onClose }: { design: AdminDesign | null; onClose: () => void }) {
   const rates = useGoldRates();
   const [f, setF] = React.useState<F>(toF(design));
-  React.useEffect(() => setF(toF(design)), [design?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [attempted, setAttempted] = React.useState(false);
+  React.useEffect(() => { setF(toF(design)); setAttempted(false); }, [design?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [sel, setSel] = React.useState<Set<string>>(new Set());
   const [count, setCount] = React.useState("2");
   const [dialog, setDialog] = React.useState<"issue" | "return" | null>(null);
@@ -53,8 +54,18 @@ export function DesignSheet({ design, onClose }: { design: AdminDesign | null; o
   const stonePaise = parseRupeesToPaise(f.stone || "0") ?? NaN;
   const rate = rates.data?.current.find((r) => r.purity === f.purity);
   const preview = rate && netMg > 0 && Number.isFinite(makingValue) && Number.isFinite(stonePaise) ? priceDesign({ netWeightMg: netMg, ratePaisePerGram: rate.ratePaisePerGram, makingChargeType: f.makingType, makingChargeValue: makingValue, stoneValuePaise: stonePaise, otherComponents: design?.otherComponents }) : null;
-  // The API requires a collection (1–100 chars); say so here instead of a generic validation error.
-  const valid = !!(f.sku.trim() && f.name.trim() && f.category.trim() && f.collection.trim() && netMg > 0 && grossMg >= netMg && Number.isFinite(makingValue) && Number.isFinite(stonePaise));
+  const imageValid = !f.image.trim() || (() => { try { return Boolean(new URL(f.image.trim())); } catch { return false; } })();
+  const missing = [
+    !f.name.trim() && "Name",
+    !f.sku.trim() && "SKU",
+    !f.category.trim() && "Category",
+    !f.collection.trim() && "Collection",
+    !(grossMg > 0) && "Gross weight",
+    !(netMg > 0) && "Net gold weight",
+    !Number.isFinite(makingValue) && "Making charge",
+    !Number.isFinite(stonePaise) && "Stone value",
+  ].filter(Boolean) as string[];
+  const valid = missing.length === 0 && grossMg >= netMg && imageValid;
   const body = {
     sku: f.sku.trim(), name: f.name.trim(), category: f.category.trim(), collection: f.collection.trim(), purity: f.purity, grossWeightMg: grossMg, netWeightMg: netMg,
     makingChargeType: f.makingType, makingChargeValue: makingValue, stoneValuePaise: stonePaise,
@@ -145,29 +156,30 @@ export function DesignSheet({ design, onClose }: { design: AdminDesign | null; o
 
           <section className="px-5 py-4">
             <h3 className="mb-3 text-[14px] font-medium text-ink">{design ? "Design details" : "Details"}</h3>
-            <form className="grid grid-cols-2 gap-3.5" onSubmit={(e) => { e.preventDefault(); if (valid) save.mutate(undefined); }}>
-              <Field label="Name" className="col-span-2"><Input value={f.name} onChange={set("name")} placeholder="Rajwada bangle" className={inputCls} /></Field>
-              <Field label="SKU"><Input value={f.sku} onChange={set("sku")} placeholder="AJ-BNG-2201" className={inputCls} /></Field>
+            <form className="grid grid-cols-2 gap-3.5" onSubmit={(e) => { e.preventDefault(); setAttempted(true); if (valid) save.mutate(undefined); }}>
+              <Field label="Name *" className="col-span-2"><Input value={f.name} onChange={set("name")} placeholder="Enter design name" aria-invalid={attempted && !f.name.trim()} className={inputCls} /></Field>
+              <Field label="SKU *"><Input value={f.sku} onChange={set("sku")} placeholder="Enter a unique SKU" aria-invalid={attempted && !f.sku.trim()} className={inputCls} /></Field>
               <Field label="Purity">
                 <Select value={f.purity} onValueChange={(v) => setF({ ...f, purity: v as Purity })}><SelectTrigger className="h-8 w-full border-line-strong"><SelectValue /></SelectTrigger><SelectContent>{(["K24", "K22", "K18", "K14"] as Purity[]).map((p) => <SelectItem key={p} value={p}>{PURITY_LABEL[p]}</SelectItem>)}</SelectContent></Select>
               </Field>
-              <Field label="Category"><Input value={f.category} onChange={set("category")} className={inputCls} /></Field>
-              <Field label="Collection"><Input value={f.collection} onChange={set("collection")} placeholder="Rajwada" required aria-invalid={!f.collection.trim() && !!f.name.trim()} className={inputCls} /></Field>
-              <Field label="Gross weight (g)"><Input inputMode="decimal" value={f.gross} onChange={set("gross")} className={inputCls} /></Field>
-              <Field label="Net gold weight (g)"><Input inputMode="decimal" value={f.net} onChange={set("net")} className={inputCls} /></Field>
+              <Field label="Category *"><Input value={f.category} onChange={set("category")} aria-invalid={attempted && !f.category.trim()} className={inputCls} /></Field>
+              <Field label="Collection *"><Input value={f.collection} onChange={set("collection")} placeholder="Enter collection name" aria-invalid={attempted && !f.collection.trim()} className={inputCls} /></Field>
+              <Field label="Gross weight (g) *"><Input inputMode="decimal" value={f.gross} onChange={set("gross")} aria-invalid={attempted && !(grossMg > 0)} className={inputCls} /></Field>
+              <Field label="Net gold weight (g) *"><Input inputMode="decimal" value={f.net} onChange={set("net")} aria-invalid={attempted && !(netMg > 0)} className={inputCls} /></Field>
               <Field label="Making charge">
                 <Select value={f.makingType} onValueChange={(v) => setF({ ...f, makingType: v as F["makingType"] })}><SelectTrigger className="h-8 w-full border-line-strong"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="PER_GRAM">₹ per gram</SelectItem><SelectItem value="PERCENT">% of gold value</SelectItem></SelectContent></Select>
               </Field>
               <Field label={f.makingType === "PER_GRAM" ? "₹ per gram" : "Percent"}><Input inputMode="decimal" value={f.making} onChange={set("making")} className={inputCls} /></Field>
               <Field label="Stone value (₹)"><Input inputMode="decimal" value={f.stone} onChange={set("stone")} className={inputCls} /></Field>
-              <Field label="Image URL"><Input value={f.image} onChange={set("image")} placeholder="https://…" className={inputCls} /></Field>
+              <Field label="Image URL"><Input value={f.image} onChange={set("image")} placeholder="https://…" aria-invalid={attempted && !imageValid} className={inputCls} /></Field>
               <Field label="Description" className="col-span-2"><Textarea value={f.description} onChange={set("description")} className="min-h-16 border-line-strong text-[14px]" /></Field>
               {grossMg > 0 && netMg > grossMg && <p className="col-span-2 text-[13px] text-danger">Net gold weight can&apos;t be more than the gross weight.</p>}
-              {f.name.trim() && !f.collection.trim() && <p className="col-span-2 text-[13px] text-ink-2">Add a collection (e.g. Rajwada) — every design belongs to one.</p>}
               {[f.gross, f.net].some((x) => x.trim() && gramsToMg(x) == null) && <p className="col-span-2 text-[13px] text-danger">Weights are grams with up to 3 decimals, e.g. 19.25.</p>}
+              {attempted && missing.length > 0 && <p className="col-span-2 text-[13px] text-danger">Complete the required fields: {missing.join(", ")}.</p>}
+              {attempted && !imageValid && <p className="col-span-2 text-[13px] text-danger">Enter a complete image URL, including https://.</p>}
               <div className="col-span-2 flex justify-end gap-2 pt-1">
                 <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-                <Btn variant="primary" type="submit" disabled={!valid || save.isPending}>{save.isPending ? "Saving…" : design ? "Save design" : "Add design"}</Btn>
+                <Btn variant="primary" type="submit" disabled={save.isPending}>{save.isPending ? "Saving…" : design ? "Save design" : "Add design"}</Btn>
               </div>
             </form>
           </section>
