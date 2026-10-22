@@ -223,8 +223,9 @@ describe('concurrency ×20', () => {
   test('C1. two tabs of one agent and a second agent memo the same piece at once', async (t) => {
     const [A, B] = AG;
     const s = await shop();
+    const otherShop = await shop();
     const va = await openVisit(A, s);
-    const vb = await openVisit(B, s);
+    const vb = await openVisit(B, otherShop);
     const [P] = await pieces(1, A);
     await pieces(1, B);
     const K1 = key();
@@ -359,15 +360,15 @@ describe('concurrency ×20', () => {
   });
 
   test('C5. gold-rate changes during order booking: each order freezes exactly one rate per purity', async (t) => {
-    const [G, H] = [AG[6], AG[0]];
+    const G = AG[6];
     const s = await shop();
-    const [vg, vh] = [await openVisit(G, s), await openVisit(H, s)];
+    const vg = await openVisit(G, s);
     const items = [{ designId: K22.id, quantity: 2 }, { designId: K18.id, quantity: 1 }];
     const before = new Set((await db.goldRate.findMany({ where: { tenantId: TID } })).map((r) => r.id));
     const reqs = Array.from({ length: N }, (_, i) =>
       i % 5 === 2 || i % 5 === 4
         ? later(jitter(), () => api(OWNER, 'POST', '/v1/admin/gold-rates', { purity: i % 2 ? 'K18' : 'K22', ratePaisePerGram: (i % 2 ? 8_600_00 : 10_500_00) + i * 1_01 }))
-        : later(jitter(), () => order(i % 2 ? G : H, i % 2 ? vg : vh, items)),
+        : later(jitter(), () => order(G, vg, items)),
     );
     const rs = await Promise.all(reqs);
     report(t, 'C5 rate vs booking', rs);
@@ -389,9 +390,9 @@ describe('concurrency ×20', () => {
   });
 
   test('C6. credit-limit PATCHes during booking: every decision used one limit in force under the shop lock', async (t) => {
-    const [A, B] = [AG[1], AG[7]];
+    const A = AG[1];
     const s = await shop(0);
-    const [va, vb] = [await openVisit(A, s), await openVisit(B, s)];
+    const va = await openVisit(A, s);
     const T = orderTotals([priceDesign({ netWeightMg: K22.netWeightMg, ratePaisePerGram: Number((await db.goldRate.findFirstOrThrow({ where: { tenantId: TID, purity: 'K22' }, orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }] })).ratePaisePerGram), makingChargeType: 'PER_GRAM', makingChargeValue: 650_00, stoneValuePaise: 1_234_50 }).unitPricePaise]).totalPaise;
     const limits = Array.from({ length: 8 }, (_, i) => T * (2 + i) + 7 * i + 1); // distinct
     assert.equal((await api(OWNER, 'PATCH', `/v1/admin/shops/${s.id}`, { creditLimitPaise: T * 3 })).status, 200);
@@ -401,7 +402,7 @@ describe('concurrency ×20', () => {
         const creditLimitPaise = limits[li++];
         return later(jitter(), () => api(OWNER, 'PATCH', `/v1/admin/shops/${s.id}`, { creditLimitPaise }));
       }
-      return later(jitter(), () => order(i % 2 ? A : B, i % 2 ? va : vb));
+      return later(jitter(), () => order(A, va));
     });
     const rs = await Promise.all(reqs);
     report(t, 'C6 limit vs booking', rs);

@@ -238,7 +238,13 @@ export class AdminService {
       });
     } catch (e) {
       if (isUniqueViolation(e)) {
-        const existing = await this.prisma.db.visit.findFirst({ where: { tenantId: tid, agentId: agent.id, shopId: shop.id, plannedDate: dateOf(body.date) }, select: { id: true } });
+        const existing = await this.prisma.db.visit.findFirst({
+          where: { tenantId: tid, shopId: shop.id, plannedDate: dateOf(body.date), status: { not: 'CANCELLED' } },
+          select: { id: true, agentId: true, agent: { select: { name: true } } },
+        });
+        if (existing && existing.agentId !== agent.id) {
+          throw conflict('SHOP_ALREADY_ASSIGNED', `${shop.name} is already assigned to ${existing.agent.name} on ${body.date}`, { visitId: existing.id });
+        }
         throw conflict('ALREADY_ASSIGNED', `${shop.name} is already assigned to ${agent.name} on ${body.date}`, { visitId: existing?.id });
       }
       throw e;

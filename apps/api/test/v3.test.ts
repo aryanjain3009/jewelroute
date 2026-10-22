@@ -146,11 +146,10 @@ describe('v3 credit rule', () => {
     assert.equal((await api(a.token, 'GET', `/v1/visits/${visitId}/credit?amountPaise=-1`)).status, 400);
   });
 
-  test('V2. concurrent orders from two agents at one shop never both slip under the limit (shop row FOR UPDATE)', async () => {
+  test('V2. concurrent orders at one shop never both slip under the limit (shop row FOR UPDATE)', async () => {
     const d = await design();
     const s = await shop(0, 0);
     const A = await openVisit(s);
-    const B = await openVisit(s);
     const T = orderTotals([await unitPrice(A.agent.token, A.visitId, d.id)]).totalPaise;
     // room for exactly one order (1.5 × T)
     assert.equal((await api(ADMIN, 'PATCH', `/v1/admin/shops/${s.id}`, { creditLimitPaise: T + Math.floor(T / 2) })).status, 200);
@@ -162,9 +161,9 @@ describe('v3 credit rule', () => {
       }
       const rs = await Promise.all([
         order(A.agent.token, A.visitId, d.id),
-        order(B.agent.token, B.visitId, d.id),
         order(A.agent.token, A.visitId, d.id),
-        order(B.agent.token, B.visitId, d.id),
+        order(A.agent.token, A.visitId, d.id),
+        order(A.agent.token, A.visitId, d.id),
       ]);
       assert.ok(rs.every((r) => r.status === 201), JSON.stringify(rs.map((r) => [r.status, r.error?.code])));
       const statuses = rs.map((r) => r.data.order.status).sort();
@@ -692,7 +691,9 @@ describe('v3 settings + migration', () => {
            ('o4','t1','O4','sa','u1','APPROVED','c4',300,0,300,'[]', true, '{ORDER_THRESHOLD}', NULL, NULL, NULL);`,
       );
       sc.psql(`-f "${sqlFile}"`);
-      // Rollbacks run newest first: the hot-path indexes, the session-timezone pin, then the final-audit migrations (0900, 1000), then v3.
+      // Rollbacks run newest first: assignment integrity, hot-path indexes, the session-timezone pin,
+      // then the final-audit migrations (0900, 1000), then v3.
+      sc.psql(`-f "${join(apiRoot, 'prisma/rollback/20261022000200_visit_one_shop_per_day_down.sql')}"`);
       sc.psql(`-f "${join(apiRoot, 'prisma/rollback/20261022000100_hot_path_indexes_down.sql')}"`);
       sc.psql(`-f "${join(apiRoot, 'prisma/rollback/20261022000000_session_timezone_down.sql')}"`);
       sc.psql(`-f "${join(apiRoot, 'prisma/rollback/20261021000900_audit_down.sql')}"`);

@@ -29,6 +29,25 @@ after(stop);
 const key = () => ({ 'Idempotency-Key': randomUUID() });
 
 describe('field flow invariants', () => {
+  test('0. one shop can be assigned to only one agent per day, including concurrent assignments', async () => {
+    const tenant = await db.tenant.findUniqueOrThrow({ where: { slug: 'aurum' } });
+    const agents = await db.user.findMany({ where: { tenantId: tenant.id, role: 'FIELD_AGENT', active: true }, orderBy: { id: 'asc' }, take: 2 });
+    const shop = await db.shop.findFirstOrThrow({ where: { tenantId: tenant.id }, orderBy: { id: 'asc' } });
+    const date = addDays(TODAY, 50);
+
+    const rs = await Promise.all(agents.map((agent) => api(ADMIN, 'POST', '/v1/admin/assignments', { agentId: agent.id, shopId: shop.id, date })));
+    assert.deepEqual(rs.map((r) => r.status).sort(), [201, 409], JSON.stringify(rs.map((r) => [r.status, r.error?.code])));
+    assert.equal(rs.find((r) => r.status === 409)!.error.code, 'SHOP_ALREADY_ASSIGNED');
+    assert.equal(await db.visit.count({ where: { tenantId: tenant.id, shopId: shop.id, plannedDate: new Date(`${date}T00:00:00.000Z`), status: { not: 'CANCELLED' } } }), 1);
+
+    const winner = rs.find((r) => r.status === 201)!;
+    const winningAgent = agents[rs.indexOf(winner)];
+    assert.equal((await api(ADMIN, 'DELETE', `/v1/admin/assignments/${winner.data.visit.id}`)).status, 200);
+    const reassigned = await api(ADMIN, 'POST', '/v1/admin/assignments', { agentId: winningAgent.id, shopId: shop.id, date });
+    assert.equal(reassigned.status, 201, JSON.stringify(reassigned.json));
+    assert.equal(await db.visit.count({ where: { tenantId: tenant.id, shopId: shop.id, plannedDate: new Date(`${date}T00:00:00.000Z`), status: { not: 'CANCELLED' } } }), 1);
+  });
+
   test('1. concurrent double check-in → exactly one succeeds', async () => {
     const gps = { lat: north(sharma.lat, 20), lng: sharma.lng, accuracyM: 10 };
     const rs = await Promise.all(Array.from({ length: 5 }, () => api(RAHUL, 'POST', `/v1/visits/${sharmaVisitId}/check-in`, gps, key())));
@@ -74,7 +93,11 @@ describe('field flow invariants', () => {
   test('1b. one open visit per agent: concurrent check-ins at two different shops → one wins (partial unique index)', async () => {
     const tenant = await db.tenant.findUniqueOrThrow({ where: { slug: 'aurum' } });
     const agent = await db.user.create({ data: { tenantId: tenant.id, name: 'Race Agent', email: `race-${Date.now()}@aurum.test`, role: 'FIELD_AGENT', passwordHash: await bcrypt.hash('Race@2026x', 4) } });
-    const shops = await db.shop.findMany({ where: { tenantId: tenant.id, name: { in: ['Royal Gems', 'Kapoor & Sons'] } } });
+    const shops = await Promise.all([1, 2].map(async (i) => {
+      const r = await api(ADMIN, 'POST', '/v1/admin/shops', { name: `Race Shop ${Date.now()}-${i}`, address: `${i} Race lane`, area: 'Race', lat: 28.6 + i / 1_000, lng: 77.2 });
+      assert.equal(r.status, 201, JSON.stringify(r.json));
+      return r.data.shop;
+    }));
     const visits = await Promise.all(shops.map((s, i) => api(ADMIN, 'POST', '/v1/admin/assignments', { agentId: agent.id, shopId: s.id, date: TODAY, sequence: i + 1 })));
     const T = await login(agent.email, 'Race@2026x');
     const rs = await Promise.all(visits.map((v, i) => api(T, 'POST', `/v1/visits/${v.data.visit.id}/check-in`, { lat: shops[i].lat, lng: shops[i].lng, accuracyM: 5 }, key())));

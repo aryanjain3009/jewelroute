@@ -204,9 +204,10 @@ describe('final audit — edge cases on persisted state', () => {
 
     // concurrent storm: 3 requests per visit, all with their own key
     const b = await agent();
-    const [w1, w2] = [await assign(b, s1), await assign(b, s2)];
+    const [s3, s4] = [await shop(), await shop()];
+    const [w1, w2] = [await assign(b, s3), await assign(b, s4)];
     const calls = [w1, w1, w1, w2, w2, w2].map((vid) => {
-      const s = vid === w1 ? s1 : s2;
+      const s = vid === w1 ? s3 : s4;
       return api(b.token, 'POST', `/v1/visits/${vid}/check-in`, { lat: s.lat, lng: s.lng, accuracyM: 5 }, key());
     });
     const rs = await Promise.all(calls);

@@ -384,6 +384,8 @@ describe('STEP 5 failure scenarios', () => {
     assert.equal((await api(RAHUL, 'POST', `/v1/visits/${sharmaVisit.id}/complete`, { summary: 'done' })).status, 200);
     const memo = await db.memo.findFirstOrThrow({ where: { agentId: rahulId, shop: { name: 'Mehta Jewellers' } }, include: { items: true } });
     const mehta = await db.shop.findUniqueOrThrow({ where: { id: memo.shopId } });
+    const existing = await db.visit.findFirstOrThrow({ where: { tenantId: AURUM, shopId: mehta.id, plannedDate: new Date(`${TODAY}T00:00:00.000Z`), status: 'PLANNED' } });
+    assert.equal((await api(ADMIN, 'DELETE', `/v1/admin/assignments/${existing.id}`)).status, 200);
     const v = (await api(ADMIN, 'POST', '/v1/admin/assignments', { agentId: rahulId, shopId: mehta.id, date: TODAY })).data.visit;
     assert.equal((await api(RAHUL, 'POST', `/v1/visits/${v.id}/check-in`, { lat: mehta.lat, lng: mehta.lng, accuracyM: 5 }, key())).status, 200);
     const [a, b] = memo.items.map((i) => i.pieceId);
