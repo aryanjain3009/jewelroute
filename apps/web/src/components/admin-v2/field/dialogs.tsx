@@ -68,10 +68,12 @@ export function AssignVisitDialog({ open, onOpenChange, shopId: initialShop, age
   const [agentId, setAgentId] = React.useState(initialAgent ?? "");
   const [date, setDate] = React.useState(today);
   React.useEffect(() => { if (open) { setShopId(initialShop ?? ""); setAgentId(initialAgent ?? ""); setDate(today); } }, [open, initialShop, initialAgent, today]);
-  const plan = useVisitRows({ date, agentId: agentId || undefined }, { enabled: open && !!agentId, refetch: 0 });
+  // Load the whole day: a shop may already belong to a different agent's route.
+  const plan = useVisitRows({ date }, { enabled: open, refetch: 0 });
   const shop = shops.data?.find((s) => s.id === shopId);
   const agent = agents.data?.find((a) => a.id === agentId);
-  const already = !!plan.data?.some((v) => v.shop.id === shopId);
+  const conflictVisit = plan.data?.find((v) => v.shop.id === shopId && v.status !== "CANCELLED");
+  const already = !!conflictVisit;
   const m = useMutation({
     mutationFn: () => api("/admin/assignments", { body: { agentId, shopId, date } }),
     onSuccess: () => {
@@ -81,7 +83,7 @@ export function AssignVisitDialog({ open, onOpenChange, shopId: initialShop, age
     },
     onError: (e) => toast.error(errMsg(e)),
   });
-  const route = [...(plan.data ?? [])].sort((a, b) => a.sequence - b.sequence);
+  const route = (plan.data ?? []).filter((v) => v.agent.id === agentId && v.status !== "CANCELLED").sort((a, b) => a.sequence - b.sequence);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="gap-0 rounded-xl p-0 sm:max-w-[500px]">
@@ -125,7 +127,7 @@ export function AssignVisitDialog({ open, onOpenChange, shopId: initialShop, age
               </ol>
             </div>
           )}
-          {already && <p className="text-[13px] text-warn">{shop?.name} is already on this route for that day.</p>}
+          {already && <p className="text-[13px] text-warn">{shop?.name} is already assigned to {conflictVisit?.agent.name ?? "another agent"} for that day.</p>}
         </div>
         <DialogFooter className="mx-0 mb-0 border-t border-line bg-white px-5 py-3">
           <Btn variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Btn>
