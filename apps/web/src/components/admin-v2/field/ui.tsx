@@ -6,7 +6,7 @@ import Link from "next/link";
 import { AlertTriangleIcon } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { Btn } from "@/components/app/chrome";
+import { Btn, RecordNotFound } from "@/components/app/chrome";
 
 /* ---------------- status vocabulary: one module (components/app/status) ---------------- */
 export { VISIT_STATUS, PROOF, SHOP_STATUS, MEMO_STATUS, ORDER_STATUS, PIECE_STATUS, StatusDot, StatusChip } from "@/components/app/status";
@@ -93,6 +93,7 @@ export function age(iso: string, now: Date) {
 
 /* ---------------- states ---------------- */
 export function QueryError({ error, retry, className }: { error: unknown; retry?: () => void; className?: string }) {
+  if (error instanceof ApiError && error.status === 404) return <RecordNotFound message={error.message} />;
   const msg = error instanceof ApiError ? error.message : error instanceof Error ? error.message : "Couldn't load this.";
   return (
     <div className={cn("flex flex-col items-center gap-2 px-6 py-14 text-center", className)}>

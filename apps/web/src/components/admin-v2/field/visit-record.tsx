@@ -9,11 +9,11 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   ActivityIcon, CalendarIcon, CameraIcon, CheckIcon, ClipboardListIcon, ClockIcon, CopyIcon, CrosshairIcon, ExternalLinkIcon,
-  FileClockIcon, FlaskConicalIcon, GemIcon, LayoutGridIcon, MapPinIcon, MapPinnedIcon, NavigationIcon, ReceiptTextIcon, RulerIcon, ScrollTextIcon,
-  RotateCcwIcon, ShieldAlertIcon, ShieldCheckIcon, StoreIcon, Trash2Icon, UserIcon,
+  FileClockIcon, FlaskConicalIcon, GemIcon, LayoutGridIcon, MapPinIcon, MapPinnedIcon, NavigationIcon, ReceiptTextIcon, ScrollTextIcon,
+  RotateCcwIcon, ShieldAlertIcon, StoreIcon, Trash2Icon, UserIcon,
 } from "lucide-react";
 import { formatINRCompact, istDate } from "@jewelroute/shared";
-import { cn } from "@/lib/utils";
+import { cn, copyText } from "@/lib/utils";
 import type { CustodyEventRow, Memo, Order, Proof, ProofState, VisitReturn } from "@/lib/types";
 import { Avatar, Btn, Chip, Empty } from "@/components/app/chrome";
 import { Highlight, Highlights, ListCard, ListRow, MainSection, Property, PropertySection, RecordHeader, RecordLayout, RecordTabs, useTab } from "@/components/app/record";
@@ -39,10 +39,7 @@ export function VisitRecord({ id }: { id: string }) {
   const d = q.data;
   const r = d.row;
   const v = d.visit;
-  const shop = d.shop;
-  const sim = v.verification === "SIMULATED";
   const agent = d.agent ?? r.agent;
-  const proof = d.proofs[0];
   const audit = d.audit ?? [];
   const activity = d.activity ?? [];
 
@@ -65,20 +62,9 @@ export function VisitRecord({ id }: { id: string }) {
               </div>
             </MainSection>
           ) : (
-          <MainSection title="Highlights">
+          // Verification, distance and proof are told once each: the panel, the Location strip and Visit proof.
+          <MainSection title="Outcome">
             <Highlights>
-              <Highlight label="Verification" icon={r.proofState === "SIMULATED" ? FlaskConicalIcon : ShieldCheckIcon}
-                sub={v.verification === "SIMULATED" ? `Not verified · entered ${istTime(v.checkInAt)}` : v.verification ? `Server-checked at ${istTime(v.checkInAt)}` : "Not checked in yet"}>
-                {v.verification ? <StatusDot map={PROOF} value={v.verification as ProofState} className="text-[15px] font-medium" /> : <span className="text-ink-3">No value</span>}
-              </Highlight>
-              <Highlight label="Distance from shop" icon={RulerIcon} sub={sim ? "Simulated location (demo)" : `Fence ${shop.geofenceRadiusM} m${v.checkInAccuracyM != null ? ` · accuracy ±${Math.round(v.checkInAccuracyM)} m` : ""}`}
-                tone={!sim && v.checkInDistanceM != null && v.checkInDistanceM > shop.geofenceRadiusM ? "warn" : undefined}>
-                {sim ? <span className="text-ink-3">Not measured</span> : fmtDist(v.checkInDistanceM) ?? <span className="text-ink-3">No value</span>}
-              </Highlight>
-              <Highlight label="Proof" icon={CameraIcon} sub={proof ? `Captured ${istTime(proof.capturedAt ?? proof.uploadedAt)}` : r.proofState === "NOT_STARTED" ? "Visit not started" : "No photo uploaded"}
-                tone={r.proofState === "MISSING" ? "danger" : undefined}>
-                {r.proofState === "MISSING" ? "Missing" : d.proofs.length ? `${d.proofs.length} photo${d.proofs.length > 1 ? "s" : ""}` : <span className="text-ink-3">No value</span>}
-              </Highlight>
               <Highlight label="Order value" icon={ReceiptTextIcon} sub={r.outcome ? `${r.outcome.orderCount} order${r.outcome.orderCount === 1 ? "" : "s"} · excl. rejected` : undefined}>
                 {r.outcome?.orderCount ? formatINRCompact(r.outcome.orderValuePaise) : <span className="text-ink-3">None</span>}
               </Highlight>
@@ -156,8 +142,8 @@ function Panel({ d, r }: { d: NonNullable<ReturnType<typeof useVisitRecord>["dat
         primary={<LinkBtn href={`/admin/shops/${shop.id}`} icon={StoreIcon}>Open shop record</LinkBtn>}
         actions={<>
           <Tip label="Navigate to shop"><LinkBtn href={navHref} external icon={NavigationIcon} label="Navigate to shop" /></Tip>
-          <Tip label="Copy link"><Btn icon={CopyIcon} aria-label="Copy link" onClick={() => { void navigator.clipboard?.writeText(location.href); toast.success("Link copied"); }} /></Tip>
-          {v.status === "PLANNED" && <Tip label="Remove from route"><Btn icon={Trash2Icon} variant="danger" aria-label="Remove from route" disabled={unassign.isPending} onClick={() => { if (confirm(`Remove ${shop.name} from ${agent.name}'s route?`)) unassign.mutate(v.id, { onSuccess: () => router.push("/admin/visits") }); }} /></Tip>}
+          <Tip label="Copy link"><Btn icon={CopyIcon} aria-label="Copy link" onClick={async () => { if (await copyText(location.href)) toast.success("Link copied"); else toast.error("Couldn't copy. Copy the address bar instead."); }} /></Tip>
+          {v.status === "PLANNED" && <Tip label="Remove from route"><Btn icon={Trash2Icon} variant="danger" className="ml-2" aria-label="Remove from route" disabled={unassign.isPending} onClick={() => { if (confirm(`Remove ${shop.name} from ${agent.name}'s route?`)) unassign.mutate(v.id, { onSuccess: () => router.push("/admin/visits") }); }} /></Tip>}
         </>}
       />
       <PropertySection title="Visit details">
@@ -184,7 +170,7 @@ function Tip({ label, children }: { label: string; children: React.ReactElement 
 function CopyText({ text, mono, display }: { text: string; mono?: boolean; display?: string }) {
   const [ok, setOk] = React.useState(false);
   return (
-    <button type="button" onClick={() => { void navigator.clipboard?.writeText(text); setOk(true); setTimeout(() => setOk(false), 1200); }}
+    <button type="button" onClick={async () => { if (!(await copyText(text))) return void toast.error("Couldn't copy. Select the text instead."); setOk(true); setTimeout(() => setOk(false), 1200); }}
       className={cn("group inline-flex max-w-full items-center gap-1.5 text-left", mono && "font-mono text-[12.5px]")} title="Copy">
       <span className="num truncate">{display ?? text}</span>
       {ok ? <CheckIcon className="size-3.5 shrink-0 text-verified" /> : <CopyIcon className="size-3.5 shrink-0 text-ink-3 opacity-0 group-hover:opacity-100" />}
@@ -224,12 +210,13 @@ function LocationMap({ d }: { d: NonNullable<ReturnType<typeof useVisitRecord>["
           {points[1] && <span className="inline-flex items-center gap-1"><span className="size-2.5 rounded-full" style={{ background: "#7a5af5" }} />Photo</span>}
         </div>
       </div>
-      <dl className="grid grid-cols-2 divide-x divide-line border-t border-line text-[13px] sm:grid-cols-4">
+      {/* Before check-in there is nothing to compare: the panel already has the shop coordinates. */}
+      {v.checkInAt && <dl className="grid grid-cols-2 divide-x divide-line border-t border-line text-[13px] sm:grid-cols-4">
         <MapFact k="Shop centre" v={fmtCoord(shop.lat, shop.lng)} />
         <MapFact k={v.verification === "SIMULATED" ? "Simulated fix" : "Check-in fix"} v={fmtCoord(v.checkInLat, v.checkInLng)} empty={v.checkInAt ? undefined : "Awaiting check-in"} />
         <MapFact k="Distance" v={v.verification === "SIMULATED" ? "Not measured" : v.checkInDistanceM != null ? `${fmtDist(v.checkInDistanceM)} ${inside ? "inside" : "outside"} fence` : undefined} tone={v.verification === "SIMULATED" ? "text-ink-3" : undefined} empty={v.checkInAt ? undefined : "—"} />
         <MapFact k="Verdict" v={v.verification === "SIMULATED" ? "Simulated · not verified" : v.verification ? PROOF[v.verification as ProofState][1] : undefined} tone={v.verification === "SIMULATED" ? "text-info" : v.verification === "LOW_ACCURACY" ? "text-warn" : undefined} empty={v.checkInAt ? undefined : "—"} />
-      </dl>
+      </dl>}
     </div>
   );
 }

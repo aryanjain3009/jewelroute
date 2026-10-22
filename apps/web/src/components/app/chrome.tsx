@@ -2,8 +2,10 @@
 /** Attio-grade page chrome: title bar, view bar, sort/filter bar, buttons, chips, empty states.
  *  Measurements follow docs/DESIGN.md v2 (CSS px). Keep these small and quiet. */
 import * as React from "react";
-import { CheckIcon, ChevronDownIcon, InfoIcon, ListFilterIcon, SearchIcon, XIcon } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { ArrowDownIcon, ArrowUpIcon, CheckIcon, ChevronDownIcon, FileQuestionIcon, InfoIcon, ListFilterIcon, SearchIcon, XIcon } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NavToggle } from "./nav-context";
@@ -119,21 +121,38 @@ export function SearchInput({ value, onChange, placeholder = "Search", className
   );
 }
 
-/** "Sorted by X" chip — Attio's sort affordance: opens a menu of fields, the current one checked. */
-export function SortChip<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
+/** "Sorted by X" chip — Attio's sort affordance: opens a menu of fields, the current one checked, then the
+ *  field's two directions in its own words ("Most recent first" / "Oldest first") when `dirs` is given. */
+export function SortChip<T extends string>({ value, options, onChange, reversed = false, onReverse, noun = "rows" }: {
+  value: T; options: { value: T; label: string; dirs?: [string, string] }[]; onChange: (v: T) => void;
+  reversed?: boolean; onReverse?: (r: boolean) => void; noun?: string;
+}) {
   const cur = options.find((o) => o.value === value) ?? options[0];
+  const Arrow = reversed ? ArrowUpIcon : ArrowDownIcon;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="press inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-lg border border-line-strong bg-white px-2.5 text-[13px] text-ink-2 outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-blue/35 data-[state=open]:bg-hover">
-        <ListFilterIcon className="size-3.5" />Sorted by <span className="font-medium text-ink">{cur.label}</span><ChevronDownIcon className="size-3 text-ink-3" />
+        <ListFilterIcon className="size-3.5" />Sorted by <span className="font-medium text-ink">{cur.label}</span>
+        {cur.dirs && onReverse && <Arrow className="size-3 text-ink-2" aria-label={cur.dirs[reversed ? 1 : 0]} />}
+        <ChevronDownIcon className="size-3 text-ink-3" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-52">
-        <DropdownMenuLabel className="text-[12px] font-normal text-ink-3">Sort shops by</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-[12px] font-normal text-ink-3">Sort {noun} by</DropdownMenuLabel>
         {options.map((o) => (
-          <DropdownMenuItem key={o.value} onSelect={() => onChange(o.value)} className="text-[13px]">
+          <DropdownMenuItem key={o.value} onSelect={() => { onChange(o.value); onReverse?.(false); }} className="text-[13px]">
             <span className="flex-1">{o.label}</span>{o.value === value && <CheckIcon className="size-3.5 text-ink" />}
           </DropdownMenuItem>
         ))}
+        {cur.dirs && onReverse && (
+          <>
+            <DropdownMenuSeparator />
+            {cur.dirs.map((d, i) => (
+              <DropdownMenuItem key={d} onSelect={() => onReverse(i === 1)} className="text-[13px]">
+                <span className="flex-1">{d}</span>{reversed === (i === 1) && <CheckIcon className="size-3.5 text-ink" />}
+              </DropdownMenuItem>
+            ))}
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -183,8 +202,9 @@ export function CountBadge({ n, className }: { n: number | string; className?: s
 }
 
 /* ---------- Avatars ---------- */
-const AV = ["#e8eefc", "#eaf6ef", "#fdf0e3", "#f3ecfb", "#fbe9ec", "#e7f5f7"];
-const AVT = ["#2f5fd0", "#24784f", "#a65e12", "#6a3fb5", "#b2334a", "#1f7480"];
+// No red or amber: those are status colours (overdue, pending), and gold is reserved for value.
+const AV = ["#e8eefc", "#eaf6ef", "#eef0f3", "#f3ecfb", "#e9eff7", "#e7f5f7"];
+const AVT = ["#2f5fd0", "#24784f", "#4b5563", "#6a3fb5", "#3d5a80", "#1f7480"];
 export function Avatar({ name, size = 20, square, className }: { name: string; size?: number; square?: boolean; className?: string }) {
   const i = [...name].reduce((a, c) => a + c.charCodeAt(0), 0) % AV.length;
   const ini = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
@@ -207,6 +227,25 @@ export function Empty({ icon: I, title, hint, action }: { icon?: Icon; title: st
       <p className="text-[14px] font-medium text-ink">{title}</p>
       {hint && <p className="max-w-sm text-[13px] text-ink-2">{hint}</p>}
       {action && <div className="mt-2">{action}</div>}
+    </div>
+  );
+}
+/** A record id the API answers 404 for (removed, mistyped, or another workspace's link): say so plainly and
+ *  offer the way back to its list — never a red error with a retry that cannot succeed. */
+export function RecordNotFound({ message }: { message?: string }) {
+  const path = usePathname() ?? "";
+  const list = path.split("/").slice(0, 3).join("/"); // /admin/memos/x → /admin/memos
+  const label = list.split("/")[2] ?? "";
+  return (
+    <div className="flex min-h-[60dvh] flex-1 flex-col items-center justify-center gap-1.5 px-6 py-20 text-center">
+      <FileQuestionIcon className="mb-1 size-5 text-ink-3" strokeWidth={1.75} />
+      <p className="text-[14px] font-medium text-ink">{message || "Not found"}</p>
+      <p className="max-w-sm text-[13px] text-ink-2">It may have been removed, or the link belongs to another workspace.</p>
+      {label && (
+        <Link href={list} className="press mt-2 inline-flex h-8 items-center rounded-lg border border-line-strong bg-white px-3 text-[13px] font-medium text-ink hover:bg-hover">
+          Back to {label}
+        </Link>
+      )}
     </div>
   );
 }

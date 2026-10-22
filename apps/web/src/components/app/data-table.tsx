@@ -19,6 +19,8 @@ export interface ColMeta {
   /** Footer content for this column (e.g. a formatted sum). */
   footer?: React.ReactNode;
   className?: string;
+  /** false = left out below 640 px, so a phone sees the name, the money and the status without scrolling. */
+  phone?: boolean;
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Col<T> = ColumnDef<T, any> & { meta?: ColMeta };
@@ -62,9 +64,14 @@ export function DataTable<T>({
     if (onSortingChange) onSortingChange(next); else setSortingLocal(next);
   };
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
+  const isPhone = usePhone();
+  const columnVisibility = React.useMemo(
+    () => (isPhone ? Object.fromEntries(columns.filter((c) => (c.meta as ColMeta | undefined)?.phone === false && c.id).map((c) => [c.id!, false])) : {}),
+    [isPhone, columns],
+  );
   const table = useReactTable({
     data, columns, getRowId: (r) => getRowId(r),
-    state: { sorting, rowSelection },
+    state: { sorting, rowSelection, columnVisibility },
     onSortingChange: setSorting,
     onRowSelectionChange: setRowSelection,
     enableRowSelection: selectable,
@@ -137,7 +144,7 @@ export function DataTable<T>({
     <div ref={scrollRef} onScroll={measure} className={cn("relative min-h-0 flex-1 overflow-auto outline-none", className)} tabIndex={0} onKeyDown={onKey} aria-label={countLabel ? `${countLabel} table` : "Table"}>
       <table
         className={cn("border-separate border-spacing-0 text-[14px]", fit ? "w-full table-fixed" : "w-max min-w-full")}
-        style={fit ? { minWidth: columns.reduce((a, c) => a + ((c.meta as ColMeta | undefined)?.width ?? 120), 0) } : undefined}
+        style={fit ? { minWidth: table.getVisibleLeafColumns().reduce((a, c, i) => a + colWidth((c.columnDef.meta as ColMeta | undefined)?.width ?? 120, i, isPhone), 0) } : undefined}
       >
         <thead className="sticky top-0 z-20 bg-white">
           {table.getHeaderGroups().map((hg) => (
@@ -150,7 +157,7 @@ export function DataTable<T>({
                 return (
                   <th
                     key={h.id}
-                    style={{ width: meta?.width, minWidth: fit ? undefined : meta?.width }}
+                    style={{ width: meta?.width && colWidth(meta.width, i, isPhone), minWidth: fit ? undefined : meta?.width }}
                     className={cn(
                       "h-9 border-b border-r border-line bg-white px-2.5 text-left align-middle text-[13px] font-medium text-ink last:border-r-0",
                       i === 0 && "sticky left-0 z-10",
@@ -336,3 +343,16 @@ export function NameCell({ lead, name, sub }: { lead?: React.ReactNode; name: Re
   );
 }
 export const Muted = ({ children }: { children?: React.ReactNode }) => <span className="truncate text-ink-3">{children ?? "—"}</span>;
+
+/** On a phone the name column gives up width so the money and status columns start on the first screen. */
+const colWidth = (w: number, i: number, phone: boolean) => (phone && i === 0 ? Math.min(w, 176) : w);
+
+/** Below 640 px (Tailwind `sm`). False on the server and the first paint, so hydration matches. */
+const PHONE = "(max-width: 639px)";
+function usePhone() {
+  return React.useSyncExternalStore(
+    (cb) => { const m = window.matchMedia(PHONE); m.addEventListener("change", cb); return () => m.removeEventListener("change", cb); },
+    () => window.matchMedia(PHONE).matches,
+    () => false,
+  );
+}

@@ -111,10 +111,10 @@ export type PieceStatus = "IN_VAULT" | "WITH_AGENT" | "ON_MEMO" | "OVERDUE" | "S
 /** Where an agent-held piece is (API-resolved; AGENT custody only). Render `label`. */
 export interface PieceLocation { kind: "IN_VISIT" | "LAST_CHECK_IN" | "FIELD_BAG"; label: string; shop?: Ref; visitId?: string; lat?: number; lng?: number; verification?: Verification; at?: string }
 export type PieceRow = Piece & { status: PieceStatus; memo?: { id: string; number: string; dueDate: string }; lastMovedAt: string; collection: string; location?: PieceLocation };
-export type AttentionKind = "MEMO_OVERDUE" | "MEMO_DUE_TODAY" | "VISIT_MISSED" | "PROOF_MISSING" | "PROOF_SIMULATED" | "ORDER_PENDING" | "WEBHOOK_FAILING" | "ACK_SELF_SUSPECTED";
+export type AttentionKind = "MEMO_OVERDUE" | "MEMO_DUE_TODAY" | "VISIT_MISSED" | "PROOF_MISSING" | "PROOF_SIMULATED" | "ORDER_PENDING" | "WEBHOOK_FAILING" | "ACK_SELF_SUSPECTED" | "AGENT_INACTIVE_CUSTODY";
 export interface AttentionItem {
   id: string; kind: AttentionKind; severity: "high" | "medium"; title: string; subtitle: string; amountPaise?: number; at: string;
-  entity: { type: "memo" | "visit" | "order" | "webhook" | "shop"; id: string };
+  entity: { type: "memo" | "visit" | "order" | "webhook" | "shop" | "agent"; id: string };
 }
 export type ShopStatus = "ACTIVE" | "MEMO_OVERDUE" | "DORMANT" | "NEW";
 export type ShopRow = Shop & {

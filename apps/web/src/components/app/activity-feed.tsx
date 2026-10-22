@@ -78,6 +78,15 @@ export function ActivitySentence({ a, selfId }: { a: ActivityItem; selfId?: stri
   return <>{parts}</>;
 }
 
+/** Proof thumbnail that degrades to a neutral camera tile when the file can't load (never alt text or a broken glyph). */
+export function PhotoThumb({ src, alt, className }: { src?: string; alt: string; className?: string }) {
+  const [broken, setBroken] = React.useState(false);
+  React.useEffect(() => setBroken(false), [src]);
+  if (broken || !src) return <span role="img" aria-label={`${alt} unavailable`} className={cn("grid place-items-center bg-sunken text-ink-3", className)}><CameraIcon className="size-4" strokeWidth={1.75} /></span>;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt={alt} onError={() => setBroken(true)} loading="lazy" className={cn("object-cover", className)} />;
+}
+
 /** Nested evidence card, only from `detail` / `refs` the API sent; null when there is nothing to show
  *  (so no empty card is drawn). */
 function evidence(a: ActivityItem): React.ReactNode {
@@ -87,8 +96,7 @@ function evidence(a: ActivityItem): React.ReactNode {
     const v = d.verification ? VER[d.verification] : undefined;
     return (
       <div className="flex items-center gap-3">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={media(d.photoUrl)} alt="Arrival photo" className="size-14 shrink-0 rounded-md border border-line object-cover" loading="lazy" />
+        <PhotoThumb src={media(d.photoUrl)} alt="Arrival photo" className="size-14 shrink-0 rounded-md border border-line" />
         <div className="min-w-0 text-[13px]">
           <div className="font-medium text-ink">Arrival photo</div>
           <div className="text-ink-3">{d.verification !== "SIMULATED" && dist(d.distanceM) ? `${dist(d.distanceM)} from check-in` : "Stored with its checksum"}</div>

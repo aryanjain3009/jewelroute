@@ -26,6 +26,7 @@ import { JrMap } from "@/components/admin/map-lazy";
 import type { MapMarker, MapTone } from "@/components/jr/map";
 import { useHome, useShops, useVisitRows, type VRow } from "./data";
 import { AssignVisitDialog } from "./dialogs";
+import { OnboardingChecklist } from "../onboarding";
 import { Bar, PROOF, QueryError, StatusDot, age, fmtDist, entityHref, istDay, istTime, prettyDates, wallTime } from "./ui";
 
 const TZ = "Asia/Kolkata";
@@ -86,12 +87,13 @@ export function HomeView() {
 
           {home.error && !d ? <QueryError error={home.error} retry={() => home.refetch()} /> : (
             <>
+              {isToday && <OnboardingChecklist onAssignVisit={() => setAssignOpen(true)} />}
               <MetricStrip m={d?.metrics} isToday={isToday} />
               <div className="mt-8 grid grid-cols-1 gap-x-8 gap-y-9 xl:grid-cols-[minmax(0,1fr)_380px]">
                 <div className="min-w-0 space-y-9">
                   <NeedsAttention items={d?.attention} loading={!d} now={now} />
                   <div className="grid grid-cols-1 gap-x-6 gap-y-9 md:grid-cols-2">
-                    <SamplesOutside shops={shops.data} memos={memos.data} error={!!shops.error && !shops.data} valuePaise={d?.metrics.samplesOutside.valuePaise} />
+                    <SamplesOutside shops={shops.data} memos={memos.data} error={!!shops.error && !shops.data} />
                     <DayOrders orders={orders.data} error={!!orders.error && !orders.data} date={date} isToday={isToday} />
                   </div>
                   <LiveField shops={d?.map.shops} checkIns={d?.map.checkIns} visits={visits.data} loading={!d} isToday={isToday} />
@@ -139,7 +141,7 @@ function MetricStrip({ m, isToday }: { m?: import("@/lib/types").AdminHome["metr
     { label: isToday ? "Orders today" : "Orders", value: m && formatINRCompact(m.ordersToday.valuePaise), sub: m && `${m.ordersToday.count} order${m.ordersToday.count === 1 ? "" : "s"}`, href: "/admin/orders" },
     { label: "Visits completed", value: m && <>{m.visits.completed}<span className="text-ink-3"> / {m.visits.planned}</span></>, sub: m && (m.visits.inProgress ? `${m.visits.inProgress} in progress` : "None in progress"), href: "/admin/visits" },
     { label: "Samples outside", value: m && formatINRCompact(m.samplesOutside.valuePaise), sub: m && `${m.samplesOutside.count} piece${m.samplesOutside.count === 1 ? "" : "s"} at shops`, href: "/admin/samples?view=memo", tone: m && m.samplesOutside.count ? "gold" : undefined },
-    { label: "Overdue memos", value: m && formatINRCompact(m.overdueMemos.valuePaise), sub: m && (m.overdueMemos.count ? `${m.overdueMemos.count} memo${m.overdueMemos.count === 1 ? "" : "s"} overdue` : "Nothing overdue"), href: "/admin/memos?view=overdue", tone: m && m.overdueMemos.count ? "danger" : undefined },
+    { label: "Overdue memos", value: m && formatINRCompact(m.overdueMemos.valuePaise), sub: m && (m.overdueMemos.count ? `${m.overdueMemos.count} memo${m.overdueMemos.count === 1 ? "" : "s"} · at handover` : "Nothing overdue"), href: "/admin/memos?view=overdue", tone: m && m.overdueMemos.count ? "danger" : undefined },
     { label: "Pending approvals", value: m && formatINRCompact(m.pendingApprovals.valuePaise), sub: m && (m.pendingApprovals.count ? `${m.pendingApprovals.count} order${m.pendingApprovals.count === 1 ? "" : "s"} waiting` : "All decided"), href: "/admin/orders?view=pending", tone: m && m.pendingApprovals.count ? "warn" : undefined },
   ];
   return (
@@ -176,8 +178,9 @@ const KIND: Record<AttentionKind, { icon: IconT; tone: "red" | "amber" | "blue" 
   ACK_SELF_SUSPECTED: { icon: ShieldAlertIcon, tone: "amber", group: "Acknowledgements to confirm", href: "/admin/memos" },
   ORDER_PENDING: { icon: ReceiptTextIcon, tone: "amber", group: "Waiting for your approval", href: "/admin/orders?view=pending" },
   PROOF_SIMULATED: { icon: FlaskConicalIcon, tone: "blue", group: "Simulated check-ins", href: "/admin/visits?proof=SIMULATED" },
+  AGENT_INACTIVE_CUSTODY: { icon: UserIcon, tone: "red", group: "Deactivated agents holding samples", href: "/admin/agents" },
 };
-const ORDER: AttentionKind[] = ["MEMO_OVERDUE", "ORDER_PENDING", "VISIT_MISSED", "PROOF_MISSING", "WEBHOOK_FAILING", "MEMO_DUE_TODAY", "ACK_SELF_SUSPECTED", "PROOF_SIMULATED"];
+const ORDER: AttentionKind[] = ["AGENT_INACTIVE_CUSTODY", "MEMO_OVERDUE", "ORDER_PENDING", "VISIT_MISSED", "PROOF_MISSING", "WEBHOOK_FAILING", "MEMO_DUE_TODAY", "ACK_SELF_SUSPECTED", "PROOF_SIMULATED"];
 /** Kinds this build doesn't know yet sort last instead of first (indexOf → -1). */
 const rank = (k: string) => { const i = ORDER.indexOf(k as AttentionKind); return i < 0 ? ORDER.length : i; };
 const CAP = 3;
@@ -226,7 +229,7 @@ function NeedsAttention({ items, loading, now }: { items?: AttentionItem[]; load
                       <button type="button" onClick={() => href && router.push(href)} className="group flex min-h-12 w-full items-center gap-3 py-2 pl-3 pr-3 text-left transition-colors hover:bg-hover focus-visible:bg-hover focus-visible:outline-none sm:pl-[42px]">
                         <span className="flex min-w-0 flex-1 flex-col py-0.5">
                           <span className="line-clamp-2 text-[14px] leading-5 text-ink decoration-ink-3 decoration-dotted underline-offset-4 group-hover:underline md:truncate">{prettyDates(a.title)}</span>
-                          <span className="line-clamp-2 text-[12.5px] leading-[18px] text-ink-3 md:line-clamp-1">{prettyDates(a.subtitle)}</span>
+                          <span className="line-clamp-2 text-[12.5px] leading-[18px] text-ink-3">{prettyDates(a.subtitle)}</span>
                         </span>
                         {a.amountPaise ? <span className={cn("num shrink-0 text-right text-[14px] font-medium", a.kind === "MEMO_OVERDUE" ? "text-danger" : "text-ink")}>{formatINRCompact(a.amountPaise)}</span> : null}
                         <span className="w-14 shrink-0 text-right text-[13px] text-ink-3" suppressHydrationWarning>{now ? age(a.at, now) : ""}</span>
@@ -251,7 +254,7 @@ function NeedsAttention({ items, loading, now }: { items?: AttentionItem[]; load
 }
 
 /* ---------------- Samples outside: shops holding pieces, valued at today's rate (same basis as the metric) ---------------- */
-function SamplesOutside({ shops, memos, error, valuePaise }: { shops?: ShopRow[]; memos?: MemoRow[]; error: boolean; valuePaise?: number }) {
+function SamplesOutside({ shops, memos, error }: { shops?: ShopRow[]; memos?: MemoRow[]; error: boolean }) {
   const holding = (shops ?? []).filter((s) => s.samplesHereCount > 0);
   // The shop's most urgent open memo gives the due line (API daysToDue).
   const memoOf = (shopId: string) => (memos ?? []).filter((m) => m.shop.id === shopId && (m.status === "ACTIVE" || m.status === "PARTIALLY_RETURNED")).sort((a, b) => a.daysToDue - b.daysToDue)[0];
@@ -259,9 +262,8 @@ function SamplesOutside({ shops, memos, error, valuePaise }: { shops?: ShopRow[]
   const shown = rows.slice(0, 5);
   return (
     <section className="min-w-0">
-      <SectionHead title="Samples outside" count={shops ? holding.length : undefined}
-        sub={valuePaise ? <span className="num text-[13px] text-ink-3"><span className="font-medium text-gold-ink">{formatINRCompact(valuePaise)}</span> today</span> : undefined}
-        action={<ViewAll href="/admin/samples?view=memo" />} />
+      {/* The total is the metric strip's "Samples outside" cell; the header doesn't repeat it. */}
+      <SectionHead title="Samples outside" count={shops ? holding.length : undefined} action={<ViewAll href="/admin/samples?view=memo" />} />
       <ListCard>
         {!shops && !error && Array.from({ length: 2 }).map((_, i) => <div key={i} className="flex h-[52px] items-center gap-2.5 px-3.5"><span className="size-5 rounded-[5px] bg-hover" /><Bar className="w-40" /></div>)}
         {error && <p className="px-3.5 py-3 text-[13px] text-danger">Couldn&apos;t load shops.</p>}
@@ -396,7 +398,7 @@ function LiveField({ shops, checkIns, visits, loading, isToday }: { shops?: MapS
                         : a.next ? <>Next: {a.next.shop.name}{a.next.plannedTime ? ` · ${wallTime(a.next.plannedTime)}` : ""}</>
                         : a.lastDone ? <>Route done · last {istTime(a.lastDone.completedAt)}</> : "No visits"}
                     </span>
-                    {v?.verification === "SIMULATED" && a.open && <span className="mt-0.5 block truncate text-[12.5px] text-info" title={SIMULATED_LOCATION}>Simulated · not verified</span>}
+                    {v?.verification === "SIMULATED" && a.open && <span className="mt-0.5 block text-[12.5px] text-info" title={SIMULATED_LOCATION}>Simulated · not verified</span>}
                     {a.missed > 0 && <span className="mt-0.5 block text-[12.5px] text-danger">{a.missed} missed</span>}
                     <span className="mt-1.5 flex h-1 overflow-hidden rounded-full bg-hover">
                       <span className="bg-verified" style={{ width: `${(a.done / Math.max(1, a.total)) * 100}%` }} />

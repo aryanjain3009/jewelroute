@@ -4,7 +4,7 @@ import * as React from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
-  ActivityIcon, CalendarClockIcon, CalendarIcon, CalendarPlusIcon, CircleDotIcon, CoinsIcon, FileTextIcon, HistoryIcon,
+  ActivityIcon, CalendarClockIcon, CalendarPlusIcon, CircleDotIcon, FileTextIcon, HistoryIcon,
   ListOrderedIcon, MapPinnedIcon, ScrollTextIcon, ShieldAlertIcon, ShieldCheckIcon, StoreIcon, UndoIcon, UserIcon,
 } from "lucide-react";
 import { addDays, daysBetween, formatGrams, formatINR, istDate, PURITY_LABEL } from "@jewelroute/shared";
@@ -72,9 +72,7 @@ function MemoBody() {
         <Property icon={CircleDotIcon} label="Status"><MemoStatusDot status={m.displayStatus} /></Property>
         <Property icon={StoreIcon} label="Retailer"><span className="flex items-center gap-2"><Avatar name={m.shop.name} square /><RecLink href={`/admin/shops/${m.shop.id}`}>{m.shop.name}</RecLink></span></Property>
         <Property icon={UserIcon} label="Agent"><span className="flex items-center gap-2"><Avatar name={m.agent.name} /><RecLink href={`/admin/agents/${m.agent.id}`}>{m.agent.name}</RecLink></span></Property>
-        <Property icon={CoinsIcon} label="Value"><span className="num">{formatINR(m.totalValuePaise)}</span></Property>
-        <Property icon={CoinsIcon} label="Outstanding"><span className="num font-medium text-gold-ink">{formatINR(m.outstandingValuePaise)}</span><span className="text-[13px] text-ink-3"> · {out.length} of {m.items.length} pieces</span></Property>
-        <Property icon={CalendarIcon} label="Issued"><span className="num">{fmtDayTime(m.issuedAt)}</span></Property>
+        {/* Value, outstanding and the issue time live in the memo document (Terms, totals); not repeated here. */}
         <Property icon={CalendarClockIcon} label="Due date"><span className="num">{fmtDay(m.dueDate)}</span>{open && <> <DueText days={m.daysToDue} /></>}</Property>
         {m.extensions.length > 0 && (
           <Property icon={CalendarPlusIcon} label="Extensions">
@@ -177,13 +175,13 @@ function MemoDocument({ m, out, visitAt }: { m: MemoRow; out: MemoItem[]; visitA
         </div>
       </div>
       <div className="overflow-x-auto border-t border-line">
-        <table className="w-full min-w-[620px] border-separate border-spacing-0 text-[14px]">
+        <table className="w-full sm:min-w-[620px] border-separate border-spacing-0 text-[14px]">
           <thead>
             <tr className="text-[12.5px] text-ink-3">
               <th className="h-9 w-[168px] border-b border-line pl-5 pr-3 text-left font-normal">Piece</th>
-              <th className="h-9 border-b border-line px-3 text-left font-normal">Design</th>
+              <th className="h-9 border-b border-line px-3 text-left font-normal max-sm:hidden">Design</th>
               <th className="h-9 w-[72px] border-b border-line px-3 text-left font-normal">Purity</th>
-              <th className="h-9 w-[92px] border-b border-line px-3 text-right font-normal">Net wt</th>
+              <th className="h-9 w-[92px] border-b border-line px-3 text-right font-normal max-sm:hidden">Net wt</th>
               <th className="h-9 w-[124px] border-b border-line px-3 text-right font-normal">Value at issue</th>
               <th className="h-9 w-[132px] border-b border-line pl-3 pr-5 text-left font-normal">Status</th>
             </tr>
@@ -192,9 +190,9 @@ function MemoDocument({ m, out, visitAt }: { m: MemoRow; out: MemoItem[]; visitA
             {m.items.map((it) => (
               <tr key={it.id} className="transition-colors hover:bg-hover">
                 <td className="h-11 border-b border-line pl-5 pr-3"><span className="flex items-center gap-2.5"><Thumb src={it.piece.imageUrl} alt={it.piece.name} size={28} /><RecLink href={`/admin/samples/${it.piece.id}`} className="num font-medium">{it.piece.tagCode}</RecLink></span></td>
-                <td className="h-11 max-w-0 border-b border-line px-3"><span className="block truncate text-ink-2">{it.piece.name}</span></td>
+                <td className="h-11 max-w-0 border-b border-line px-3 max-sm:hidden"><span className="block truncate text-ink-2">{it.piece.name}</span></td>
                 <td className="h-11 border-b border-line px-3 font-medium text-gold-ink">{PURITY_LABEL[it.piece.purity]}</td>
-                <td className="num h-11 border-b border-line px-3 text-right">{formatGrams(it.piece.netWeightMg)}</td>
+                <td className="num h-11 border-b border-line px-3 text-right max-sm:hidden">{formatGrams(it.piece.netWeightMg)}</td>
                 <td className={cn("num h-11 border-b border-line px-3 text-right", it.status === "OUT" ? "font-medium text-ink" : "text-ink-3")}>{formatINR(it.valuePaise)}</td>
                 <td className="h-11 border-b border-line pl-3 pr-5"><span className="flex items-baseline gap-1.5"><Dot tone={ITEM[it.status][0]}>{ITEM[it.status][1]}</Dot>{it.returnedAt && <span className="num text-[12px] text-ink-3">{fmtDay(it.returnedAt)}</span>}</span></td>
               </tr>

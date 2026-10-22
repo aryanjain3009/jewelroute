@@ -60,7 +60,7 @@ export function SegmentedTabsList({
   // follows the input that was actually used (keyboard → ring, pointer → none).
   const [kbd, setKbd] = React.useState(false);
   const lastPointer = React.useRef(0);
-  const seg = "flex h-10 min-w-0 items-center justify-center gap-1.5 whitespace-nowrap px-2 text-[13.5px] font-medium sm:h-8 sm:px-4 sm:text-[14px]";
+  const seg = "flex h-10 min-w-0 items-center justify-center gap-1.5 whitespace-nowrap px-1.5 text-[13px] font-medium sm:h-8 sm:px-4 sm:text-[14px]";
   return (
     <TabsPrimitive.List
       onKeyDown={() => setKbd(true)}
@@ -92,7 +92,7 @@ export function SegmentedTabsList({
       {/* Active layer: the same segments in ink, clipped to the active one. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-[3px] z-10 grid grid-flow-col auto-cols-fr rounded-[8px] bg-ink text-white transition-[clip-path] duration-[220ms] ease-[cubic-bezier(0.23,1,0.32,1)]"
+        className="pointer-events-none absolute inset-[3px] z-10 grid grid-flow-col auto-cols-fr rounded-[8px] bg-ink text-white transition-[clip-path] duration-[220ms] ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
         style={{ clipPath: clip }}
       >
         {items.map((it, k) => {

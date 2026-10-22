@@ -79,7 +79,7 @@ function SamplesBody() {
       const l = p.location;
       if (!l) return <Muted />;
       if (l.kind === "IN_VISIT") return <span className="truncate" title={l.label}>At {l.shop?.name ?? l.label} <span className="text-ink-3">· in visit</span></span>;
-      if (l.kind === "LAST_CHECK_IN") return <span className="truncate text-ink-2" title={l.label}>Field bag <span className="text-ink-3">· last at {l.shop?.name}</span></span>;
+      if (l.kind === "LAST_CHECK_IN") return <span className="truncate text-ink-3" title={l.label}>In the bag</span>;
       return <span className="truncate text-ink-2">{l.label}</span>;
     }
     if (p.custodianType === "VAULT") return <span className="text-ink-3">In the vault</span>;
@@ -88,20 +88,20 @@ function SamplesBody() {
 
   const columns: Col<PieceRow>[] = [
     { id: "tag", header: "Tag", accessorFn: (p) => p.tagCode, meta: { icon: TagIcon, width: 176 }, cell: ({ row: { original: p } }) => <NameCell lead={<Thumb src={p.imageUrl} alt={p.name} />} name={<span className="num">{p.tagCode}</span>} /> },
-    { id: "design", header: "Design", accessorFn: (p) => p.name, meta: { icon: GemIcon, width: 140 }, cell: ({ row: { original: p } }) => <span className="truncate" title={p.collection ? `${p.name} · ${p.collection} collection` : p.name}>{p.name}</span> },
-    { id: "purity", header: "Purity", accessorFn: (p) => p.purity, meta: { width: 66 }, cell: ({ row: { original: p } }) => <span className="text-gold-ink">{PURITY_LABEL[p.purity]}</span> },
-    { id: "net", header: "Net wt", accessorFn: (p) => p.netWeightMg, meta: { icon: ScaleIcon, width: 90, align: "right" }, cell: ({ row: { original: p } }) => <span className="num">{formatGrams(p.netWeightMg)}</span> },
+    { id: "design", header: "Design", accessorFn: (p) => p.name, meta: { phone: false, icon: GemIcon, width: 164 }, cell: ({ row: { original: p } }) => <span className="truncate" title={p.collection ? `${p.name} · ${p.collection} collection` : p.name}>{p.name}</span> },
+    { id: "purity", header: "Purity", accessorFn: (p) => p.purity, meta: { phone: false, width: 60 }, cell: ({ row: { original: p } }) => <span className="text-gold-ink">{PURITY_LABEL[p.purity]}</span> },
+    { id: "net", header: "Net wt", accessorFn: (p) => p.netWeightMg, meta: { phone: false, icon: ScaleIcon, width: 84, align: "right" }, cell: ({ row: { original: p } }) => <span className="num">{formatGrams(p.netWeightMg)}</span> },
     {
-      id: "value", header: "Value today", accessorFn: (p) => p.valuePaise, meta: { icon: IndianRupeeIcon, width: 124, align: "right", footer: rows.length ? <span className="num font-medium text-gold-ink">{formatINRCompact(total)}</span> : undefined },
+      id: "value", header: "Value today", accessorFn: (p) => p.valuePaise, meta: { icon: IndianRupeeIcon, width: 116, align: "right", footer: rows.length ? <span className="num font-medium text-gold-ink">{formatINRCompact(total)}</span> : undefined },
       cell: ({ row: { original: p } }) => <span className="num font-medium text-gold-ink">{formatINR(p.valuePaise)}</span>,
     },
-    { id: "holder", header: "Custodian", accessorFn: (p) => holderLabel(p), meta: { icon: UserIcon, width: 140 }, cell: ({ row: { original: p } }) => <span className="flex min-w-0 items-center gap-2"><HolderLead p={p} /><span className="truncate">{holderLabel(p)}</span></span> },
-    { id: "location", header: "Location", accessorFn: (p) => p.custodianType, meta: { icon: MapPinIcon, width: 124 }, cell: ({ row: { original: p } }) => location(p) },
+    { id: "holder", header: "Custodian", accessorFn: (p) => holderLabel(p), meta: { phone: false, icon: UserIcon, width: 148 }, cell: ({ row: { original: p } }) => <span className="flex min-w-0 items-center gap-2"><HolderLead p={p} /><span className="truncate">{holderLabel(p)}</span></span> },
+    { id: "location", header: "Location", accessorFn: (p) => p.custodianType, meta: { phone: false, icon: MapPinIcon, width: 116 }, cell: ({ row: { original: p } }) => location(p) },
     {
       id: "status", header: "Status", accessorFn: (p) => p.status, meta: { icon: CircleDotIcon, width: 166 },
       cell: ({ row: { original: p } }) => <span className="flex items-baseline gap-1.5"><PieceStatusDot status={p.status} />{p.memo && (p.status === "ON_MEMO" || p.status === "OVERDUE") && <span className={cn("num text-[12px]", p.status === "OVERDUE" ? "text-danger" : "text-ink-3")}>due {fmtDay(p.memo.dueDate)}</span>}</span>,
     },
-    { id: "moved", header: "Last moved", accessorFn: (p) => p.lastMovedAt, meta: { icon: ClockIcon, width: 144 }, cell: ({ row: { original: p } }) => (p.lastMovedAt ? <span className="num" title={p.lastMovedAt}>{relTime(p.lastMovedAt)}</span> : <Muted />) },
+    { id: "moved", header: "Last moved", accessorFn: (p) => p.lastMovedAt, meta: { phone: false, icon: ClockIcon, width: 140 }, cell: ({ row: { original: p } }) => (p.lastMovedAt ? <span className="num" title={p.lastMovedAt}>{relTime(p.lastMovedAt)}</span> : <Muted />) },
   ];
 
   const count = (vv: View) => (IN_VIEW[vv] ? all.filter((p) => IN_VIEW[vv]!.includes(p.status)).length : all.length);

@@ -68,15 +68,11 @@ export function ShopRecord({ id }: { id: string }) {
             <CreditBlock c={c} limitPaise={s.creditLimitPaise} unsettled={unsettled.length} pending={pendingCount} memoCount={s.activeMemoCount} />
           </MainSection>
 
+          {/* Highlights hold only what Credit position and the sections below don't: memo value is the
+              "On memo" cell, samples-here value heads its own list. Today that leaves the last order. */}
+          {s.lastOrder && (
           <MainSection title="Highlights">
             <Highlights>
-              <Highlight label="Samples here" icon={GemIcon} tone={s.samplesHereCount ? "gold" : undefined} sub={s.samplesHereCount ? `${s.samplesHereCount} piece${s.samplesHereCount > 1 ? "s" : ""} · at today's rate` : "No pieces at this shop"}>
-                {s.samplesHereCount ? formatINRCompact(s.samplesHereValuePaise) : <span className="text-ink-3">None</span>}
-              </Highlight>
-              <Highlight label="Active memos" icon={ScrollTextIcon} tone={s.status === "MEMO_OVERDUE" ? "danger" : s.activeMemoCount ? "gold" : undefined}
-                sub={s.activeMemoCount ? `${s.activeMemoCount} memo${s.activeMemoCount > 1 ? "s" : ""}${s.status === "MEMO_OVERDUE" ? " · overdue" : ""} · at handover` : "Nothing on memo"}>
-                {s.activeMemoCount ? formatINRCompact(s.activeMemoValuePaise) : <span className="text-ink-3">None</span>}
-              </Highlight>
               {s.lastOrder && (
                 <Highlight label="Last order" icon={ReceiptTextIcon} sub={<span className="inline-flex items-center gap-1.5"><span className="num">{s.lastOrder.number}</span><span className="text-ink-3">·</span>{ORDER_STATUS[s.lastOrder.status]?.[1] ?? s.lastOrder.status}</span>}>
                   <Link href={`/admin/orders/${s.lastOrder.id}`} className="num decoration-ink-3 decoration-dotted underline-offset-4 hover:underline">{formatINRCompact(s.lastOrder.totalPaise)}<span className="font-normal text-ink-3"> · {istDay(s.lastOrder.createdAt)}</span></Link>
@@ -84,12 +80,13 @@ export function ShopRecord({ id }: { id: string }) {
               )}
             </Highlights>
           </MainSection>
+          )}
 
           <MainSection title="Recent activity" action={<button type="button" onClick={() => setTab("activity")} className="rounded-md px-1.5 py-0.5 text-[13px] text-ink-2 transition-colors hover:bg-hover hover:text-ink">View all</button>}>
             <ActivityFeed framed filter={{ shopId: s.id }} selfId={s.id} compact max={5} empty={<p className="text-[13px] text-ink-3">Nothing has happened at this shop yet.</p>} />
           </MainSection>
 
-          <MainSection title="Samples here" count={d.pieces.length} action={d.pieces.length ? <Link href={`/admin/samples?shop=${s.id}`} className="rounded-md px-1.5 py-0.5 text-[13px] text-ink-2 transition-colors hover:bg-hover hover:text-ink">Open in Samples</Link> : undefined}>
+          <MainSection title="Samples here" count={d.pieces.length} action={d.pieces.length ? <span className="flex items-center gap-2">{s.samplesHereCount > 0 && <span className="num text-[13px] text-ink-3"><span className="font-medium text-gold-ink">{formatINRCompact(s.samplesHereValuePaise)}</span> at today&apos;s rate</span>}<Link href={`/admin/samples?shop=${s.id}`} className="rounded-md px-1.5 py-0.5 text-[13px] text-ink-2 transition-colors hover:bg-hover hover:text-ink">Open in Samples</Link></span> : undefined}>
             {d.pieces.length ? <ListCard>{d.pieces.map((p) => <PieceLine key={p.id} p={p} />)}</ListCard> : <p className="text-[13px] text-ink-3">No pieces are at this shop. Pieces left on memo appear here until they come back or are sold.</p>}
           </MainSection>
 
@@ -131,7 +128,7 @@ export function ShopRecord({ id }: { id: string }) {
 export function CreditBlock({ c, limitPaise, unsettled, pending, memoCount, compact }: { c?: CreditPosition; limitPaise: number; unsettled: number; pending: number; memoCount: number; compact?: boolean }) {
   if (!c) return <div className="rounded-[10px] border border-line px-4 py-3.5 text-[13px] text-ink-3">No credit position for this shop.</div>;
   const limited = c.availableCreditPaise != null && c.creditLimitPaise > 0;
-  const outSub = [unsettled ? `${unsettled} unsettled order${unsettled === 1 ? "" : "s"}` : "", c.openingOutstandingPaise ? `${formatINRCompact(c.openingOutstandingPaise)} opening` : ""].filter(Boolean).join(" + ") || (pending ? "Pending orders aren't owed yet" : "Nothing unsettled");
+  const outSub = !unsettled && c.openingOutstandingPaise && c.openingOutstandingPaise === c.outstandingPaise ? "All opening balance" : [unsettled ? `${unsettled} unsettled order${unsettled === 1 ? "" : "s"}` : "", c.openingOutstandingPaise ? `${formatINRCompact(c.openingOutstandingPaise)} opening` : ""].filter(Boolean).join(" + ") || (pending ? "Pending orders aren't owed yet" : "Nothing unsettled");
   const cells: { label: string; value: React.ReactNode; sub: React.ReactNode; dot?: string }[] = [
     { label: "Outstanding", dot: "bg-[#55565a]", value: c.outstandingPaise ? formatINR(c.outstandingPaise) : <span className="text-ink-3">Nothing owed</span>, sub: outSub },
     { label: "On memo", dot: "bg-gold", value: c.memoExposurePaise ? <span className="text-gold-ink">{formatINR(c.memoExposurePaise)}</span> : <span className="text-ink-3">None</span>, sub: memoCount ? `${memoCount} active memo${memoCount === 1 ? "" : "s"}` : "No samples on memo" },
@@ -169,6 +166,7 @@ function Panel({ d, onAssign, onEdit }: { d: ShopRec; onAssign: () => void; onEd
   const s = d.shop;
   const c = s.credit;
   const upcoming = s.upcomingVisit ?? s.nextVisit;
+  const open = d.visits.find((v) => v.status === "CHECKED_IN" || v.status === "ACTIVE");
   return (
     <>
       <RecordHeader
@@ -184,9 +182,19 @@ function Panel({ d, onAssign, onEdit }: { d: ShopRec; onAssign: () => void; onEd
       />
       <PropertySection title="Relationship">
         <Property icon={UserIcon} label="Assigned agent"><AgentSelect shopId={s.id} value={s.assignedAgent} /></Property>
-        <Property icon={ClockIcon} label="Last visit">{s.lastVisitAt && <span className="flex flex-col"><span>{relDay(s.lastVisitAt)}</span>{s.lastVisitAgent && <span className="text-[13px] text-ink-3">{s.lastVisitAgent.name}</span>}</span>}</Property>
+        {/* An agent checked in right now is the freshest visit there is — say so instead of an empty "last visit". */}
+        {open ? (
+          <Property icon={ClockIcon} label="Visit">
+            <span className="flex flex-col">
+              <Link href={`/admin/visits/${open.id}`} className="inline-flex items-center gap-1.5 decoration-ink-3 decoration-dotted underline-offset-4 hover:underline"><span className="size-1.5 rounded-full bg-blue" aria-hidden />In visit now</Link>
+              <span className="text-[13px] text-ink-3">{open.agent.name}{open.checkInAt ? ` · since ${istTime(open.checkInAt)}` : ""}</span>
+            </span>
+          </Property>
+        ) : (
+          <Property icon={ClockIcon} label="Last visit">{s.lastVisitAt ? <span className="flex flex-col"><span>{relDay(s.lastVisitAt)}</span>{s.lastVisitAgent && <span className="text-[13px] text-ink-3">{s.lastVisitAgent.name}</span>}</span> : <span className="text-ink-3">None yet</span>}</Property>
+        )}
         <Property icon={CalendarClockIcon} label="Upcoming visit">{upcoming ? <span className="flex flex-col"><Link href={`/admin/visits/${upcoming.id}`} className="decoration-ink-3 decoration-dotted underline-offset-4 hover:underline">{upcoming.date === istDate() ? "Today" : istDay(upcoming.date)}{upcoming.plannedTime ? `, ${wallTime(upcoming.plannedTime)}` : ""}</Link><span className="text-[13px] text-ink-3">{upcoming.agent.name}</span></span> : <span className="text-ink-3">Not planned</span>}</Property>
-        <Property icon={ReceiptTextIcon} label="Previous orders">{d.orders.length > 0 && <span className="num">{d.orders.length}{d.orders.length >= 50 ? "+" : ""}{s.lastOrder ? <span className="text-ink-3"> · last {istDay(s.lastOrder.createdAt)}</span> : d.orders[0] ? <span className="text-ink-3"> · last {istDay(d.orders[0].createdAt)}</span> : null}</span>}</Property>
+        <Property icon={ReceiptTextIcon} label="Previous orders">{d.orders.length > 0 && <span className="num">{d.orders.length}{d.orders.length >= 50 ? "+" : ""}{s.lastOrder ? <span className="text-ink-3"> · last {istDay(s.lastOrder.createdAt)}</span> : d.orders[0] ? <span className="text-ink-3"> · last {istDay(d.orders[0].createdAt)}</span> : null}</span>}{d.orders.length === 0 && <span className="text-ink-3">None yet</span>}</Property>
       </PropertySection>
       <PropertySection title="Credit" defaultOpen={false}>
         <Property icon={WalletIcon} label="Outstanding">{c && <span className="flex flex-col"><span className="num">{formatINR(c.outstandingPaise)}</span>{!!c.openingOutstandingPaise && <span className="num text-[13px] text-ink-3">incl. {formatINRCompact(c.openingOutstandingPaise)} opening balance</span>}</span>}</Property>

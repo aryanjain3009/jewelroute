@@ -23,9 +23,13 @@ import { QueryError, SHOP_STATUS, StatusDot, daysAgo, istDay, wallTime } from ".
 
 type View = "all" | "attention" | "unassigned" | "dormant";
 type Sort = "name" | "lastVisit" | "outstanding" | "credit" | "samples" | "nextVisit";
-const SORTS: { value: Sort; label: string }[] = [
-  { value: "lastVisit", label: "Last visit" }, { value: "outstanding", label: "Outstanding" }, { value: "credit", label: "Credit left" }, { value: "samples", label: "Samples value" },
-  { value: "nextVisit", label: "Next visit" }, { value: "name", label: "Name" },
+const SORTS: { value: Sort; label: string; dirs: [string, string] }[] = [
+  { value: "lastVisit", label: "Last visit", dirs: ["Most recent first", "Least recent first"] },
+  { value: "outstanding", label: "Outstanding", dirs: ["Highest first", "Lowest first"] },
+  { value: "credit", label: "Credit left", dirs: ["Least left first", "Most left first"] },
+  { value: "samples", label: "Samples value", dirs: ["Highest first", "Lowest first"] },
+  { value: "nextVisit", label: "Next visit", dirs: ["Soonest first", "Latest first"] },
+  { value: "name", label: "Name", dirs: ["A to Z", "Z to A"] },
 ];
 const sum = (rows: ShopRow[], f: (r: ShopRow) => number) => rows.reduce((a, r) => a + f(r), 0);
 
@@ -40,6 +44,8 @@ export function ShopsList() {
   const [area, setArea] = useUrlState("area", "all");
   const [sortRaw, setSort] = useUrlState("sort", "lastVisit");
   const sort = (SORTS.some((x) => x.value === sortRaw) ? sortRaw : "lastVisit") as Sort;
+  const [dir, setDir] = useUrlState("dir", "");
+  const reversed = dir === "rev";
   const patch = useUrlPatch();
   const [creating, setCreating] = React.useState(false);
   // ?new=1 (⌘K "New shop") opens the sheet once, then leaves the URL.
@@ -60,7 +66,8 @@ export function ShopsList() {
     (status === "all" || r.status === status) &&
     (area === "all" || r.area === area) &&
     (!q || `${r.name} ${r.code} ${r.area} ${r.ownerName ?? ""} ${r.assignedAgent?.name ?? ""}`.toLowerCase().includes(q.toLowerCase())),
-  ).sort((a, b) => {
+  ).sort((a, b) => (reversed ? -1 : 1) * cmp(a, b));
+  function cmp(a: ShopRow, b: ShopRow): number {
     switch (sort) {
       case "name": return a.name.localeCompare(b.name);
       case "lastVisit": return (b.lastVisitAt ?? "").localeCompare(a.lastVisitAt ?? "");
@@ -69,21 +76,21 @@ export function ShopsList() {
       case "samples": return b.samplesHereValuePaise - a.samplesHereValuePaise;
       case "nextVisit": return (a.nextVisit ? `${a.nextVisit.date} ${a.nextVisit.plannedTime ?? ""}` : "9").localeCompare(b.nextVisit ? `${b.nextVisit.date} ${b.nextVisit.plannedTime ?? ""}` : "9");
     }
-  });
+  }
   const today = istDate();
 
   const columns: Col<ShopRow>[] = [
     {
-      id: "shop", header: "Shop", accessorFn: (r) => r.name, meta: { icon: StoreIcon, width: 196 },
+      id: "shop", header: "Shop", accessorFn: (r) => r.name, meta: { icon: StoreIcon, width: 200 },
       cell: ({ row: { original: r } }) => <span className="block min-w-0" title={r.name}><NameCell lead={<Avatar name={r.name} size={20} square />} name={r.name} /></span>,
     },
-    { id: "area", header: "Area", accessorFn: (r) => r.area, meta: { icon: MapPinIcon, width: 132 }, cell: ({ row: { original: r } }) => <span className="block min-w-0 truncate" title={r.area}>{r.area}</span> },
+    { id: "area", header: "Area", accessorFn: (r) => r.area, meta: { phone: false, icon: MapPinIcon, width: 128 }, cell: ({ row: { original: r } }) => <span className="block min-w-0 truncate" title={r.area}>{r.area}</span> },
     {
-      id: "agent", header: "Assigned agent", accessorFn: (r) => r.assignedAgent?.name ?? "", meta: { icon: UserIcon, width: 140 },
+      id: "agent", header: "Assigned agent", accessorFn: (r) => r.assignedAgent?.name ?? "", meta: { phone: false, icon: UserIcon, width: 140 },
       cell: ({ row: { original: r } }) => (r.assignedAgent ? <span className="flex min-w-0 items-center gap-2"><Avatar name={r.assignedAgent.name} /><span className="truncate">{r.assignedAgent.name}</span></span> : <Muted>Unassigned</Muted>),
     },
     {
-      id: "lastVisit", header: "Last visit", accessorFn: (r) => r.lastVisitAt ?? "", meta: { icon: ClockIcon, width: 104 },
+      id: "lastVisit", header: "Last visit", accessorFn: (r) => r.lastVisitAt ?? "", meta: { phone: false, icon: ClockIcon, width: 96 },
       cell: ({ row: { original: r } }) => {
         if (!r.lastVisitAt) return <Muted>Never</Muted>;
         const n = daysAgo(r.lastVisitAt) ?? 0;
@@ -98,21 +105,21 @@ export function ShopsList() {
     },
     {
       // Exposure (outstanding + memo) against the limit, and what is left — the API's figures, drawn.
-      id: "credit", header: "Credit left", accessorFn: (r) => r.credit?.availableCreditPaise ?? Number.MAX_SAFE_INTEGER, meta: { icon: GaugeIcon, width: 136 },
+      id: "credit", header: "Credit left", accessorFn: (r) => r.credit?.availableCreditPaise ?? Number.MAX_SAFE_INTEGER, meta: { phone: false, icon: GaugeIcon, width: 144 },
       cell: ({ row: { original: r } }) => {
         const c = r.credit;
         if (!c) return <Muted />;
         if (c.availableCreditPaise == null || !c.creditLimitPaise) return <Muted>No limit</Muted>;
         return (
-          <span className="flex min-w-0 items-center gap-2.5" title={`${formatINRCompact(c.exposurePaise)} of ${formatINRCompact(c.creditLimitPaise)} limit in use (outstanding + memo)`}>
-            <ExposureBar p={c} showOrder={false} className="w-12 shrink-0" />
+          <span className="flex min-w-0 items-center gap-2" title={`${formatINRCompact(c.exposurePaise)} of ${formatINRCompact(c.creditLimitPaise)} limit in use (outstanding + memo)`}>
+            <ExposureBar p={c} showOrder={false} className="w-10 shrink-0" />
             <span className={cn("num truncate", c.overLimit ? "font-medium text-danger" : c.availableCreditPaise === 0 ? "text-warn" : "text-ink")}>{c.overLimit ? `Over ${formatINRCompact(c.exposurePaise - c.creditLimitPaise)}` : formatINRCompact(c.availableCreditPaise)}</span>
           </span>
         );
       },
     },
     {
-      id: "samples", header: "Samples", accessorFn: (r) => r.samplesHereValuePaise, meta: { icon: GemIcon, width: 112, align: "right", footer: <FooterSum v={sum(rows, (r) => r.samplesHereValuePaise)} gold /> },
+      id: "samples", header: "Samples", accessorFn: (r) => r.samplesHereValuePaise, meta: { phone: false, icon: GemIcon, width: 112, align: "right", footer: <FooterSum v={sum(rows, (r) => r.samplesHereValuePaise)} gold /> },
       cell: ({ row: { original: r } }) => (r.samplesHereCount
         ? <span className="num" title={`${r.samplesHereCount} piece${r.samplesHereCount === 1 ? "" : "s"} at today's rate · ${r.activeMemoCount} memo${r.activeMemoCount === 1 ? "" : "s"} worth ${formatINRCompact(r.activeMemoValuePaise)} at handover`}>
             {r.status === "MEMO_OVERDUE" && <span className="mr-1.5 inline-block size-1.5 rounded-full bg-danger align-middle" />}
@@ -121,7 +128,7 @@ export function ShopsList() {
         : <Muted />),
     },
     {
-      id: "nextVisit", header: "Next visit", accessorFn: (r) => r.nextVisit ? `${r.nextVisit.date} ${r.nextVisit.plannedTime ?? ""}` : "~", meta: { icon: CalendarClockIcon, width: 112 },
+      id: "nextVisit", header: "Next visit", accessorFn: (r) => r.nextVisit ? `${r.nextVisit.date} ${r.nextVisit.plannedTime ?? ""}` : "~", meta: { phone: false, icon: CalendarClockIcon, width: 104 },
       cell: ({ row: { original: r } }) => (r.nextVisit ? <span className="num truncate" title={`${r.nextVisit.agent.name}`}>{r.nextVisit.date === today ? (r.nextVisit.plannedTime ? wallTime(r.nextVisit.plannedTime) : "Today") : `${istDay(r.nextVisit.date)}${r.nextVisit.plannedTime ? `, ${wallTime(r.nextVisit.plannedTime)}` : ""}`}</span> : <Muted>Not planned</Muted>),
     },
     { id: "status", header: "Status", accessorFn: (r) => r.status, meta: { icon: CircleDotIcon, width: 136 }, cell: ({ row: { original: r } }) => <StatusDot map={SHOP_STATUS} value={r.status} /> },
@@ -143,7 +150,7 @@ export function ShopsList() {
         ]} />
       </ViewBar>
       <FilterBar right={<SearchInput value={q} onChange={setQ} placeholder="Search shop, area, owner" />}>
-        <SortChip value={sort} options={SORTS} onChange={setSort} />
+        <SortChip value={sort} options={SORTS} onChange={setSort} reversed={reversed} onReverse={(r) => setDir(r ? "rev" : "")} noun="shops" />
         <span className="mx-0.5 h-4 w-px bg-line" />
         <FilterChip label="Agent" value={agent} onChange={setAgent} icon={UserIcon} options={[{ value: "all", label: "Any agent" }, { value: "none", label: "Unassigned" }, ...(agents.data ?? []).map((a) => ({ value: a.id, label: a.name }))]} />
         <FilterChip label="Status" value={status} onChange={setStatus} icon={CircleDotIcon} options={[{ value: "all", label: "Any status" }, ...Object.entries(SHOP_STATUS).map(([v, [, l]]) => ({ value: v, label: l }))]} />

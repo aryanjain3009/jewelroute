@@ -134,7 +134,7 @@ export function useTab(defaultTab: string, param = "tab") {
 
 /** Highlights grid (3 columns): small bordered cards with label, icon and a value. */
 export function Highlights({ children }: { children: React.ReactNode }) {
-  return <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">{children}</div>;
+  return <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-3">{children}</div>;
 }
 export function Highlight({ label, icon: I, children, sub, tone }: { label: string; icon?: Icon; children: React.ReactNode; sub?: React.ReactNode; tone?: "danger" | "warn" | "gold" }) {
   return (

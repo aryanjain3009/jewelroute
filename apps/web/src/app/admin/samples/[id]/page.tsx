@@ -112,7 +112,7 @@ function SampleBody() {
       <RecordHeader
         lead={<Thumb src={p.imageUrl} alt={p.name} size={48} className="rounded-[10px]" />}
         title={<span className="flex min-w-0 items-center gap-2"><span className="num truncate">{p.tagCode}</span><StatusChip map={PIECE_STATUS} value={p.status} /></span>}
-        subtitle={<span className="flex min-w-0 items-center gap-1.5"><span className="truncate">{p.name}</span><span className="text-ink-3">·</span><span className="shrink-0 font-medium text-gold-ink">{PURITY_LABEL[p.purity]}</span><span className="text-ink-3">·</span><span className="num shrink-0">{formatGrams(p.netWeightMg)}</span><span className="text-ink-3">·</span><span className="num shrink-0 font-medium text-gold-ink">{formatINRCompact(p.valuePaise)}</span></span>}
+        subtitle={<span className="flex min-w-0 items-center gap-1.5"><span className="truncate">{p.name}</span><span className="text-ink-3">·</span><span className="shrink-0 font-medium text-gold-ink">{PURITY_LABEL[p.purity]}</span><span className="text-ink-3">·</span><span className="num shrink-0 font-medium text-gold-ink">{formatINRCompact(p.valuePaise)}</span></span>}
         primary={
           p.status === "IN_VAULT" ? <Btn variant="primary" icon={SendIcon} onClick={() => setDialog("issue")}>Issue to agent</Btn>
           : p.status === "WITH_AGENT" ? <Btn icon={ArchiveRestoreIcon} onClick={() => setDialog("return")}>Return to vault</Btn>
@@ -122,9 +122,10 @@ function SampleBody() {
         }
       />
       {p.imageUrl && (
-        <div className="border-b border-line px-5 py-4">
+        // Below lg the 48 px header thumbnail carries the photo, so "where is it now" stays above the fold.
+        <div className="hidden border-b border-line px-5 py-4 lg:block">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={p.imageUrl} alt={p.name} className="aspect-[16/10] w-full rounded-xl max-lg:aspect-[16/7] bg-sunken object-cover ring-1 ring-black/5" />
+          <img src={p.imageUrl} alt={p.name} className="aspect-[16/10] w-full rounded-xl bg-sunken object-cover ring-1 ring-black/5" />
         </div>
       )}
       <PropertySection title="Piece" collapseBelowLg>

@@ -51,10 +51,10 @@ function MemosBody() {
 
   const columns: Col<MemoRow>[] = [
     { id: "number", header: "Memo", accessorFn: (m) => m.number, meta: { icon: HashIcon, width: 196 }, cell: ({ row: { original: m } }) => <NameCell lead={<span className="flex shrink-0 -space-x-1.5">{m.items.slice(0, 3).map((it) => <Thumb key={it.id} src={it.piece.imageUrl} alt={it.piece.name} size={20} className="rounded-[5px] ring-2 ring-white" />)}</span>} name={<span className="num">{m.number}</span>} /> },
-    { id: "shop", header: "Retailer", accessorFn: (m) => m.shop.name, meta: { icon: StoreIcon, width: 160 }, cell: ({ row: { original: m } }) => <span className="flex min-w-0 items-center gap-2" title={m.shop.area ? `${m.shop.name} · ${m.shop.area}` : m.shop.name}><Avatar name={m.shop.name} square /><span className="truncate">{m.shop.name}</span></span> },
-    { id: "agent", header: "Agent", accessorFn: (m) => m.agent.name, meta: { icon: UserIcon, width: 136 }, cell: ({ row: { original: m } }) => <span className="flex min-w-0 items-center gap-2"><Avatar name={m.agent.name} /><span className="truncate">{m.agent.name}</span></span> },
+    { id: "shop", header: "Retailer", accessorFn: (m) => m.shop.name, meta: { phone: false, icon: StoreIcon, width: 160 }, cell: ({ row: { original: m } }) => <span className="flex min-w-0 items-center gap-2" title={m.shop.area ? `${m.shop.name} · ${m.shop.area}` : m.shop.name}><Avatar name={m.shop.name} square /><span className="truncate">{m.shop.name}</span></span> },
+    { id: "agent", header: "Agent", accessorFn: (m) => m.agent.name, meta: { phone: false, icon: UserIcon, width: 136 }, cell: ({ row: { original: m } }) => <span className="flex min-w-0 items-center gap-2"><Avatar name={m.agent.name} /><span className="truncate">{m.agent.name}</span></span> },
     {
-      id: "pieces", header: "Pieces", accessorFn: (m) => m.pieceCount, meta: { icon: GemIcon, width: 84, align: "right" },
+      id: "pieces", header: "Pieces", accessorFn: (m) => m.pieceCount, meta: { phone: false, icon: GemIcon, width: 84, align: "right" },
       cell: ({ row: { original: m } }) => {
         const out = m.outstandingCount ?? m.items.filter((i) => i.status === "OUT").length;
         return <span className="num">{out !== m.pieceCount && isOpen(m) ? <><span className="text-ink">{out}</span><span className="text-ink-3"> of {m.pieceCount}</span></> : m.pieceCount}</span>;
@@ -64,14 +64,14 @@ function MemosBody() {
       id: "value", header: "Total value", accessorFn: (m) => m.totalValuePaise, meta: { icon: IndianRupeeIcon, width: 116, align: "right", footer: rows.length ? <span className="num font-medium text-gold-ink">{formatINRCompact(total)}</span> : undefined },
       cell: ({ row: { original: m } }) => <span className="num font-medium text-gold-ink">{formatINR(m.totalValuePaise)}</span>,
     },
-    { id: "issued", header: "Issued", accessorFn: (m) => m.issuedAt, meta: { icon: CalendarIcon, width: 84 }, cell: ({ row: { original: m } }) => <span className="num">{fmtDay(m.issuedAt)}</span> },
+    { id: "issued", header: "Issued", accessorFn: (m) => m.issuedAt, meta: { phone: false, icon: CalendarIcon, width: 84 }, cell: ({ row: { original: m } }) => <span className="num">{fmtDay(m.issuedAt)}</span> },
     {
       id: "due", header: "Due", accessorFn: (m) => m.dueDate, meta: { icon: CalendarClockIcon, width: 176 },
       cell: ({ row: { original: m } }) => <span className="flex items-baseline gap-2"><span className="num">{fmtDay(m.dueDate)}</span><DueText days={m.daysToDue} open={isOpen(m)} />{m.extended && <span className="text-[12px] text-ink-3">extended</span>}</span>,
     },
     { id: "status", header: "Status", accessorFn: (m) => m.displayStatus, meta: { icon: CircleDotIcon, width: 112 }, cell: ({ row: { original: m } }) => <MemoStatusDot status={m.displayStatus} /> },
     {
-      id: "ack", header: "Acknowledged", accessorFn: (m) => m.ackStatus, meta: { icon: ShieldCheckIcon, width: 132 },
+      id: "ack", header: "Acknowledged", accessorFn: (m) => m.ackStatus, meta: { phone: false, icon: ShieldCheckIcon, width: 132 },
       cell: ({ row: { original: m } }) => m.ackStatus === "ACKNOWLEDGED"
         ? <span className="flex items-center gap-1.5 text-ink-2" title={m.ackAt ? `Acknowledged ${fmtDay(m.ackAt)}` : undefined}><ShieldCheckIcon className={cn("size-3.5 shrink-0", m.selfAckSuspected ? "text-warn" : "text-verified")} strokeWidth={2} />{m.ackMethod === "OTP" ? "By code" : "Via QR"}{m.selfAckSuspected && <span className="text-[12px] text-warn">check</span>}</span>
         : <span className="flex items-center gap-1.5 text-warn"><ShieldAlertIcon className="size-3.5 shrink-0" strokeWidth={2} />Waiting</span>,

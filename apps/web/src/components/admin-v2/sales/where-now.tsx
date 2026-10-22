@@ -4,7 +4,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { ShieldAlertIcon, ShieldCheckIcon } from "lucide-react";
-import { formatINR, istDate } from "@jewelroute/shared";
+import { istDate } from "@jewelroute/shared";
 import type { CustodyEventRow, MemoRecord, PieceRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { SelfAckNote } from "@/components/app/status";
@@ -72,10 +72,8 @@ export function WhereNow({ p, events, memo, compact }: { p: PieceRow; events: Cu
   return (
     <div className={compact ? "" : "border-b border-line px-6 pb-5 pt-5"}>
       {!compact && (
-        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <p className="text-[13px] text-ink-2">Where it is now</p>
-          <p className="text-[13px] text-ink-2">Value today <span className="num text-[15px] font-semibold text-gold-ink">{formatINR(p.valuePaise)}</span></p>
-        </div>
+        // Value today is in the record header and the Piece panel; this block answers only "where".
+        <p className="text-[13px] text-ink-2">Where it is now</p>
       )}
       <h2 className={cn(!compact && "mt-1", "font-semibold tracking-[-0.015em] text-ink", compact ? "text-[16px] leading-6" : "text-[20px] leading-8")}>{head}</h2>
       <dl className={cn("mt-3.5 grid grid-cols-2 gap-px overflow-hidden rounded-[10px] border border-line bg-line", !compact && "md:grid-cols-4")}>

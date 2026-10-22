@@ -281,8 +281,12 @@ export function AddAgentDialog({ open, onOpenChange, onCreated }: { open: boolea
 export function useSetAgentActive(agentId: string) {
   const sync = useSync();
   return useMutation({
-    mutationFn: (active: boolean) => api<{ agent: { name: string; active: boolean } }>(`/admin/agents/${agentId}`, { method: "PATCH", body: { active } }),
-    onSuccess: (r) => { sync("agent.saved"); toast.success(r.agent.active ? `${r.agent.name} is active again` : `${r.agent.name} is deactivated`); },
+    mutationFn: (active: boolean) => api<{ agent: { name: string; active: boolean }; cancelledVisits?: number }>(`/admin/agents/${agentId}`, { method: "PATCH", body: { active } }),
+    onSuccess: (r) => {
+      sync("agent.saved", "visit.assigned");
+      const n = r.cancelledVisits ?? 0;
+      toast.success(r.agent.active ? `${r.agent.name} is active again` : `${r.agent.name} is deactivated${n ? ` · ${n} planned visit${n === 1 ? "" : "s"} cancelled` : ""}`);
+    },
     onError: (e) => toast.error(errMsg(e)),
   });
 }
@@ -297,7 +301,7 @@ export function AgentActiveDialog({ open, onOpenChange, agent }: { open: boolean
           <DialogTitle className="text-[15px] font-semibold">{deactivating ? `Deactivate ${agent.name}?` : `Reactivate ${agent.name}?`}</DialogTitle>
           <DialogDescription className="text-[13px]">
             {deactivating
-              ? "They can't sign in or be assigned visits. Their visits, orders, memos and audit history stay on record. Return the samples in their bag to the vault first."
+              ? "They're signed out everywhere and can't be assigned visits. Their planned visits from today are cancelled. Past visits, orders, memos and the audit history stay on record. Samples in their bag stay with them until you return them to the vault, and Home flags them."
               : "They can sign in to the field app again and be assigned visits."}
           </DialogDescription>
         </DialogHeader>

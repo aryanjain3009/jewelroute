@@ -15,6 +15,8 @@ export const qk = {
   catalog: ["catalog"] as const,
   // admin
   home: ["home"] as const,
+  /** First-run checklist (a new workspace's six setup steps). */
+  onboarding: ["onboarding"] as const,
   search: ["search"] as const,
   shops: ["shops"] as const,
   shop: (id?: string) => (id ? (["shop", id] as const) : (["shop"] as const)),
@@ -54,8 +56,8 @@ export type Change =
   | "memo.created" | "memo.returned" | "memo.extended" | "memo.converted" | "memo.acknowledged"
   | "piece.moved" | "gold_rate.set" | "shop.saved" | "design.saved" | "agent.saved" | "webhook.changed" | "settings.saved";
 
-const everywhereVisit: QueryKey[] = [qk.today, qk.visit(), qk.fieldVisits, qk.home, qk.adminVisits, qk.adminVisit(), qk.shop(), qk.shops, qk.agent(), qk.agents, qk.activity];
-const custody: QueryKey[] = [qk.credit, qk.convertPreview, qk.pieces, qk.piece(), qk.profile, qk.catalog, qk.designs, qk.memos, qk.memo(), qk.shop(), qk.shops, qk.agent(), qk.agents, qk.today, qk.visit(), qk.adminVisit(), qk.home, qk.activity];
+const everywhereVisit: QueryKey[] = [qk.onboarding, qk.today, qk.visit(), qk.fieldVisits, qk.home, qk.adminVisits, qk.adminVisit(), qk.shop(), qk.shops, qk.agent(), qk.agents, qk.activity];
+const custody: QueryKey[] = [qk.onboarding, qk.credit, qk.convertPreview, qk.pieces, qk.piece(), qk.profile, qk.catalog, qk.designs, qk.memos, qk.memo(), qk.shop(), qk.shops, qk.agent(), qk.agents, qk.today, qk.visit(), qk.adminVisit(), qk.home, qk.activity];
 
 export const AFFECTS: Record<Change, QueryKey[]> = {
   "visit.checked_in": everywhereVisit,
@@ -76,10 +78,10 @@ export const AFFECTS: Record<Change, QueryKey[]> = {
   "memo.extended": [qk.memos, qk.memo(), qk.home, qk.shop(), qk.visit(), qk.adminVisit(), qk.activity, qk.today, qk.profile, qk.pieces, qk.piece(), qk.shops, qk.agents, qk.agent()],
   "memo.acknowledged": [qk.memos, qk.memo(), qk.visit(), qk.adminVisit(), qk.shop(), qk.piece(), qk.pieces, qk.home, qk.activity],
   "piece.moved": custody,
-  "gold_rate.set": [qk.goldRates, qk.convertPreview, qk.catalog, qk.designs, qk.pieces, qk.piece(), qk.home, qk.profile, qk.today, qk.visit(), qk.adminVisit(), qk.shops, qk.shop(), qk.agents, qk.agent(), qk.activity],
-  "shop.saved": [qk.shops, qk.shop(), qk.credit, qk.convertPreview, qk.home, qk.today, qk.activity, qk.adminVisits, qk.adminVisit(), qk.orders, qk.memos],
-  "design.saved": [qk.designs, qk.catalog, qk.pieces, qk.piece()],
-  "agent.saved": [qk.agents, qk.agent(), qk.home, qk.adminVisits, qk.shops, qk.shop(), qk.pieces],
+  "gold_rate.set": [qk.onboarding, qk.goldRates, qk.convertPreview, qk.catalog, qk.designs, qk.pieces, qk.piece(), qk.home, qk.profile, qk.today, qk.visit(), qk.adminVisit(), qk.shops, qk.shop(), qk.agents, qk.agent(), qk.activity],
+  "shop.saved": [qk.onboarding, qk.shops, qk.shop(), qk.credit, qk.convertPreview, qk.home, qk.today, qk.activity, qk.adminVisits, qk.adminVisit(), qk.orders, qk.memos],
+  "design.saved": [qk.onboarding, qk.designs, qk.catalog, qk.pieces, qk.piece()],
+  "agent.saved": [qk.onboarding, qk.agents, qk.agent(), qk.home, qk.adminVisits, qk.shops, qk.shop(), qk.pieces],
   "webhook.changed": [qk.webhooks, qk.deliveries, qk.delivery(), qk.received, qk.home],
   // The approval threshold changes every prospective credit check and the shop credit rows.
   "settings.saved": [qk.settings, qk.credit, qk.convertPreview, qk.shops, qk.shop(), qk.me],

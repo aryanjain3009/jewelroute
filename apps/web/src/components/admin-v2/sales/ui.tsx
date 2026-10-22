@@ -4,7 +4,8 @@ import * as React from "react";
 import Link from "next/link";
 import { AlertCircleIcon, CheckIcon, CopyIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Btn, Dot, type Tone } from "@/components/app/chrome";
+import { Btn, Dot, RecordNotFound, type Tone } from "@/components/app/chrome";
+import { ApiError } from "@/lib/api";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import type { MemoDisplayStatus, PieceStatus } from "@/lib/types";
 import { MEMO_STATUS, PIECE_STATUS, StatusDot } from "@/components/app/status";
@@ -80,6 +81,7 @@ export function CopyId({ id, className, label }: { id: string; className?: strin
 
 /** Error state with the API's own message and a retry. */
 export function ErrorState({ error, retry, className }: { error: unknown; retry?: () => void; className?: string }) {
+  if (error instanceof ApiError && error.status === 404) return <RecordNotFound message={error.message} />;
   return (
     <div className={cn("flex flex-col items-center justify-center gap-1.5 px-6 py-14 text-center", className)}>
       <AlertCircleIcon className="mb-1 size-5 text-danger" strokeWidth={1.75} />

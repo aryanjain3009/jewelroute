@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useParams } from "next/navigation";
 import {
-  ActivityIcon, BadgeCheckIcon, CalendarIcon, CheckIcon, CircleDotIcon, CoinsIcon, FileTextIcon, HashIcon, HistoryIcon,
+  ActivityIcon, BadgeCheckIcon, CalendarIcon, CheckIcon, CoinsIcon, FileTextIcon, HashIcon, HistoryIcon,
   LayoutGridIcon, LockIcon, MapPinnedIcon, PackageIcon, ReceiptTextIcon, ScaleIcon, StoreIcon, UserIcon, XIcon, WalletIcon, BanIcon, ShieldCheckIcon, ShieldAlertIcon,
 } from "lucide-react";
 import { formatGrams, formatINR, formatINRCompact, formatRate, formatRateDelta, PURITY_LABEL } from "@jewelroute/shared";
@@ -81,7 +81,6 @@ function OrderBody() {
       />
       <PropertySection title="Order details">
         <Property icon={HashIcon} label="Order number"><span className="num">{o.number}</span></Property>
-        <Property icon={CircleDotIcon} label="Status"><OrderStatusDot status={o.status} /></Property>
         <Property icon={StoreIcon} label="Shop"><span className="flex items-center gap-2"><Avatar name={o.shop.name} square /><RecLink href={`/admin/shops/${o.shop.id}`}>{o.shop.name}</RecLink></span></Property>
         <Property icon={UserIcon} label="Agent"><span className="flex items-center gap-2"><Avatar name={o.agent.name} /><RecLink href={`/admin/agents/${o.agent.id}`}>{o.agent.name}</RecLink></span></Property>
         <Property icon={MapPinnedIcon} label="Source visit">
@@ -114,13 +113,11 @@ function OrderBody() {
         <>
           {ap && <ApprovalBlock order={o} />}
           <MainSection title="Highlights">
-            <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
+            {/* The rate is told once, in Rate snapshot below; the total once here and once in the invoice footer. */}
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
               <Highlight label="Total incl. GST" icon={CoinsIcon} tone="gold" sub={`${formatINR(o.gstPaise)} GST included`}><span className="num">{formatINR(o.totalPaise)}</span></Highlight>
               <Highlight label="Items" icon={PackageIcon} sub={`${o.items.length} design${o.items.length === 1 ? "" : "s"}`}><span className="num">{pieces} piece{pieces === 1 ? "" : "s"}</span></Highlight>
               <Highlight label="Gold weight" icon={ScaleIcon} sub="Net, all lines"><span className="num">{formatGrams(grams)}</span></Highlight>
-              <Highlight label="Rate used" icon={LockIcon} sub={o.goldRateSnapshot.length > 1 ? `+${o.goldRateSnapshot.length - 1} more purity` : "Frozen at booking"}>
-                {o.goldRateSnapshot[0] ? <span className="num">{PURITY_LABEL[o.goldRateSnapshot[0].purity]} {formatRate(o.goldRateSnapshot[0].ratePaisePerGram)}</span> : "—"}
-              </Highlight>
             </div>
           </MainSection>
           <MainSection title="Rate snapshot">
@@ -224,7 +221,7 @@ function LineItems({ order: o }: { order: Order }) {
             <MTd className="overflow-hidden">
               <span className="flex min-w-0 items-center gap-2.5">
                 <Thumb src={it.imageUrl} alt={it.name} size={24} />
-                <span className="min-w-0"><span className="block truncate font-medium text-ink">{it.name}</span><span className="flex items-center gap-1.5 text-[12px] text-ink-3">{it.sku}<span aria-hidden>·</span><span className="text-gold-ink">{PURITY_LABEL[it.purity]}</span></span></span>
+                <span className="min-w-0"><span className="block font-medium leading-5 text-ink">{it.name}</span><span className="flex items-center gap-1.5 text-[12px] text-ink-3">{it.sku}<span aria-hidden>·</span><span className="text-gold-ink">{PURITY_LABEL[it.purity]}</span></span></span>
               </span>
             </MTd>
             <MTd align="right" className="num">{formatGrams(it.netWeightMg)}</MTd>

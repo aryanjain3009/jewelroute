@@ -70,6 +70,11 @@ function useEventList() {
 }
 
 const STATUS: Record<Delivery["status"], [Tone, string]> = { SUCCEEDED: ["green", "Delivered"], PENDING: ["grey", "Queued"], FAILED: ["amber", "Retrying"], DEAD: ["red", "Dead letter"] };
+/** "1 retrying · 1 dead letter" — the delivery rows' own words. An older API without the split says "not delivered". */
+function notDelivered(s: WebhookEndpoint["stats"]) {
+  if (s.retrying24h === undefined || s.dead24h === undefined) return `${s.failed24h} not delivered`;
+  return [s.retrying24h && `${s.retrying24h} retrying`, s.dead24h && `${s.dead24h} in dead letter`].filter(Boolean).join(" · ");
+}
 function statusDetail(d: Delivery) {
   if (d.status === "FAILED") return d.nextAttemptAt ? `next ${relTime(d.nextAttemptAt)}` : "";
   if (d.status === "DEAD") return d.lastError === "Endpoint is disabled" ? "endpoint disabled" : `after ${d.attempts}`;
@@ -231,10 +236,10 @@ function EndpointHeader({ ep, onDeleted }: { ep: WebhookEndpoint; onDeleted: () 
               <UrlError error={urlError} />
             </form>
           ) : (
-            <h2 className={cn("truncate text-[15px] font-medium text-ink", mono)} title={ep.url}>{ep.url}</h2>
+            <h2 className={cn("break-all text-[15px] font-medium text-ink sm:truncate sm:break-normal", mono)} title={ep.url}>{ep.url}</h2>
           )}
           <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-ink-2">
-            <Dot tone={!ep.active ? "grey" : ep.stats.failed24h ? "red" : "green"} className="text-[13px]">{!ep.active ? "Disabled" : ep.stats.failed24h ? `Enabled · failing (${ep.stats.failed24h} not delivered in 24 h)` : "Enabled · healthy"}</Dot>
+            <Dot tone={!ep.active ? "grey" : ep.stats.failed24h ? "red" : "green"} className="text-[13px]">{!ep.active ? "Disabled" : ep.stats.failed24h ? `Enabled · failing: ${notDelivered(ep.stats)} in 24 h` : "Enabled · healthy"}</Dot>
             {ep.description && <><span className="text-ink-3">·</span><span>{ep.description}</span></>}
           </p>
         </div>
@@ -246,10 +251,10 @@ function EndpointHeader({ ep, onDeleted }: { ep: WebhookEndpoint; onDeleted: () 
 
       <dl className="mt-4 grid grid-cols-1 gap-x-10 xl:grid-cols-2">
         <Property icon={KeyRoundIcon} label="Signing secret"><SecretRow ep={ep} /></Property>
-        <Property icon={CircleDotIcon} label="Status">
+        <Property icon={CircleDotIcon} label="Enabled">
           <span className="flex flex-wrap items-center gap-2.5">
             <Switch checked={ep.active} onCheckedChange={(v) => patch.mutate({ active: v })} aria-label="Endpoint enabled" />
-            <span className="num text-[13px] text-ink-2">Last 24 h: {ep.stats.succeeded24h} delivered{ep.stats.failed24h ? <>, <span className="text-danger">{ep.stats.failed24h} not delivered</span> (retrying or dead letter)</> : ""}</span>
+            <span className="num text-[13px] text-ink-2">Last 24 h: {ep.stats.succeeded24h} delivered{ep.stats.failed24h ? <>, <span className="text-danger">{notDelivered(ep.stats)}</span></> : ""}</span>
           </span>
         </Property>
         <Property icon={ListChecksIcon} label="Events">
@@ -287,10 +292,10 @@ function Deliveries({ endpointId, onOpen, openId }: { endpointId: string; onOpen
   const cols: Col<Row>[] = [
     { id: "event", header: "Event", accessorFn: (d) => d.eventType, meta: { icon: HashIcon, width: 200 }, cell: ({ row: { original: d } }) => <code className={cn("truncate text-[12.5px] text-ink", mono)}>{d.eventType}</code> },
     ...(scope === "all" ? [{ id: "endpoint", header: "Endpoint", accessorFn: (d: Row) => d.endpointUrl ?? d.endpointId, meta: { icon: GlobeIcon, width: 220 }, cell: ({ row: { original: d } }: { row: { original: Row } }) => <span className={cn("truncate text-[12.5px] text-ink-2", mono)} title={d.endpointUrl}>{host(d.endpointUrl) || d.endpointId}</span> } as Col<Row>] : []),
-    { id: "http", header: "HTTP", accessorFn: (d) => d.lastStatusCode ?? 0, meta: { icon: CodeXmlIcon, width: 76 }, cell: ({ row: { original: d } }) => (d.lastStatusCode != null ? <span className={cn("num font-medium", d.lastStatusCode < 300 ? "text-verified" : "text-danger")}>{d.lastStatusCode}</span> : d.lastError ? <span className="text-[12.5px] text-danger" title={d.lastError}>ERR</span> : <Muted />) },
-    { id: "latency", header: "Latency", accessorFn: (d) => d.lastLatencyMs ?? -1, meta: { icon: TimerIcon, width: 90, align: "right" }, cell: ({ row: { original: d } }) => (d.lastLatencyMs != null ? <span className="num">{d.lastLatencyMs} ms</span> : <Muted />) },
-    { id: "attempt", header: "Attempt", accessorFn: (d) => d.attempts, meta: { icon: RotateCcwIcon, width: 90, align: "right" }, cell: ({ row: { original: d } }) => <span className="num">{d.attempts}<span className="text-ink-3"> / 7</span></span> },
-    { id: "at", header: "Timestamp", accessorFn: (d) => d.createdAt, meta: { icon: CalendarIcon, width: 140 }, cell: ({ row: { original: d } }) => <span className="num" title={d.createdAt}>{fmtDayTime(d.createdAt)}</span> },
+    { id: "http", header: "HTTP", accessorFn: (d) => d.lastStatusCode ?? 0, meta: { phone: false, icon: CodeXmlIcon, width: 76 }, cell: ({ row: { original: d } }) => (d.lastStatusCode != null ? <span className={cn("num font-medium", d.lastStatusCode < 300 ? "text-verified" : "text-danger")}>{d.lastStatusCode}</span> : d.lastError ? <span className="text-[12.5px] text-danger" title={d.lastError}>ERR</span> : <Muted />) },
+    { id: "latency", header: "Latency", accessorFn: (d) => d.lastLatencyMs ?? -1, meta: { phone: false, icon: TimerIcon, width: 90, align: "right" }, cell: ({ row: { original: d } }) => (d.lastLatencyMs != null ? <span className="num">{d.lastLatencyMs} ms</span> : <Muted />) },
+    { id: "attempt", header: "Attempt", accessorFn: (d) => d.attempts, meta: { phone: false, icon: RotateCcwIcon, width: 90, align: "right" }, cell: ({ row: { original: d } }) => <span className="num">{d.attempts}<span className="text-ink-3"> / 7</span></span> },
+    { id: "at", header: "Timestamp", accessorFn: (d) => d.createdAt, meta: { phone: false, icon: CalendarIcon, width: 140 }, cell: ({ row: { original: d } }) => <span className="num" title={d.createdAt}>{fmtDayTime(d.createdAt)}</span> },
     {
       id: "status", header: "Status", accessorFn: (d) => d.status, meta: { icon: ActivityIcon, width: 230 },
       cell: ({ row: { original: d } }) => (

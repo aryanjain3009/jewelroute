@@ -70,14 +70,13 @@ export function AgentRecord({ id }: { id: string }) {
             <Tip label={a.active ? "Deactivate agent" : "Reactivate agent"}><Btn icon={a.active ? UserXIcon : UserCheckIcon} aria-label={a.active ? "Deactivate agent" : "Reactivate agent"} onClick={() => setActiveOpen(true)} /></Tip>
           </>}
         />
-        <PropertySection title="Agent details">
+        <PropertySection title="Agent details" collapseBelowLg>
           <Property icon={MailIcon} label="Email"><a href={`mailto:${a.email}`} className="block min-w-0 truncate hover:underline" title={a.email}>{a.email}</a></Property>
           <Property icon={PhoneIcon} label="Phone">{a.phone && <a href={`tel:${a.phone.replace(/\s/g, "")}`} className="num hover:underline">{a.phone}</a>}</Property>
           <Property icon={HomeIcon} label="Home area">{a.homeArea}</Property>
           <Property icon={CircleDotIcon} label="Account">{a.active ? <span className="text-ink">Active · can sign in</span> : <span className="text-danger">Deactivated</span>}</Property>
-          <Property icon={TrendingUpIcon} label="Today">{planned > 0 && <span className="num">{done} of {planned} visits done</span>}</Property>
-          <Property icon={StoreIcon} label="Current visit">{open && <Link href={`/admin/visits/${open.id}`} className="hover:underline">{open.shop.name}<span className="text-ink-3"> · since {istTime(open.checkInAt)}</span></Link>}</Property>
-          <Property icon={GemIcon} label="Bag">{d.bag.length > 0 && <span className="num text-gold-ink">{d.bag.length} pieces · {formatINRCompact(bagValue)}</span>}</Property>
+          {/* Route progress and the bag are told once, in Highlights. */}
+          <Property icon={StoreIcon} label="Current visit">{open ? <Link href={`/admin/visits/${open.id}`} className="hover:underline">{open.shop.name}<span className="text-ink-3"> · since {istTime(open.checkInAt)}</span></Link> : <span className="text-ink-3">Not in a visit</span>}</Property>
           <Property icon={ScrollTextIcon} label="Open memos">{d.memos.length > 0 && <span className="num"><span className="text-gold-ink">{d.memos.length} · {formatINRCompact(memoValue)}</span>{overdue.length > 0 && <span className="text-danger"> · {overdue.length} overdue</span>}</span>}</Property>
           <Property icon={ClockIcon} label="Last check-in">{a.lastCheckInAt && <span className="num" title={new Date(a.lastCheckInAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}>{relDay(a.lastCheckInAt)}</span>}</Property>
         </PropertySection>
@@ -98,7 +97,7 @@ export function AgentRecord({ id }: { id: string }) {
               <Highlight label="Route progress" icon={TrendingUpIcon} sub={open ? `In visit at ${open.shop.name}` : planned ? `${planned - done} to go` : undefined}>
                 {planned ? <span className="num">{done} / {planned}</span> : <span className="text-ink-3">No route today</span>}
               </Highlight>
-              <Highlight label="Orders today" icon={ReceiptTextIcon} sub={`${ordersToday.length ? `${ordersToday.length} today · ` : ""}${d.orders.length} in total · excl. rejected`}>
+              <Highlight label="Orders today" icon={ReceiptTextIcon} sub={`${ordersToday.length ? `${ordersToday.length} today · ` : ""}${d.orders.length} all time · excl. rejected`}>
                 {ordersToday.length ? formatINRCompact(ordersToday.reduce((s, o) => s + o.totalPaise, 0)) : <span className="text-ink-3">None yet</span>}
               </Highlight>
               <Highlight label="In the bag" icon={GemIcon} tone={d.bag.length ? "gold" : undefined} sub={`${d.bag.length} piece${d.bag.length === 1 ? "" : "s"} · at today's rate`}>

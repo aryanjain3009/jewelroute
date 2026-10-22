@@ -2,6 +2,8 @@
 /** Visits — REFERENCE IMPLEMENTATION of an Attio list page (TitleBar → ViewBar → FilterBar → DataTable).
  *  Other list pages follow this structure exactly. */
 import * as React from "react";
+import { toast } from "sonner";
+import { copyText } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { useUrlPatch, useUrlSort, useUrlState } from "@/lib/url-state";
 import { ErrorState } from "@/components/admin-v2/sales/ui";
@@ -73,20 +75,20 @@ function VisitsBody() {
 
   const columns: Col<Row>[] = [
     {
-      id: "shop", header: "Shop", accessorFn: (r) => r.shop.name, meta: { icon: StoreIcon, width: 192 },
+      id: "shop", header: "Shop", accessorFn: (r) => r.shop.name, meta: { icon: StoreIcon, width: 196 },
       cell: ({ row: { original: r } }) => <NameCell lead={<Avatar name={r.shop.name} size={20} square />} name={r.shop.name} />,
     },
     // Status sits next to Shop: it is the column people verify, so it must never fall behind horizontal scroll.
     { id: "status", header: "Status", accessorFn: (r) => r.status, meta: { icon: CircleDotIcon, width: 108 }, cell: ({ row: { original: r } }) => <Dot tone={STATUS[r.status][0]}>{STATUS[r.status][1]}</Dot> },
-    { id: "agent", header: "Agent", accessorFn: (r) => r.agent?.name, meta: { icon: UserIcon, width: 140 }, cell: ({ row: { original: r } }) => <span className="flex min-w-0 items-center gap-2"><Avatar name={r.agent?.name ?? "?"} /><span className="truncate">{r.agent?.name}</span></span> },
-    { id: "area", header: "Area", accessorFn: (r) => r.shop.area, meta: { icon: MapPinIcon, width: 120 } },
-    { id: "planned", header: "Planned", accessorFn: (r) => `${r.plannedDate} ${r.plannedTime ?? ""}`, meta: { icon: CalendarIcon, width: 92 }, cell: ({ row: { original: r } }) => <span className="num">{view === "week" ? `${r.plannedDate.slice(8)}/${r.plannedDate.slice(5, 7)} ` : ""}{r.plannedTime ? wallTime(r.plannedTime) : <Muted>#{r.sequence}</Muted>}</span> },
+    { id: "agent", header: "Agent", accessorFn: (r) => r.agent?.name, meta: { phone: false, icon: UserIcon, width: 132 }, cell: ({ row: { original: r } }) => <span className="flex min-w-0 items-center gap-2"><Avatar name={r.agent?.name ?? "?"} /><span className="truncate">{r.agent?.name}</span></span> },
+    { id: "area", header: "Area", accessorFn: (r) => r.shop.area, meta: { phone: false, icon: MapPinIcon, width: 132 } },
+    { id: "planned", header: "Planned", accessorFn: (r) => `${r.plannedDate} ${r.plannedTime ?? ""}`, meta: { icon: CalendarIcon, width: 94 }, cell: ({ row: { original: r } }) => <span className="num">{view === "week" ? `${r.plannedDate.slice(8)}/${r.plannedDate.slice(5, 7)} ` : ""}{r.plannedTime ? wallTime(r.plannedTime) : <Muted>#{r.sequence}</Muted>}</span> },
     { id: "checkin", header: "Check-in", accessorFn: (r) => r.checkInAt ?? "", meta: { icon: ClockIcon, width: 104 }, cell: ({ row: { original: r } }) => (r.checkInAt ? <span className="num">{istTime(r.checkInAt)}</span> : r.status === "PLANNED" ? <span className="text-ink-3">Not started</span> : <Muted />) },
-    { id: "distance", header: "Distance", accessorFn: (r) => r.checkInDistanceM ?? -1, meta: { icon: RulerIcon, width: 96, align: "right" }, cell: ({ row: { original: r } }) => (r.verification === "SIMULATED" ? <span className="text-ink-3" title={SIMULATED_LOCATION}>Not measured</span> : r.checkInDistanceM != null ? <span className="num">{fmtDist(r.checkInDistanceM)}</span> : r.status === "PLANNED" ? null : <Muted />) },
-    { id: "proof", header: "Proof", accessorFn: (r) => proofOf(r), meta: { icon: CameraIcon, width: 104 }, cell: ({ row: { original: r } }) => { const p = proofOf(r); return p === "NOT_STARTED" ? null : <Dot tone={PROOF[p][0]}>{PROOF[p][1]}</Dot>; } },
-    { id: "duration", header: "Duration", accessorFn: (r) => r.durationMin ?? -1, meta: { icon: ActivityIcon, width: 100, align: "right" }, cell: ({ row: { original: r } }) => (r.durationMin != null ? <span className="num">{r.durationMin} min</span> : r.status === "PLANNED" ? null : <Muted />) },
+    { id: "distance", header: "Distance", accessorFn: (r) => r.checkInDistanceM ?? -1, meta: { phone: false, icon: RulerIcon, width: 98, align: "right" }, cell: ({ row: { original: r } }) => (r.verification === "SIMULATED" ? <span className="text-ink-3" title={SIMULATED_LOCATION} aria-label="Not measured (simulated)">—</span> : r.checkInDistanceM != null ? <span className="num">{fmtDist(r.checkInDistanceM)}</span> : r.status === "PLANNED" ? null : <Muted />) },
+    { id: "proof", header: "Proof", accessorFn: (r) => proofOf(r), meta: { phone: false, icon: CameraIcon, width: 104 }, cell: ({ row: { original: r } }) => { const p = proofOf(r); return p === "NOT_STARTED" ? null : <Dot tone={PROOF[p][0]}>{PROOF[p][1]}</Dot>; } },
+    { id: "duration", header: "Duration", accessorFn: (r) => r.durationMin ?? -1, meta: { phone: false, icon: ActivityIcon, width: 96, align: "right" }, cell: ({ row: { original: r } }) => (r.durationMin != null ? <span className="num">{r.durationMin} min</span> : r.status === "PLANNED" ? null : <Muted />) },
     {
-      id: "outcome", header: "Outcome", accessorFn: (r) => r.outcome?.orderValuePaise ?? r.orderCount, meta: { icon: ReceiptTextIcon, width: 116 },
+      id: "outcome", header: "Outcome", accessorFn: (r) => r.outcome?.orderValuePaise ?? r.orderCount, meta: { phone: false, icon: ReceiptTextIcon, width: 108 },
       cell: ({ row: { original: r } }) => {
         const o = r.outcome; const parts: string[] = [];
         if (o?.orderCount ?? r.orderCount) parts.push(o ? `Order ${formatINRCompact(o.orderValuePaise)}` : `${r.orderCount} order${r.orderCount > 1 ? "s" : ""}`);
@@ -126,7 +128,7 @@ function VisitsBody() {
           sorting={sorting}
           onSortingChange={setSorting}
           empty={<Empty icon={MapPinnedIcon} title="No visits match" hint="Change the view or filters, or assign a shop to an agent." action={(q || agent !== "all" || status !== "all" || proof !== "all") ? <Btn onClick={() => patch({ q: null, agent: null, status: null, proof: null })}>Clear filters</Btn> : <Btn icon={PlusIcon} onClick={() => setAssigning(true)}>Assign visit</Btn>} />}
-          bulkActions={(sel, clear) => <Btn variant="ghost" size="sm" onClick={() => { void navigator.clipboard?.writeText(sel.map((s) => `${s.shop.name}\t${s.agent?.name}\t${s.status}`).join("\n")); clear(); }}>Copy rows</Btn>}
+          bulkActions={(sel, clear) => <Btn variant="ghost" size="sm" onClick={async () => { if (await copyText(sel.map((s) => `${s.shop.name}\t${s.agent?.name}\t${s.status}`).join("\n"))) { toast.success(`${sel.length} row${sel.length === 1 ? "" : "s"} copied`); clear(); } else toast.error("Couldn't copy the rows."); }}>Copy rows</Btn>}
         />
       )}
       <AssignVisitDialog open={assigning} onOpenChange={setAssigning} />

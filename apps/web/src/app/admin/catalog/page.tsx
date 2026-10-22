@@ -36,6 +36,9 @@ function CatalogBody() {
   const [collection, setCollection] = useUrlState("collection", "all");
   const [sorting, setSorting] = useUrlSort([{ id: "sku", desc: false }]);
   const [creating, setCreating] = React.useState(false);
+  // ?new=1 (onboarding checklist) opens the create sheet once, then leaves the URL.
+  const [newParam, setNewParam] = useUrlState("new");
+  React.useEffect(() => { if (newParam === "1") { setCreating(true); setNewParam(""); } }, [newParam, setNewParam]);
   const openId = sp.get("design");
   const open = openId ? all.find((d) => d.id === openId) ?? null : null;
   const patch = useUrlPatch();
@@ -47,12 +50,12 @@ function CatalogBody() {
 
   const columns: Col<AdminDesign>[] = [
     { id: "name", header: "Design", accessorFn: (d) => d.name, meta: { icon: GemIcon, width: 250 }, cell: ({ row: { original: d } }) => <NameCell lead={<Thumb src={d.imageUrls[0]} alt={d.name} size={24} />} name={d.name} /> },
-    { id: "sku", header: "SKU", accessorFn: (d) => d.sku, meta: { icon: HashIcon, width: 120 }, cell: ({ row: { original: d } }) => <span className="num text-ink-2">{d.sku}</span> },
-    { id: "category", header: "Category", accessorFn: (d) => d.category, meta: { icon: TagIcon, width: 110 } },
-    { id: "collection", header: "Collection", accessorFn: (d) => d.collection, meta: { icon: LayersIcon, width: 125 }, cell: ({ row: { original: d } }) => (d.collection ? d.collection : <Muted />) },
+    { id: "sku", header: "SKU", accessorFn: (d) => d.sku, meta: { phone: false, icon: HashIcon, width: 120 }, cell: ({ row: { original: d } }) => <span className="num text-ink-2">{d.sku}</span> },
+    { id: "category", header: "Category", accessorFn: (d) => d.category, meta: { phone: false, icon: TagIcon, width: 110 } },
+    { id: "collection", header: "Collection", accessorFn: (d) => d.collection, meta: { phone: false, icon: LayersIcon, width: 125 }, cell: ({ row: { original: d } }) => (d.collection ? d.collection : <Muted />) },
     { id: "purity", header: "Purity", accessorFn: (d) => d.purity, meta: { width: 70 }, cell: ({ row: { original: d } }) => <span className="font-medium text-gold-ink">{PURITY_LABEL[d.purity]}</span> },
-    { id: "net", header: "Net wt", accessorFn: (d) => d.netWeightMg, meta: { icon: ScaleIcon, width: 90, align: "right" }, cell: ({ row: { original: d } }) => <span className="num">{formatGrams(d.netWeightMg)}</span> },
-    { id: "making", header: () => <span title="Making charge: a % of the gold value, or ₹ per gram of net weight">Making</span>, accessorFn: (d) => d.makingChargeValue, meta: { icon: PercentIcon, width: 100, align: "right" }, cell: ({ row: { original: d } }) => <span className="num text-ink-2">{making(d)}</span> },
+    { id: "net", header: "Net wt", accessorFn: (d) => d.netWeightMg, meta: { phone: false, icon: ScaleIcon, width: 90, align: "right" }, cell: ({ row: { original: d } }) => <span className="num">{formatGrams(d.netWeightMg)}</span> },
+    { id: "making", header: () => <span title="Making charge: a % of the gold value, or ₹ per gram of net weight">Making</span>, accessorFn: (d) => d.makingChargeValue, meta: { phone: false, icon: PercentIcon, width: 100, align: "right" }, cell: ({ row: { original: d } }) => <span className="num text-ink-2">{making(d)}</span> },
     { id: "price", header: "Today's price", accessorFn: (d) => d.price?.unitPricePaise ?? -1, meta: { icon: CoinsIcon, width: 130, align: "right" }, cell: ({ row: { original: d } }) => (d.price ? <span className="num font-medium text-ink" title="Before 3% GST">{formatINR(d.price.unitPricePaise)}</span> : <Muted>No rate</Muted>) },
     { id: "pieces", header: "Samples", accessorFn: (d) => d.pieces.length, meta: { icon: BoxesIcon, width: 150, footer: rows.length ? <span className="num"><span className="text-ink">{rows.reduce((n, d) => n + vault(d), 0)}</span> in vault · <span className="text-gold-ink">{rows.reduce((n, d) => n + out(d), 0)}</span> out</span> : undefined }, cell: ({ row: { original: d } }) => <Pieces d={d} /> },
   ];

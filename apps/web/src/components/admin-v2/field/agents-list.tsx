@@ -37,6 +37,9 @@ export function AgentsList() {
   const [sorting, setSorting] = useUrlSort([{ id: "status", desc: false }]);
   const [assign, setAssign] = React.useState<string | undefined>();
   const [adding, setAdding] = React.useState(false);
+  // ?new=1 (onboarding checklist) opens the create sheet once, then leaves the URL.
+  const [newParam, setNewParam] = useUrlState("new");
+  React.useEffect(() => { if (newParam === "1") { setAdding(true); setNewParam(""); } }, [newParam, setNewParam]);
   const agents = useAgentRows();
   const all = agents.data ?? [];
   const rows = all.filter((a) =>
@@ -56,24 +59,24 @@ export function AgentsList() {
       ) : <Muted>No route</Muted>,
     },
     {
-      id: "current", header: "Current visit", accessorFn: (r) => r.currentVisit?.shopName ?? "", meta: { icon: MapPinnedIcon, width: 248 },
+      id: "current", header: "Current visit", accessorFn: (r) => r.currentVisit?.shopName ?? "", meta: { phone: false, icon: MapPinnedIcon, width: 244 },
       cell: ({ row: { original: r } }) => (r.currentVisit
         ? <span className="flex min-w-0 items-baseline gap-1.5"><span className="truncate">{r.currentVisit.shopName}</span><span className="num shrink-0 text-[12.5px] text-ink-3">since {sinceLabel(r.currentVisit.since)}</span></span>
         : r.nextVisit ? <span className="truncate text-ink-3">Next: {r.nextVisit.shopName}{r.nextVisit.plannedTime ? ` · ${wallTime(r.nextVisit.plannedTime)}` : ""}</span> : <Muted />),
     },
     {
-      id: "bag", header: "Bag value", accessorFn: (r) => r.bag.valuePaise, meta: { icon: GemIcon, width: 120, align: "right", footer: <Sum v={sum(rows, (r) => r.bag.valuePaise)} gold /> },
+      id: "bag", header: "Bag value", accessorFn: (r) => r.bag.valuePaise, meta: { phone: false, icon: GemIcon, width: 120, align: "right", footer: <Sum v={sum(rows, (r) => r.bag.valuePaise)} gold /> },
       cell: ({ row: { original: r } }) => (r.bag.count ? <span className="num"><span className="text-ink-3">{r.bag.count} · </span><span className="text-gold-ink">{formatINRCompact(r.bag.valuePaise)}</span></span> : <Muted>Empty</Muted>),
     },
     {
-      id: "memos", header: "Open memos", accessorFn: (r) => r.openMemos.valuePaise, meta: { icon: ScrollTextIcon, width: 124, align: "right", footer: <Sum v={sum(rows, (r) => r.openMemos.valuePaise)} gold /> },
+      id: "memos", header: "Open memos", accessorFn: (r) => r.openMemos.valuePaise, meta: { phone: false, icon: ScrollTextIcon, width: 124, align: "right", footer: <Sum v={sum(rows, (r) => r.openMemos.valuePaise)} gold /> },
       cell: ({ row: { original: r } }) => (r.openMemos.count ? <span className="num inline-flex items-center gap-1.5">{r.openMemos.overdueCount > 0 && <span className="size-1.5 rounded-full bg-danger" title={`${r.openMemos.overdueCount} overdue`} />}<span className="text-ink-3">{r.openMemos.count} · </span><span className="text-gold-ink">{formatINRCompact(r.openMemos.valuePaise)}</span></span> : <Muted />),
     },
     {
-      id: "orders", header: "Orders today", accessorFn: (r) => r.ordersToday.valuePaise, meta: { icon: ReceiptTextIcon, width: 130, align: "right", footer: <Sum v={sum(rows, (r) => r.ordersToday.valuePaise)} /> },
+      id: "orders", header: "Orders today", accessorFn: (r) => r.ordersToday.valuePaise, meta: { phone: false, icon: ReceiptTextIcon, width: 130, align: "right", footer: <Sum v={sum(rows, (r) => r.ordersToday.valuePaise)} /> },
       cell: ({ row: { original: r } }) => (r.ordersToday.count ? <span className="num"><span className="text-ink-3">{r.ordersToday.count} · </span>{formatINRCompact(r.ordersToday.valuePaise)}</span> : <Muted />),
     },
-    { id: "lastCheckIn", header: "Last check-in", accessorFn: (r) => r.lastCheckInAt ?? "", meta: { icon: ClockIcon, width: 144 }, cell: ({ row: { original: r } }) => (r.lastCheckInAt ? <span className="num">{relDay(r.lastCheckInAt)}</span> : <Muted>Never</Muted>) },
+    { id: "lastCheckIn", header: "Last check-in", accessorFn: (r) => r.lastCheckInAt ?? "", meta: { phone: false, icon: ClockIcon, width: 148 }, cell: ({ row: { original: r } }) => (r.lastCheckInAt ? <span className="num">{relDay(r.lastCheckInAt)}</span> : <Muted>Never</Muted>) },
     { id: "status", header: "Status", accessorFn: (r) => agentState(r), meta: { icon: CircleDotIcon, width: 124 }, cell: ({ row: { original: r } }) => <StatusDot map={AGENT_STATE} value={agentState(r)} /> },
   ];
 
@@ -81,7 +84,7 @@ export function AgentsList() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <TitleBar icon={UsersIcon} iconClass={OBJECT_TINT.agents} title="Agents" info="Field agents: today's route progress, the samples in their bag and the memos they own.">
-        <Btn icon={UserPlusIcon} onClick={() => setAdding(true)}>Add agent</Btn>
+        <Btn icon={UserPlusIcon} onClick={() => setAdding(true)} aria-label="Add agent" title="Add agent"><span className="max-sm:hidden">Add agent</span></Btn>
         <Btn variant="primary" icon={PlusIcon} onClick={() => setAssign("")}>Assign visit</Btn>
       </TitleBar>
       <ViewBar right={agents.data && <span className="hidden text-[13px] text-ink-2 sm:inline"><span className="num font-medium text-ink">{sum(active, (a) => a.today.completed)}</span> of <span className="num">{sum(active, (a) => a.today.planned)}</span> visits done today</span>}>

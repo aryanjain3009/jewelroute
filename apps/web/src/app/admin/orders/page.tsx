@@ -83,15 +83,28 @@ function OrdersBody() {
       id: "number", header: "Order", accessorFn: (o) => o.number, meta: { icon: HashIcon, width: 184 },
       cell: ({ row: { original: o } }) => <NameCell name={<span className="num">{o.number}</span>} />,
     },
-    { id: "shop", header: "Shop", accessorFn: (o) => o.shop.name, meta: { icon: StoreIcon, width: 176 }, cell: ({ row: { original: o } }) => <span className="flex min-w-0 items-center gap-2" title={o.shop.area ? `${o.shop.name} · ${o.shop.area}` : o.shop.name}><Avatar name={o.shop.name} square /><span className="truncate">{o.shop.name}</span></span> },
-    { id: "agent", header: "Agent", accessorFn: (o) => o.agent.name, meta: { icon: UserIcon, width: 136 }, cell: ({ row: { original: o } }) => <span className="flex min-w-0 items-center gap-2"><Avatar name={o.agent.name} /><span className="truncate">{o.agent.name}</span></span> },
+    { id: "shop", header: "Shop", accessorFn: (o) => o.shop.name, meta: { phone: false, icon: StoreIcon, width: 164 }, cell: ({ row: { original: o } }) => <span className="flex min-w-0 items-center gap-2" title={o.shop.area ? `${o.shop.name} · ${o.shop.area}` : o.shop.name}><Avatar name={o.shop.name} square /><span className="truncate">{o.shop.name}</span></span> },
+    { id: "agent", header: "Agent", accessorFn: (o) => o.agent.name, meta: { phone: false, icon: UserIcon, width: 132 }, cell: ({ row: { original: o } }) => <span className="flex min-w-0 items-center gap-2"><Avatar name={o.agent.name} /><span className="truncate">{o.agent.name}</span></span> },
     {
       id: "amount", header: "Amount", accessorFn: (o) => o.totalPaise, meta: { icon: IndianRupeeIcon, width: 112, align: "right", footer: rows.length ? <span className="num"><span className="text-ink-3">Sum </span><span className="font-medium text-ink">{formatINRCompact(total)}</span></span> : undefined },
       cell: ({ row: { original: o } }) => <span className={cn("num font-medium", o.status === "REJECTED" || o.status === "CANCELLED" ? "text-ink-3" : "text-ink")}>{formatINR(o.totalPaise)}</span>,
     },
-    { id: "status", header: "Status", accessorFn: (o) => o.status, meta: { icon: CircleDotIcon, width: 152 }, cell: ({ row: { original: o } }) => <OrderStatusDot status={o.status} /> },
     {
-      id: "approval", header: "Approval", accessorFn: (o) => (o.approval?.required ? o.approval.reasons.join() : ""), meta: { icon: ShieldCheckIcon, width: 168 },
+      id: "status", header: "Status", accessorFn: (o) => o.status, meta: { icon: CircleDotIcon, width: 152 },
+      // Pending rows act from the row, through the side sheet: approving needs the credit check in view.
+      // Status stays visible on every width, so the action does too.
+      cell: ({ row: { original: o } }) => isPendingApproval(o.status) ? (
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="size-2 shrink-0 rounded-full bg-warn" aria-hidden /><span className="truncate max-sm:sr-only" title="Pending approval">Pending</span>
+          <button type="button" onClick={(e) => { e.stopPropagation(); preview.open(o.id); }}
+            className="press h-6 shrink-0 rounded-md sm:ml-auto border border-line-strong bg-white px-2 text-[12px] font-medium text-ink hover:bg-hover">
+            Review
+          </button>
+        </span>
+      ) : <OrderStatusDot status={o.status} />,
+    },
+    {
+      id: "approval", header: "Approval", accessorFn: (o) => (o.approval?.required ? o.approval.reasons.join() : ""), meta: { phone: false, icon: ShieldCheckIcon, width: 184 },
       cell: ({ row: { original: o } }) => {
         if (!o.approval) return <Muted />;
         if (!o.approval.required) return <Muted>Not needed</Muted>;
@@ -100,14 +113,15 @@ function OrdersBody() {
         return (
           <span className="flex min-w-0 items-center gap-1.5" title={why}>
             {pend ? <ShieldAlertIcon className="size-3.5 shrink-0 text-warn" strokeWidth={2} /> : o.status === "APPROVED" ? <ShieldCheckIcon className="size-3.5 shrink-0 text-verified" strokeWidth={2} /> : o.status === "REJECTED" ? <ShieldXIcon className="size-3.5 shrink-0 text-danger" strokeWidth={2} /> : <ShieldIcon className="size-3.5 shrink-0 text-ink-3" strokeWidth={2} />}
-            <span className={cn("truncate text-[13px]", pend ? "text-warn" : "text-ink-2")}>{pend ? shortWhy(o) : o.decidedBy ? `${o.status === "APPROVED" ? "Approved" : o.status === "REJECTED" ? "Rejected" : "Decided"} by ${o.decidedBy.name.split(" ")[0]}` : shortWhy(o)}</span>
+            {/* Status says approved/rejected; this cell says why it needed a decision and who made it. */}
+            <span className={cn("truncate text-[13px]", pend ? "text-warn" : "text-ink-2")}>{shortWhy(o)}{!pend && o.decidedBy ? ` · ${o.decidedBy.name.split(" ")[0]}` : ""}</span>
           </span>
         );
       },
     },
-    { id: "created", header: "Created", accessorFn: (o) => o.createdAt, meta: { icon: CalendarIcon, width: 132 }, cell: ({ row: { original: o } }) => <span className="num">{fmtDayTime(o.createdAt)}</span> },
+    { id: "created", header: "Created", accessorFn: (o) => o.createdAt, meta: { phone: false, icon: CalendarIcon, width: 132 }, cell: ({ row: { original: o } }) => <span className="num">{fmtDayTime(o.createdAt)}</span> },
     {
-      id: "settled", header: "Payment", accessorFn: (o) => o.settledAt ?? "", meta: { icon: WalletIcon, width: 124 },
+      id: "settled", header: "Payment", accessorFn: (o) => o.settledAt ?? "", meta: { phone: false, icon: WalletIcon, width: 124 },
       cell: ({ row: { original: o } }) => o.settledAt ? <span className="num text-ink-2">Settled {fmtDay(o.settledAt)}</span> : o.status === "CONFIRMED" || o.status === "APPROVED" ? <span className="text-ink">Unpaid</span> : <Muted />,
     },
   ];
