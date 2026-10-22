@@ -416,6 +416,7 @@ model Order {
   @@unique([tenantId, clientOpId])
   @@unique([tenantId, number])
   @@index([tenantId, status, createdAt])
+  @@index([tenantId, createdAt])
   @@index([tenantId, visitId])
   @@index([tenantId, shopId, createdAt])
   @@index([tenantId, shopId, status])
@@ -520,6 +521,8 @@ model MemoExtension {
   reason      String?
   actorId     String
   createdAt   DateTime @default(now())
+
+  @@index([memoId])
 }
 
 model WebhookEndpoint {
