@@ -112,3 +112,12 @@ export function installBigIntJson() {
     return Number(this);
   };
 }
+
+/** Opaque keyset cursor on (createdAt, id) for newest-first lists (deliveries, orders). */
+export const encodeCursor = (at: Date | string, id: string) => Buffer.from(`${new Date(at).toISOString()}|${id}`, 'utf8').toString('base64url');
+export function decodeCursor(cursor: string): { at: Date; id: string } {
+  const [ts, id] = Buffer.from(cursor, 'base64url').toString('utf8').split('|');
+  const at = new Date(ts ?? '');
+  if (!id || Number.isNaN(at.getTime())) throw badRequest('VALIDATION_FAILED', 'Invalid cursor', [{ path: 'cursor', message: 'use nextCursor from the previous page' }]);
+  return { at, id };
+}

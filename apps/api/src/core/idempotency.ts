@@ -62,7 +62,7 @@ export class IdempotencyService {
     const out = await this.prisma.tx(async (tx) => {
       const inserted = await tx.$queryRaw<{ key: string }[]>`
         INSERT INTO "IdempotencyKey" ("tenantId", key, "userId", fingerprint, "createdAt")
-        VALUES (${tenantId}, ${key}, ${ctx.user.sub}, ${fp}, now())
+        VALUES (${tenantId}, ${key}, ${ctx.user.sub}, ${fp}, (now() AT TIME ZONE 'UTC'))
         ON CONFLICT ("tenantId", key) DO NOTHING RETURNING key`;
       if (inserted.length === 0) {
         const existing = await tx.idempotencyKey.findUnique({ where: { tenantId_key: { tenantId, key } } });

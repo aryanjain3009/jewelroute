@@ -55,7 +55,7 @@ export class RatesService {
     const db = tx ?? this.prisma.db;
     const rows = await db.$queryRaw<{ id: string; purity: Purity; ratePaisePerGram: bigint; effectiveFrom: Date; createdById: string | null }[]>`
       SELECT DISTINCT ON (purity) id, purity, "ratePaisePerGram", "effectiveFrom", "createdById"
-      FROM "GoldRate" WHERE "tenantId" = ${tenantId} AND "effectiveFrom" <= now()
+      FROM "GoldRate" WHERE "tenantId" = ${tenantId} AND "effectiveFrom" <= (now() AT TIME ZONE 'UTC')
       ORDER BY purity, "effectiveFrom" DESC, "createdAt" DESC`;
     const map: RateMap = {};
     for (const r of rows) {

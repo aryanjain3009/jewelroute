@@ -4,7 +4,7 @@ import { istDate } from '@jewelroute/shared';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import type { CustodianType, Prisma, VisitStatus } from '../../generated/prisma';
-import { PrismaService } from '../prisma.service';
+import { PrismaService, Tx } from '../prisma.service';
 import { Requires } from '../common/auth';
 import { Ctx, ReqCtx } from '../common/context';
 import { badRequest, conflict, isUniqueViolation, notFound } from '../common/errors';
@@ -16,7 +16,7 @@ import { IdempotencyService } from '../core/idempotency';
 import { RatesService, valueOrZero } from '../core/rates';
 import { dateOf, toDesign, toShop, ViewsService, visitInclude } from '../core/views';
 import { Dispatcher } from '../webhooks/dispatcher';
-import { lockFamily } from './auth';
+import { lockEmail, lockFamily } from './auth';
 import { RecordsController, RecordsService } from './records';
 import { VisitsModule, VisitsService } from './visits';
 
@@ -97,6 +97,12 @@ const ActivityQuery = z.object({
 });
 
 const OPEN: VisitStatus[] = ['CHECKED_IN', 'ACTIVE'];
+
+/** Row lock on a field agent: assignment and (de)activation serialise on it. Null when not an agent of this tenant. */
+async function lockAgent(tx: Tx, tenantId: string, id: string) {
+  const [row] = await tx.$queryRaw<{ active: boolean }[]>`SELECT active FROM "User" WHERE id = ${id} AND "tenantId" = ${tenantId} AND role = 'FIELD_AGENT' FOR UPDATE`;
+  return row ?? null;
+}
 /** Orders that are real business (not rejected or cancelled). */
 const NOT_DEAD = { notIn: ['REJECTED', 'CANCELLED'] as ('REJECTED' | 'CANCELLED')[] };
 
@@ -221,6 +227,8 @@ export class AdminService {
     if (body.date < today) throw badRequest('INVALID_DATE', `Visits can only be assigned for today (${today}) or later`);
     try {
       return await this.prisma.tx(async (tx) => {
+        // Serialise with deactivation: an agent deactivated after the read above gets no new planned visit.
+        if (!(await lockAgent(tx, tid, agent.id))?.active) throw conflict('AGENT_INACTIVE', `${agent.name} is deactivated`);
         const max = await tx.visit.aggregate({ where: { tenantId: tid, agentId: agent.id, plannedDate: dateOf(body.date) }, _max: { sequence: true } });
         const v = await tx.visit.create({
           data: { tenantId: tid, agentId: agent.id, shopId: shop.id, plannedDate: dateOf(body.date), plannedTime: body.plannedTime, sequence: body.sequence ?? (max._max.sequence ?? 0) + 1, assignedById: ctx.user.sub },
@@ -299,10 +307,11 @@ export class AdminService {
   async patchShop(ctx: ReqCtx, id: string, body: z.infer<typeof ShopPatch>) {
     await this.checkAgent(ctx.user.tid, body.assignedAgentId);
     return this.prisma.tx(async (tx) => {
+      // Lock like the order create does: a limit change and an order at this shop serialise. Read the
+      // before-image only under the lock, or two concurrent PATCHes audit the same stale "before".
+      await tx.$queryRaw`SELECT id FROM "Shop" WHERE id = ${id} AND "tenantId" = ${ctx.user.tid} FOR UPDATE`;
       const before = await tx.shop.findFirst({ where: { id, tenantId: ctx.user.tid } });
       if (!before) throw notFound('Shop');
-      // Lock like the order create does: a limit change and an order at this shop serialise.
-      await tx.$queryRaw`SELECT id FROM "Shop" WHERE id = ${id} AND "tenantId" = ${ctx.user.tid} FOR UPDATE`;
       const s = await tx.shop.update({
         where: { id },
         data: {
@@ -431,6 +440,30 @@ export class AdminService {
     });
   }
 
+  // ---------------- onboarding ----------------
+  /** The owner's first-run checklist, answered from real rows (nothing is stored about "done"). */
+  async onboarding(ctx: ReqCtx) {
+    const tenantId = ctx.user.tid;
+    const db = this.prisma.db;
+    const [rates, pieces, shops, agents, issued, visits] = await Promise.all([
+      db.goldRate.count({ where: { tenantId } }),
+      db.samplePiece.count({ where: { tenantId } }),
+      db.shop.count({ where: { tenantId } }),
+      db.user.count({ where: { tenantId, role: 'FIELD_AGENT' } }),
+      db.custodyEvent.count({ where: { tenantId, reason: 'ISSUE_TO_AGENT' } }),
+      db.visit.count({ where: { tenantId } }),
+    ]);
+    const steps = [
+      { key: 'gold_rate', done: rates > 0 },
+      { key: 'catalog', done: pieces > 0 }, // a piece needs a design, so pieces > 0 means both
+      { key: 'shop', done: shops > 0 },
+      { key: 'agent', done: agents > 0 },
+      { key: 'issue', done: issued > 0 },
+      { key: 'visit', done: visits > 0 },
+    ];
+    return { steps, complete: steps.every((s) => s.done) };
+  }
+
   // ---------------- agents ----------------
   /** v2 AgentRow — one call, grouped queries (no per-agent lookups). */
   async agents(ctx: ReqCtx) {
@@ -489,6 +522,9 @@ export class AdminService {
   async createAgent(ctx: ReqCtx, body: z.infer<typeof AgentBody>) {
     try {
       return await this.prisma.tx(async (tx) => {
+        // Login is email + password with no workspace field, so an email may sign in to one workspace only.
+        await lockEmail(tx, body.email);
+        if (await tx.user.findFirst({ where: { email: body.email.toLowerCase() }, select: { id: true } })) throw conflict('EMAIL_TAKEN', 'A user with this email already exists');
         const u = await tx.user.create({
           data: { tenantId: ctx.user.tid, name: body.name, email: body.email.toLowerCase(), phone: body.phone, homeArea: body.homeArea, role: 'FIELD_AGENT', passwordHash: await bcrypt.hash(body.password, 10) },
         });
@@ -503,16 +539,26 @@ export class AdminService {
 
   async patchAgent(ctx: ReqCtx, id: string, body: z.infer<typeof AgentPatch>) {
     return this.prisma.tx(async (tx) => {
+      if (!(await lockAgent(tx, ctx.user.tid, id))) throw notFound('Agent');
       const before = await tx.user.findFirst({ where: { id, tenantId: ctx.user.tid, role: 'FIELD_AGENT' } });
       if (!before) throw notFound('Agent');
       const { password, ...rest } = body;
       const u = await tx.user.update({ where: { id }, data: { ...rest, ...(password ? { passwordHash: await bcrypt.hash(password, 10) } : {}) } });
+      let cancelledVisits = 0;
       if (body.active === false) {
         await lockFamily(tx, id);
         await tx.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+        // Nobody will check in to their planned visits: cancel them (today onward) instead of letting them turn
+        // into "missed". Open visits, the bag and memos stay as they are — custody follows the physical pieces.
+        if (before.active) {
+          // RETURNING: the audit names only visits really cancelled (a concurrent check-in keeps its visit).
+          const cancelled = await tx.visit.updateManyAndReturn({ where: { tenantId: ctx.user.tid, agentId: id, status: 'PLANNED', plannedDate: { gte: dateOf(istDate()) } }, data: { status: 'CANCELLED' }, select: { id: true } });
+          cancelledVisits = cancelled.length;
+          for (const v of cancelled) await this.audit.log(tx, ctx, 'visit.cancel_on_deactivate', 'Visit', v.id, { status: 'PLANNED' }, { status: 'CANCELLED', agentId: id });
+        }
       }
       await this.audit.log(tx, ctx, 'agent.update', 'User', id, { name: before.name, phone: before.phone, active: before.active }, { name: u.name, phone: u.phone, active: u.active, passwordChanged: !!password });
-      return { agent: { id: u.id, name: u.name, email: u.email, phone: u.phone ?? undefined, active: u.active } };
+      return { agent: { id: u.id, name: u.name, email: u.email, phone: u.phone ?? undefined, active: u.active }, cancelledVisits };
     });
   }
 
@@ -557,6 +603,11 @@ export class AdminController {
     const { before, limit, ...f } = q;
     if (before === undefined && limit === undefined) return this.activityFeed.list(ctx.user.tid, f, 100);
     return this.activityFeed.page(ctx.user.tid, f, { before, limit: limit ?? 50 });
+  }
+
+  @Get('onboarding')
+  onboarding(@Ctx() ctx: ReqCtx) {
+    return this.admin.onboarding(ctx);
   }
 
   @Get('settings')

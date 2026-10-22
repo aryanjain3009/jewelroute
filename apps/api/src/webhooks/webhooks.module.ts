@@ -10,7 +10,7 @@ import { Public, Requires } from '../common/auth';
 import { Ctx, ReqCtx } from '../common/context';
 import { decryptSecret, encryptSecret, newWebhookSecret, safeEqual, signWebhook } from '../common/crypto';
 import { AppError, badRequest, notFound } from '../common/errors';
-import { parse } from '../common/http';
+import { decodeCursor, encodeCursor, parse } from '../common/http';
 import { AuditService } from '../core/audit';
 import { OutboxService } from '../core/outbox';
 import { env, isProd } from '../env';
@@ -36,13 +36,6 @@ const DeliveriesQuery = z.object({
   cursor: z.string().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });
-const encodeCursor = (at: Date, id: string) => Buffer.from(`${at.toISOString()}|${id}`, 'utf8').toString('base64url');
-function decodeCursor(cursor: string): { at: Date; id: string } {
-  const [ts, id] = Buffer.from(cursor, 'base64url').toString('utf8').split('|');
-  const at = new Date(ts ?? '');
-  if (!id || Number.isNaN(at.getTime())) throw badRequest('VALIDATION_FAILED', 'Invalid cursor', [{ path: 'cursor', message: 'use nextCursor from the previous page' }]);
-  return { at, id };
-}
 
 const EXAMPLES: Record<string, unknown> = {
   'visit.checked_in': { visitId: 'clx…', agent: { id: 'u_1', name: 'Rahul Verma' }, shop: { id: 's_1', name: 'Sharma Jewellers' }, lat: 28.6519, lng: 77.1907, accuracyM: 12, distanceM: 31, radiusM: 100, verification: 'VERIFIED' },
@@ -64,8 +57,8 @@ const EXAMPLES: Record<string, unknown> = {
   'sample.custody_changed': { pieces: [{ id: 'clp…', tagCode: 'AJ-S-000123', seq: 3 }], from: { type: 'AGENT' }, to: { type: 'SHOP' }, fromLabel: 'Rahul Verma', toLabel: 'Sharma Jewellers', reason: 'MEMO_HANDOVER' },
 };
 
-function toEndpoint(e: Prisma.WebhookEndpointGetPayload<object>, stats?: { succeeded24h: number; failed24h: number }) {
-  return { id: e.id, url: e.url, description: e.description ?? undefined, events: e.events, active: e.active, secretLast4: e.secretLast4, createdAt: e.createdAt.toISOString(), updatedAt: e.updatedAt.toISOString(), stats: stats ?? { succeeded24h: 0, failed24h: 0 } };
+function toEndpoint(e: Prisma.WebhookEndpointGetPayload<object>, stats?: { succeeded24h: number; failed24h: number; retrying24h: number; dead24h: number }) {
+  return { id: e.id, url: e.url, description: e.description ?? undefined, events: e.events, active: e.active, secretLast4: e.secretLast4, createdAt: e.createdAt.toISOString(), updatedAt: e.updatedAt.toISOString(), stats: stats ?? { succeeded24h: 0, failed24h: 0, retrying24h: 0, dead24h: 0 } };
 }
 
 type DeliveryRow = Prisma.WebhookDeliveryGetPayload<{ include: { event: { select: { type: true; payload: true } }; endpoint: { select: { url: true } } } }>;
@@ -123,6 +116,8 @@ export class WebhooksService {
       toEndpoint(e, {
         succeeded24h: stats.filter((s) => s.endpointId === e.id && s.status === 'SUCCEEDED').reduce((a, s) => a + s._count, 0),
         failed24h: stats.filter((s) => s.endpointId === e.id && (s.status === 'FAILED' || s.status === 'DEAD')).reduce((a, s) => a + s._count, 0),
+        retrying24h: stats.filter((s) => s.endpointId === e.id && s.status === 'FAILED').reduce((a, s) => a + s._count, 0),
+        dead24h: stats.filter((s) => s.endpointId === e.id && s.status === 'DEAD').reduce((a, s) => a + s._count, 0),
       }),
     );
   }

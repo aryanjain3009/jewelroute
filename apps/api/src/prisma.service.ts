@@ -1,4 +1,4 @@
-import { Global, Injectable, Module, OnModuleDestroy } from '@nestjs/common';
+import { Global, Injectable, Logger, Module, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Prisma, PrismaClient } from '../generated/prisma';
 
 export type Tx = Prisma.TransactionClient;
@@ -14,8 +14,14 @@ export function prismaClient(): PrismaClient {
 }
 
 @Injectable()
-export class PrismaService implements OnModuleDestroy {
+export class PrismaService implements OnModuleInit, OnModuleDestroy {
   readonly db: PrismaClient = prismaClient();
+  /** Columns are UTC TIMESTAMP(3). Raw SQL takes now() AT TIME ZONE 'UTC', but column DEFAULT CURRENT_TIMESTAMP
+   *  still follows the session zone, so a non-UTC database is reported loudly at boot. */
+  async onModuleInit() {
+    const [{ tz }] = await this.db.$queryRaw<{ tz: string }[]>`SELECT current_setting('TimeZone') AS tz`;
+    if (!['UTC', 'Etc/UTC', 'GMT'].includes(tz)) new Logger('Prisma').error(`Database session TimeZone is ${tz}, not UTC: column defaults (CURRENT_TIMESTAMP) will be off by the zone offset. Run: ALTER DATABASE <db> SET timezone TO 'UTC'`);
+  }
   tx<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
     return this.db.$transaction(fn, TX_OPTS);
   }

@@ -8,8 +8,8 @@ import { createHmac } from 'node:crypto';
 import { PrismaService, Tx } from '../prisma.service';
 import { AuthUser, CurrentUser, Public, signAccessToken } from '../common/auth';
 import { randomToken, sha256 } from '../common/crypto';
-import { notFound, unauthorized } from '../common/errors';
-import { parse } from '../common/http';
+import { conflict, isUniqueViolation, notFound, unauthorized } from '../common/errors';
+import { parse, requestIdOf } from '../common/http';
 import { env, isProd } from '../env';
 
 const REFRESH_TTL_MS = 30 * 24 * 3600 * 1000;
@@ -38,6 +38,13 @@ interface TokenRow {
   deviceHash: string | null;
 }
 
+const SignupBody = z.object({
+  workspaceName: z.string().trim().min(2).max(80),
+  name: z.string().trim().min(1).max(200),
+  email: z.string().trim().email().max(200),
+  password: z.string().min(8).max(200),
+  phone: z.string().trim().max(32).optional(),
+});
 const LoginBody = z.object({ email: z.string().email().max(200), password: z.string().min(1).max(200), tenantSlug: z.string().max(64).optional() });
 
 // Constant-time-ish: compare against a dummy hash when the user does not exist.
@@ -76,6 +83,36 @@ export class AuthService {
     const device = deviceCookie && DEVICE_RE.test(deviceCookie) ? deviceCookie : randomToken(32);
     const tokens = await this.issue(user, userAgent, sha256(device));
     return { user: toUser(user), ...tokens, device };
+  }
+
+  /**
+   * Self-serve workspace: a new tenant (real, not demo) and its owner (ADMIN), signed in. Emails sign in to
+   * exactly one workspace (login has no workspace field), so the email check and the inserts run under an
+   * advisory lock on the email — concurrent signups with one address serialise and only the first wins.
+   */
+  async signup(body: z.infer<typeof SignupBody>, meta: { userAgent?: string; deviceCookie?: string; ip: string; requestId: string }) {
+    const email = body.email.toLowerCase();
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const user = await this.prisma.tx(async (tx) => {
+          await lockEmail(tx, email);
+          if (await tx.user.findFirst({ where: { email }, select: { id: true } })) throw conflict('EMAIL_TAKEN', 'An account with this email already exists. Sign in instead.');
+          const tenant = await tx.tenant.create({ data: { slug: await freeSlug(tx, body.workspaceName), name: body.workspaceName, demoMode: false } });
+          const u = await tx.user.create({
+            data: { tenantId: tenant.id, email, name: body.name, phone: body.phone || null, role: 'ADMIN', passwordHash: await bcrypt.hash(body.password, 10) },
+            include: { tenant: true },
+          });
+          await tx.auditLog.create({ data: { tenantId: tenant.id, actorId: u.id, action: 'tenant.signup', entityType: 'Tenant', entityId: tenant.id, after: { name: tenant.name, slug: tenant.slug, owner: email }, requestId: meta.requestId || null, ip: meta.ip || null } });
+          return u;
+        });
+        const device = meta.deviceCookie && DEVICE_RE.test(meta.deviceCookie) ? meta.deviceCookie : randomToken(32);
+        return { user: toUser(user), ...(await this.issue(user, meta.userAgent, sha256(device))), device };
+      } catch (e) {
+        // Two signups picked the same free slug at once: the loser takes the next one.
+        if (attempt < 3 && isUniqueViolation(e, 'slug')) continue;
+        throw e;
+      }
+    }
   }
 
   /**
@@ -145,6 +182,19 @@ export class AuthService {
   }
 }
 
+/** Serialises "is this email free?" with the insert that takes it (signup, agent create). */
+export async function lockEmail(tx: Tx, email: string) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`email:${email.toLowerCase()}`}::text))`;
+}
+
+/** "Aurum Jewels" → aurum-jewels, or aurum-jewels-2 … when taken. */
+async function freeSlug(tx: Tx, name: string) {
+  const base = name.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '') || 'workspace';
+  const candidates = [base, ...Array.from({ length: 19 }, (_, i) => `${base}-${i + 2}`)];
+  const taken = new Set((await tx.tenant.findMany({ where: { slug: { in: candidates } }, select: { slug: true } })).map((t) => t.slug));
+  return candidates.find((c) => !taken.has(c)) ?? `${base}-${randomToken(4).toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+}
+
 /** Per-user lock shared by rotation, grace reuse, family revocation, logout-all and deactivation. */
 export async function lockFamily(tx: Tx, userId: string) {
   // $executeRaw: pg_advisory_xact_lock returns void, which $queryRaw cannot deserialize.
@@ -170,6 +220,19 @@ export class AuthController {
   @ApiOperation({ summary: 'Email + password login; sets jr_at / jr_rt httpOnly cookies' })
   async login(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const r = await this.auth.login(parse(LoginBody, body), req.headers['user-agent'], cookieOf(req, DEVICE_COOKIE));
+    setCookies(res, r);
+    res.cookie(DEVICE_COOKIE, r.device, { httpOnly: true, secure: isProd(), sameSite: 'lax', path: '/', maxAge: DEVICE_TTL_MS });
+    return { user: r.user, accessToken: r.accessToken, refreshToken: r.refreshToken };
+  }
+
+  @Public()
+  // ponytail: per-IP cap only; email verification / captcha is the upgrade when signup is public.
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Post('signup')
+  @HttpCode(201)
+  @ApiOperation({ summary: 'Create a workspace and its owner; signs the owner in (same cookies as login)' })
+  async signup(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const r = await this.auth.signup(parse(SignupBody, body), { userAgent: req.headers['user-agent'], deviceCookie: cookieOf(req, DEVICE_COOKIE), ip: req.ip ?? '', requestId: requestIdOf(req) });
     setCookies(res, r);
     res.cookie(DEVICE_COOKIE, r.device, { httpOnly: true, secure: isProd(), sameSite: 'lax', path: '/', maxAge: DEVICE_TTL_MS });
     return { user: r.user, accessToken: r.accessToken, refreshToken: r.refreshToken };

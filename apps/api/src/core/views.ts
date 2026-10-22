@@ -211,7 +211,7 @@ export class ViewsService {
 
   async orders(tenantId: string, where: Prisma.OrderWhereInput, opts: { take?: number; tx?: Tx } = {}) {
     const db = opts.tx ?? this.prisma.db;
-    const rows = await db.order.findMany({ where: { ...where, tenantId }, include: orderInclude, orderBy: { createdAt: 'desc' }, take: opts.take });
+    const rows = await db.order.findMany({ where: { ...where, tenantId }, include: orderInclude, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: opts.take });
     const names = await this.userNames(rows.map((o) => o.decidedById), opts.tx);
     return rows.map((o) => toOrder(o, names));
   }

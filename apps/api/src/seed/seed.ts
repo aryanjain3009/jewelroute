@@ -177,7 +177,9 @@ export async function runSeed(prisma: PrismaClient, opts: SeedOptions): Promise<
   const rateRows: { purity: Purity; ymd: string; id: string; rate: number; at: Date }[] = [];
   for (let i = 0; i < 10; i++) {
     const ymd = addDays(TODAY, i - 9);
-    const when = at(ymd, '10:00');
+    // Before 10:00 IST `at` clamps today's row to "now", after the morning's orders (≤95 min ago) — so the
+    // rate an order was priced from would look set after it was booked. Keep today's row 2 h back instead.
+    const when = i === 9 ? new Date(Math.min(at(ymd, '10:00').getTime(), Date.now() - 2 * 3600_000)) : at(ymd, '10:00');
     for (const pu of ['K24', 'K22', 'K18'] as const) rateRows.push({ purity: pu, ymd, id: `gr_${ulid()}`, rate: round(BASE[pu] * DRIFT[i]), at: when });
   }
   await prisma.goldRate.createMany({ data: rateRows.map((r) => ({ id: r.id, tenantId, purity: r.purity, ratePaisePerGram: BigInt(r.rate), effectiveFrom: r.at, createdAt: r.at, createdById: admin.id, source: 'MANUAL' })) });

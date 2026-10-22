@@ -11,7 +11,7 @@ import { PrismaService } from '../prisma.service';
 import { Requires } from '../common/auth';
 import { Ctx, ReqCtx } from '../common/context';
 import { badRequest, notFound } from '../common/errors';
-import { parse, ymd } from '../common/http';
+import { decodeCursor, encodeCursor, parse, ymd } from '../common/http';
 import { ActivityFilter, ActivityService } from '../core/activity';
 import { auditSummary, resolveAuditRefs } from '../core/audit-summary';
 import { CreditService } from '../core/credit';
@@ -24,7 +24,7 @@ export type Ref = { id: string; name: string };
 export type ProofState = 'VERIFIED' | 'LOW_ACCURACY' | 'SIMULATED' | 'MISSING' | 'NOT_STARTED';
 export type PieceStatus = 'IN_VAULT' | 'WITH_AGENT' | 'ON_MEMO' | 'OVERDUE' | 'SOLD' | 'LOST';
 export type ShopStatus = 'ACTIVE' | 'MEMO_OVERDUE' | 'DORMANT' | 'NEW';
-export type AttentionKind = 'MEMO_OVERDUE' | 'MEMO_DUE_TODAY' | 'VISIT_MISSED' | 'PROOF_MISSING' | 'PROOF_SIMULATED' | 'ORDER_PENDING' | 'WEBHOOK_FAILING' | 'ACK_SELF_SUSPECTED';
+export type AttentionKind = 'MEMO_OVERDUE' | 'MEMO_DUE_TODAY' | 'VISIT_MISSED' | 'PROOF_MISSING' | 'PROOF_SIMULATED' | 'ORDER_PENDING' | 'WEBHOOK_FAILING' | 'ACK_SELF_SUSPECTED' | 'AGENT_INACTIVE_CUSTODY';
 export interface AttentionItem {
   id: string;
   kind: AttentionKind;
@@ -33,7 +33,7 @@ export interface AttentionItem {
   subtitle: string;
   amountPaise?: number;
   at: string;
-  entity: { type: 'memo' | 'visit' | 'order' | 'webhook' | 'shop'; id: string };
+  entity: { type: 'memo' | 'visit' | 'order' | 'webhook' | 'shop' | 'agent'; id: string };
 }
 
 const OPEN_VISIT: VisitStatus[] = ['CHECKED_IN', 'ACTIVE'];
@@ -98,7 +98,7 @@ const VisitsQuery = z.object({
   status: z.string().max(200).optional(),
   proof: z.string().max(200).optional(),
 });
-const OrdersQuery = z.object({ status: z.string().max(100).optional(), from: ymd.optional(), to: ymd.optional(), agentId: z.string().max(64).optional(), shopId: z.string().max(64).optional() });
+const OrdersQuery = z.object({ status: z.string().max(100).optional(), from: ymd.optional(), to: ymd.optional(), agentId: z.string().max(64).optional(), shopId: z.string().max(64).optional(), cursor: z.string().max(200).optional(), limit: z.coerce.number().int().min(1).max(200).optional() });
 const MemosQuery = z.object({ filter: z.enum(['active', 'due_today', 'overdue', 'returned', 'all']).default('active'), shopId: z.string().max(64).optional(), agentId: z.string().max(64).optional() });
 const PiecesQuery = z.object({
   q: z.string().max(100).optional(),
@@ -363,9 +363,12 @@ export class RecordsService {
         WHERE v."tenantId" = ${tid} AND v.status = 'PLANNED' AND v."plannedDate" >= ${today}::date AND v."shopId" = ANY(${ids})
         ORDER BY v."shopId", v."plannedDate", v."plannedTime" NULLS LAST, v.sequence`,
       this.db.$queryRaw<{ id: string; shopId: string; number: string; status: OrderStatus; totalPaise: bigint; createdAt: Date; settledAt: Date | null }[]>`
-        SELECT DISTINCT ON (o."shopId") o.id, o."shopId", o.number, o.status, o."totalPaise", o."createdAt", o."settledAt"
-        FROM "Order" o WHERE o."tenantId" = ${tid} AND o."shopId" = ANY(${ids})
-        ORDER BY o."shopId", o."createdAt" DESC, o.id DESC`,
+        SELECT o.* FROM unnest(${ids}::text[]) AS s(id)
+        CROSS JOIN LATERAL (
+          -- One index probe per shop on ("tenantId", "shopId", "createdAt"); DISTINCT ON sorted every order of the tenant (EXPLAIN.md).
+          SELECT o.id, o."shopId", o.number, o.status, o."totalPaise", o."createdAt", o."settledAt"
+          FROM "Order" o WHERE o."tenantId" = ${tid} AND o."shopId" = s.id
+          ORDER BY o."createdAt" DESC, o.id DESC LIMIT 1) o`,
     ]);
     const E = new Map(exposure.map((e) => [e.shopId, e]));
     const L = new Map(lastVisits.map((l) => [l.shopId, l]));
@@ -449,7 +452,7 @@ export class RecordsService {
     const today = istDate();
     const nowIstHour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', hour12: false }).format(new Date()));
     const since24h = new Date(Date.now() - DAY_MS);
-    const [memos, missed, noProof, simulated, pending, failing, selfAcks] = await Promise.all([
+    const [memos, missed, noProof, simulated, pending, failing, selfAcks, inactive] = await Promise.all([
       this.views.memos(tid, { status: { in: OPEN_MEMO }, dueDate: { lte: dateOf(day) } }, { orderBy: { dueDate: 'asc' }, take: 100 }),
       this.db.visit.findMany({
         where: {
@@ -478,8 +481,27 @@ export class RecordsService {
         orderBy: { ackAt: 'desc' },
         take: 50,
       }),
+      // Deactivated agents who still hold pieces or an open visit: custody that nobody can work any more.
+      this.db.user.findMany({
+        where: { tenantId: tid, role: 'FIELD_AGENT', active: false, OR: [{ piecesHeld: { some: { custodianType: 'AGENT' } } }, { visits: { some: { status: { in: OPEN_VISIT } } } }] },
+        select: { id: true, name: true, _count: { select: { piecesHeld: { where: { custodianType: 'AGENT' } }, visits: { where: { status: { in: OPEN_VISIT } } } } } },
+        take: 50,
+      }),
     ]);
     const items: AttentionItem[] = [];
+    for (const a of inactive) {
+      const n = a._count.piecesHeld;
+      const holds = [n ? `${n} piece${n === 1 ? '' : 's'}` : '', a._count.visits ? 'an open visit' : ''].filter(Boolean).join(' and ');
+      items.push({
+        id: `agent_inactive:${a.id}`,
+        kind: 'AGENT_INACTIVE_CUSTODY',
+        severity: 'high',
+        title: `${a.name} is deactivated and still holds ${holds}`,
+        subtitle: n ? 'Return the pieces to the vault or reactivate the agent' : 'Reactivate the agent to complete the visit',
+        at: new Date().toISOString(),
+        entity: { type: 'agent', id: a.id },
+      });
+    }
     for (const m of memos) {
       const overdue = m.dueDate < day;
       if (!overdue && m.dueDate !== day) continue;
@@ -698,7 +720,14 @@ export class RecordsService {
     if (q.agentId) where.agentId = q.agentId;
     if (q.shopId) where.shopId = q.shopId;
     if (q.from || q.to) where.createdAt = { ...(q.from ? { gte: istStart(q.from) } : {}), ...(q.to ? { lt: istStart(addDays(q.to, 1)) } : {}) };
-    return this.views.orders(ctx.user.tid, where, { take: 500 });
+    // Without limit/cursor: the latest 500 as a bare array (v1 shape). With either: keyset pages on (createdAt, id).
+    if (q.limit === undefined && q.cursor === undefined) return this.views.orders(ctx.user.tid, where, { take: 500 });
+    const limit = q.limit ?? 50;
+    const c = q.cursor ? decodeCursor(q.cursor) : undefined;
+    const rows = await this.views.orders(ctx.user.tid, c ? { AND: [where, { OR: [{ createdAt: { lt: c.at } }, { createdAt: c.at, id: { lt: c.id } }] }] } : where, { take: limit + 1 });
+    const page = rows.slice(0, limit);
+    const last = page[page.length - 1];
+    return { items: page, nextCursor: rows.length > limit && last ? encodeCursor(last.createdAt, last.id) : undefined };
   }
 
   async orderRecord(ctx: ReqCtx, id: string) {

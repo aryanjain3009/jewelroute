@@ -209,14 +209,14 @@ export class Dispatcher implements DispatchQueue {
   async claim(limit: number, onlyId?: string): Promise<string[]> {
     const rows = onlyId
       ? await this.prisma.db.$queryRaw<{ id: string }[]>`
-          UPDATE "WebhookDelivery" SET "lockedUntil" = now() + make_interval(secs => ${LOCK_SECONDS})
-          WHERE id IN (SELECT id FROM "WebhookDelivery" WHERE id = ${onlyId} AND ("lockedUntil" IS NULL OR "lockedUntil" < now()) FOR UPDATE SKIP LOCKED)
+          UPDATE "WebhookDelivery" SET "lockedUntil" = (now() AT TIME ZONE 'UTC') + make_interval(secs => ${LOCK_SECONDS})
+          WHERE id IN (SELECT id FROM "WebhookDelivery" WHERE id = ${onlyId} AND ("lockedUntil" IS NULL OR "lockedUntil" < (now() AT TIME ZONE 'UTC')) FOR UPDATE SKIP LOCKED)
           RETURNING id`
       : await this.prisma.db.$queryRaw<{ id: string }[]>`
-          UPDATE "WebhookDelivery" SET "lockedUntil" = now() + make_interval(secs => ${LOCK_SECONDS})
+          UPDATE "WebhookDelivery" SET "lockedUntil" = (now() AT TIME ZONE 'UTC') + make_interval(secs => ${LOCK_SECONDS})
           WHERE id IN (
             SELECT id FROM "WebhookDelivery"
-            WHERE status IN ('PENDING', 'FAILED') AND "nextAttemptAt" <= now() AND ("lockedUntil" IS NULL OR "lockedUntil" < now())
+            WHERE status IN ('PENDING', 'FAILED') AND "nextAttemptAt" <= (now() AT TIME ZONE 'UTC') AND ("lockedUntil" IS NULL OR "lockedUntil" < (now() AT TIME ZONE 'UTC'))
             ORDER BY "nextAttemptAt" LIMIT ${limit} FOR UPDATE SKIP LOCKED)
           RETURNING id`;
     return rows.map((r) => r.id);
@@ -293,8 +293,8 @@ export class Dispatcher implements DispatchQueue {
    */
   async retryNow(deliveryId: string) {
     const claimed = await this.prisma.db.$queryRaw<{ id: string }[]>`
-      UPDATE "WebhookDelivery" SET status = 'PENDING', "nextAttemptAt" = now(), "lockedUntil" = now() + make_interval(secs => ${LOCK_SECONDS})
-      WHERE id = ${deliveryId} AND ("lockedUntil" IS NULL OR "lockedUntil" < now())
+      UPDATE "WebhookDelivery" SET status = 'PENDING', "nextAttemptAt" = (now() AT TIME ZONE 'UTC'), "lockedUntil" = (now() AT TIME ZONE 'UTC') + make_interval(secs => ${LOCK_SECONDS})
+      WHERE id = ${deliveryId} AND ("lockedUntil" IS NULL OR "lockedUntil" < (now() AT TIME ZONE 'UTC'))
       RETURNING id`;
     if (claimed.length) {
       await this.deliver(deliveryId);

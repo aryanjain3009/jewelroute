@@ -298,9 +298,12 @@ export class OrdersService {
   async settle(ctx: ReqCtx, id: string) {
     const tid = ctx.user.tid;
     return this.prisma.tx(async (tx) => {
-      const o = await tx.order.findFirst({ where: { id, tenantId: tid }, include: { shop: { select: { id: true, name: true } }, agent: { select: { id: true, name: true } } } });
-      if (!o) throw notFound('Order');
-      await this.lockShop(tx, tid, o.shopId);
+      const head = await tx.order.findFirst({ where: { id, tenantId: tid }, select: { shopId: true } });
+      if (!head) throw notFound('Order');
+      await this.lockShop(tx, tid, head.shopId);
+      // Every order status change holds this shop lock, so the row read now is the status being settled
+      // (read before the lock, an approve committing in between left order.settled saying PENDING_APPROVAL).
+      const o = await tx.order.findFirstOrThrow({ where: { id, tenantId: tid }, include: { shop: { select: { id: true, name: true } }, agent: { select: { id: true, name: true } } } });
       const now = new Date();
       const r = await tx.order.updateMany({ where: { id, tenantId: tid, status: { in: LIVE }, settledAt: null }, data: { settledAt: now } });
       if (r.count !== 1) {
