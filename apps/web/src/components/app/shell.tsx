@@ -6,7 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BoxesIcon, ChevronDownIcon, CodeXmlIcon, GemIcon, HomeIcon, LogOutIcon, MapPinnedIcon, PanelLeftIcon,
-  PlugIcon, ReceiptTextIcon, ScrollTextIcon, SearchIcon, Settings2Icon, SmartphoneIcon, StoreIcon, UsersIcon,
+  ReceiptTextIcon, ScrollTextIcon, SearchIcon, Settings2Icon, SmartphoneIcon, StoreIcon, UsersIcon,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { formatRate } from "@jewelroute/shared";
@@ -45,7 +45,6 @@ export const ADMIN_NAV: NavGroup[] = [
   ] },
   { label: "Workspace", items: [
     { href: "/admin/catalog", label: "Catalog", icon: BoxesIcon, tint: OBJECT_TINT.catalog },
-    { href: "/admin/integrations", label: "Integrations", icon: PlugIcon, tint: OBJECT_TINT.integrations },
     { href: "/admin/settings", label: "Settings", icon: Settings2Icon, tint: OBJECT_TINT.settings },
   ] },
 ];
