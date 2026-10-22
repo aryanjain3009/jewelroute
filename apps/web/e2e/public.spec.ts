@@ -126,6 +126,28 @@ test("public: /login makes the demo choice obvious — Rahul on a phone, Priya o
   await ctx.close();
 });
 
+test("public: /login asks who is signing in — field agent or manager — and the account still decides", async ({ page }) => {
+  await page.goto("/login");
+  const agent = page.getByRole("radio", { name: "Field agent" });
+  const manager = page.getByRole("radio", { name: "Manager" });
+  await expect(agent).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByText(/Your route, check-ins/)).toBeVisible();
+  await manager.click();
+  await expect(page).toHaveURL(/[?&]as=manager/);
+  await expect(page.getByText(/Approvals, visits, shops/)).toBeVisible();
+  await expect(page.getByText("Opens the manager dashboard.", { exact: false })).toBeVisible();
+  // A deep link into /admin preselects Manager.
+  await page.goto("/login?next=%2Fadmin%2Forders");
+  await expect(page.getByRole("radio", { name: "Manager" })).toHaveAttribute("aria-checked", "true");
+  // Picking the wrong role never blocks: a manager account signed in as "Field agent" lands on /admin with a note.
+  await page.goto("/login?as=agent");
+  await page.getByLabel(/email/i).fill("admin@aurum.test");
+  await page.getByLabel(/password/i).fill("Aurum@2026");
+  await page.getByRole("button", { name: /^sign in$/i }).click();
+  await expect(page).toHaveURL(/\/admin$/, { timeout: 45_000 });
+  await expect(page.getByText("This is a manager account")).toBeVisible();
+});
+
 test("public: /ack/[token] — pending receipt, one confirm, a lasting receipt; invalid and expired links explain themselves", async ({ browser }) => {
   test.setTimeout(120_000);
   const memo = await memoToken(browser, 2);
