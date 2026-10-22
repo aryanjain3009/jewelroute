@@ -1,0 +1,12 @@
+{
+  "who": "visitor",
+  "pages": [
+    "/",
+    "/login",
+    "/signup",
+    "/developers"
+  ],
+  "controls": 17,
+  "failures": [],
+  "at": "2026-10-22T03:43:29.273Z"
+}

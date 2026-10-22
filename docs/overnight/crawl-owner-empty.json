@@ -1,0 +1,27 @@
+{
+  "who": "owner-empty",
+  "pages": [
+    "/admin",
+    "/admin/visits",
+    "/admin/agents",
+    "/admin/shops",
+    "/admin/orders",
+    "/admin/memos",
+    "/admin/samples",
+    "/admin/catalog",
+    "/admin/integrations",
+    "/admin/settings",
+    "/admin/settings?tab=approvals",
+    "/admin/settings?tab=workspace",
+    "/admin/settings?tab=gold-rate",
+    "/admin/catalog?new=1",
+    "/admin/shops?new=1",
+    "/admin/agents?new=1",
+    "/admin/samples?view=memo",
+    "/admin/memos?view=overdue",
+    "/admin/orders?view=pending"
+  ],
+  "controls": 161,
+  "failures": [],
+  "at": "2026-10-22T03:41:55.890Z"
+}

@@ -1,0 +1,91 @@
+# Overnight log (times IST)
+
+- **02:56** Started on branch `overnight` (from `main` dde3f88). Read OVERNIGHT-v2.md and the required docs.
+- **02:56** Decision: the user's instruction overrides OVERNIGHT-v2.md §4. Aryan's repository is not fetched or touched, so there is no `super-final` branch and no `apply-to-aryan.sh`. The loop runs until 09:15; the deliverable is `~/claude-code-playground/JewelRoute-OUR-FINAL.zip`, built by 10:00.
+- **02:57** Local setup: `pnpm install --frozen-lockfile`. The tests default to `postgres:postgres@127.0.0.1`, so I created a local `postgres` superuser role and the `jewelroute_test` database on the Homebrew Postgres 16.
+- **03:00** Wrote SYSTEM-DESIGN.md and BACKLOG.md. Found that self-serve signup does not exist. Agent create and deactivate already exist in the API and the admin UI.
+- **03:00** Decision: split the work into isolated git worktrees so that parallel work cannot clobber the tree or the test database:
+  - lead (main tree): signup, onboarding, tenancy and the crawler;
+  - `wt-conc`: the concurrency suite and EXPLAIN;
+  - `wt-admin`: admin UI critic items;
+  - `wt-public`: landing hero, field and public critic items.
+  Each worktree has its own database and ports. I merge their branches into `overnight` after the gates pass.
+- **03:02** Baseline `pnpm verify` was red before any change. Two causes:
+  1. Node 24 prints test counts as `ℹ pass N`, so verify reported a false ZERO-RUN. The repo pins Node 22 (`.nvmrc`); from now on every gate runs on Node 22.23.3, and verify.mjs also parses the Node 24 format.
+  2. API tests 7, A11 and F12 (webhook backoff) failed on Node 22 too. The local Postgres runs in Asia/Kolkata, and raw SQL compares UTC `TIMESTAMP(3)` columns with `now()` and `timestamptz` params in the session zone. Retries therefore fired at once, leases lasted 5.5 h, and a future gold rate would apply early.
+- **03:08** Decision: fix the timezone at the database default (migration `20261022000000_session_timezone_utc` plus a down script), not with a connection-string `options` flag, because poolers may refuse that parameter. The API logs an error at boot on a non-UTC session. Commit 53ba4d3; proof: tests 7a, 7, A11 and F12 green, and V11 runs the new down script first.
+- **03:14** Signup and onboarding API, commit 4822e02. Proof: `tenancy.test.ts` S1–S5, and `pnpm verify` 83/83 API, 14/14 shared, harness green.
+  - Decision: an email signs in to exactly one workspace, because login has no workspace field. Signup and agent creation take an advisory lock on the email, then check it: a check-then-insert under a lock, so 10 parallel signups yield exactly one workspace (S3).
+  - Decision: signup workspaces are real (`demoMode: false`), with no simulated GPS. The approval threshold starts unset.
+  - Honest note: the S-tests were written before the code but first ran after it. S5 proves existing isolation; it is not a fix.
+- **03:17** Launched the worktree agents (all from 4822e02):
+  - `wt-conc`: concurrency ×20 and EXPLAIN; DBs `jewelroute_test_conc` and `jewelroute_explain`.
+  - `wt-admin`: admin critic items; stack on :3100/:4100.
+  - `wt-public`: hero, field and public pages; stack on :3200/:4200.
+  Each must stop new work at 07:20 and report by 07:40.
+- **03:25** `/signup` page and the onboarding checklist on Home, commit 2f81e73. Proof: e2e `admin-signup.spec.ts` (signup → 0/3/5/6 of 6 ticks from real data → the new agent checks in VERIFIED at the new shop at 390); shots in `docs/overnight/shots/lead/`.
+  - Decision: the checklist is answered by the API (`/admin/onboarding` counts rows) and disappears when complete. No "done" flag is stored.
+- **03:32** Agent deactivation, commit eb56953, proof test S6.
+  - Decision: deactivation cancels PLANNED visits from today on, but leaves the open visit, bag and memos alone, because custody follows the physical pieces.
+  - A new Home attention item, `AGENT_INACTIVE_CUSTODY`, stays until the pieces are back in the vault. Assigning or issuing to an inactive agent was already refused.
+- **03:45** Built the route-and-control crawler (`admin-crawl.spec.ts`), commit 714b8b9. Final run, with zero 4xx/5xx and zero console or page errors:
+  - manager: 32 pages, 367 controls;
+  - agent: 6 pages, 39 controls;
+  - visitor: 4 pages, 17 controls.
+  - First-run finding, fixed: copy buttons on the visit record and Visits bulk copy threw unhandled clipboard rejections, and claimed "Link copied" even when the copy failed.
+- **03:55** Independent reviews of the lead's T3 commits: security APPROVE, migration APPROVE.
+  - Fixed in d5bdd7c: M3 bounded slug lookup; L1 the audit lists only the visits actually cancelled; L3 brain notes L0022 and L0023.
+  - Open, with reasons: M1/M2 email verification and a shared rate-limit store before signup is public; F4 making each raw SQL time comparison zone-proof (the DB default now covers it); F1 refusing to boot on a non-UTC session in production (kept as an error log so a non-owner deploy is not an outage).
+- **04:00** Made the raw SQL timing independent of the session zone, commit f33c573: every raw `now()` is now `(now() AT TIME ZONE 'UTC')`, and test 7a fails on any bare `now()` in `src`.
+  - Evidence: with `jewelroute_test` forced back to Asia/Kolkata, the api, audit, failures and v3 suites pass 63/64. The only failure is 7a's deliberate UTC assertion; before the fix, 7, A11 and F12 failed there. Restored UTC afterwards.
+- **04:05** Full gate round:
+  - API e2e 31/31 against :4000;
+  - full Playwright 41/41 (field, admin, landing);
+  - crawler of a brand-new owner's empty workspace: 17 pages, 151 controls, 0 failures (commit 5d9be16);
+  - empty-agent crawl: 5 pages, 0 failures.
+  - New opt-in screenshot sweep `admin-screens.spec.ts`: 27 pages × 390/768/1440 (bcb46b9).
+- **04:20** Decision: no separate OWNER/MANAGER roles tonight (backlog #23). It needs an enum migration plus permission gating on every admin screen while `wt-admin` edits them, so the conflict risk is too high. It stays documented in SYSTEM-DESIGN (one enum value + one `ROLE_PERMISSIONS` row).
+- **04:30** Merged `wt-conc` (06bb728, 128f081):
+  - concurrency ×20 for all 9 races; C3 (settle event status) and C6 (shop PATCH before-image) found and fixed under the shop lock;
+  - EXPLAIN at three volumes shows no N+1;
+  - two indexes added: `Order(tenantId, createdAt)` and `MemoExtension(memoId)`; the shop list's "last order" query moved to LATERAL.
+  - Gate after the merge: 97/97 API.
+- **04:40** Reviews of the lead's T3 range: security APPROVE, migration APPROVE, invariant REJECT, verifier REJECT. Fixed in e2e2877:
+  - invariant item 10: one audit row per cancelled visit (S6);
+  - verifier finding 4: assign ‖ deactivate race. The S7 test was red without the new agent-row lock (7 stray planned visits) and green with it;
+  - the crawler's claimed scope was overstated: `?tab=` pages are now counted, sample ids normalised, the sale workspace added as a start route, and the doc states the real limits;
+  - docs updated: contract body, L0022/L0023, backlog.
+  - The verifier's one red run (P4, Home not 2xx) did not reproduce in 2 reruns or alone. Its log was overwritten by another run in the shared scratchpad, so it is logged as unexplained, not dismissed.
+  - Human decisions left open: a SQL unique index on `lower(email)`; signup replay-on-retry (signup takes no Idempotency-Key); email verification and a shared rate-limit store before public signup.
+- **04:45** Interim merge of `wt-admin` (15 commits) and `wt-public` (3 commits) into `overnight`: no conflicts.
+  - After the merge, records.test X1 (plan shape) failed on the shared test DB. Stale statistics after a reseed made the planner see 1–12 Order rows and choose a sort. Fixed the test, not the index: ANALYZE first, then price out sorts and bitmap scans, as was already done for seq scans. Commit 9eaf75e; verify 99/99.
+- **04:57** Stack rebuilt on the merged code:
+  - full Playwright 43/43;
+  - API e2e first failed at step 20 with a 500. Cause: `FATAL: sorry, too many clients already`. Postgres `max_connections` = 100, shared by three stacks (21 pooled connections each) and the agents' test runs. Environmental, not a regression; the rerun passed 31/31.
+  - Decision: do not raise `max_connections`, because it needs a Postgres restart under the agents' running stacks.
+- **05:25** Crawler on the merged tree, all 0 failures:
+  - manager 32 pages / 373 controls;
+  - new owner 19 / 161;
+  - agent 7 / 67;
+  - visitor 4 / 17;
+  - empty agent 5 / 5.
+  One earlier attempt timed out under DB connection pressure; the budget was raised to 25 min.
+- **05:30** Independent critic sweep of the merged build. Findings sent to the agents:
+  - `wt-admin`: the shop record says ₹3.54L four times, and "Last visit: No value" while an agent is in visit there; a broken proof thumbnail shows its alt text.
+  - `wt-public`: a broken arrival-photo thumbnail; "jewelry" vs "jewellery".
+  - Fixed my sweep fixture to upload a real JPEG.
+- **05:35** S5 now proves the own-workspace file URL serves (200) before asserting the foreign ones 404 (verifier note), commit d516bf6.
+- **05:38** Backlog #28: opt-in keyset paging on `GET /admin/orders` (`limit`/`cursor` → `{ items, nextCursor }`). The bare 500-row list is unchanged for the web. Test R6, commit f2b344f; verify 100/100.
+- **05:50–08:50** The disk filled (100%, about 117 MB free). Every command and every agent's gate failed with ENOSPC.
+  - wt-admin stopped early at 05:58; its final report and commits are intact.
+  - wt-public reported at about 05:50. It had stopped wt-admin's API by mistake, by reading a pid file from the shared scratchpad, and its uncommitted, ungated changes were left out.
+  - The lead's admin merge (`cfac54b`) was committed; the public merge attempt failed partway.
+  - Deletions need human approval, so nothing could be freed until the user cleared space at about 08:50 (19 GB free).
+- **08:51** Stashed the partial public-merge output (stash "partial wt-public merge output after ENOSPC") and moved 2 untracked files to the scratchpad. Re-merged wt-public up to 115ce15 cleanly (3835632).
+- **08:54** Final gates on the frozen tree:
+  - `pnpm verify` PASSED: API 100/100, shared 14/14, harness 102/102;
+  - API e2e 31/31;
+  - full Playwright 44/44;
+  - crawler 4/4: 67 pages, 627 controls, 0 failures;
+  - screenshot sweep: 81 shots.
+- **09:13** Freeze. FINAL-REPORT.md written; zip built from `overnight`.

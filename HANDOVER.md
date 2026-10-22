@@ -21,13 +21,22 @@ It has two apps. The **field app** is phone-first and used by agents in shops. T
   - harness hook tests: 102/102.
 - Gates: the production web build passes, and so does `pnpm verify`.
 - **Not deployed yet.** Deploying needs a GitHub repo; see §6.
+- **Overnight, 22 Oct 2026** (branch `overnight`; details in `docs/overnight/FINAL-REPORT.md` of the deliverable, `docs/overnight/LOG.md`):
+  - **Self-serve workspaces.** `/signup` creates a business workspace and its owner. Home then shows a six-step onboarding checklist: gold rate, design and pieces, shop, agent, issue pieces, plan a visit. The demo tenant and its one-tap logins are unchanged.
+  - **Agent deactivation** cancels the agent's planned visits. Home flags any pieces a deactivated agent still holds.
+  - **Database sessions run in UTC.** A Postgres in IST used to fire webhook retries at once.
+  - New test suites:
+    - concurrency ×20 for 9 races;
+    - tenant isolation across 3 signed-up workspaces;
+    - a route-and-control crawler for the manager, the agent, a visitor and a new owner.
+  - Two hot-path indexes were added, after EXPLAIN at volume.
 
 ---
 
 ## 1. Run it on a laptop (5 minutes)
 
 Requirements:
-- Node 22 or newer. Check with `node -v`, or install with `brew install node@22`.
+- Node 22 (the repo pins it in `.nvmrc`). Check with `node -v`, or install with `brew install node@22`. On Node 24 the gate still runs, but tests print counts in a different format, which `scripts/harness/verify.mjs` now also reads.
 - Postgres. The script handles it in this order:
   1. it uses Postgres if it's already running;
   2. otherwise it starts Docker if that's running;
@@ -50,6 +59,7 @@ The script does the rest, in order:
 | | |
 |---|---|
 | App | http://localhost:3000 (landing page) → **Sign in** |
+| Your own workspace | http://localhost:3000/signup creates a real (non-demo) workspace; Home walks the owner through setup |
 | Field agent | `rahul@aurum.test` / `Rahul@2026`. There is also a one-tap button on the login page. Use phone width (DevTools device mode). |
 | Manager | `admin@aurum.test` / `Aurum@2026`, or the one-tap button |
 | API docs (Swagger) | http://localhost:4000/docs |

@@ -106,3 +106,13 @@
 - evidence: reject (Shop → Memo) ‖ convert (Memo → Shop) on one memo → `409 CONCURRENT_UPDATE` in round 0 of `test/v3.test.ts` V13 (reviewer: 11/12); after `lockConversion` (Memo → Pieces before Shop) V13 passes 6/6 rounds, 4 full-file runs
 - rule: Memo → Visit → SamplePiece (id order) → Shop → Order. A new path that locks two of these follows it, and gets a reject‖convert-style concurrency test.
 
+
+## L0022 · Raw SQL time comparisons assume a UTC session — pin it, and assert it
+- status: confirmed · 2026-10-22 · cluster: platform-webhooks · overnight lead
+- evidence: on a Homebrew Postgres in Asia/Kolkata, tests 7, A11, F12 failed (webhook retry fired at once); `TIMESTAMP(3)` columns hold UTC while `now()` and Date params (`timestamptz`) are read in the session zone. Migration `20261022000000_session_timezone_utc` + test 7a; migration-reviewer APPROVE.
+- rule: in raw SQL take `(now() AT TIME ZONE 'UTC')`, never a bare `now()` (test 7a scans src); never compare a timestamp column with a Date param. The database default is UTC as the second line, and the API logs an error at boot otherwise. Done in f33c573: with the DB forced back to IST the api/audit/failures/v3 suites pass (63/64, only 7a's UTC assertion fails).
+
+## L0023 · An email signs in to one workspace — every user-creating path takes `lockEmail`
+- status: confirmed · 2026-10-22 · cluster: platform-webhooks · overnight lead (security review APPROVE with M1/M2)
+- evidence: the sign-in form is email + password with no workspace field (the API accepts an optional `tenantSlug` that the web never sends; `take: 2` → refuse when ambiguous). `User` is unique per `(tenantId, email)` only, so the global rule lives in `lockEmail` + check (signup, agent create); `tenancy.test.ts` S2, S3 (10 parallel signups → 1 workspace).
+- rule: a new path that creates a user calls `lockEmail(tx, email)` and checks the email globally. Before signup is public: email verification and a shared rate-limit store (review M1, M2: email squatting and an EMAIL_TAKEN existence oracle on signup and agent create), or drop the global rule and make login ask for the workspace. Known deviation from INV-5: signup takes no Idempotency-Key — a retry after a lost 201 gets 409 EMAIL_TAKEN (one effect; the owner signs in). Open human decision: a unique index on lower(email) to move the rule into SQL.

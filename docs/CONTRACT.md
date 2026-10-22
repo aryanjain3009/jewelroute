@@ -3,6 +3,20 @@
 Base: the NestJS API serves everything under `/v1`. The web app calls it **same-origin** through a Next.js rewrite `/api/:path* → ${API_ORIGIN}/:path*`, so the browser always calls `/api/v1/...` and auth cookies are first-party.
 
 ## Changelog
+- **2026-10-22 (api, overnight concurrency suite — `apps/api/test/concurrency.test.ts` C3, C6)**: no shape changes.
+  - `POST /v1/admin/orders/:id/settle` reads the order under the shop lock: racing an approve, the `order.settled` event `data.status` and the `order.settle` audit before-image now carry the status that was settled (`APPROVED`), not the stale `PENDING_APPROVAL`.
+  - `PATCH /v1/admin/shops/:id` reads the audit before-image under the shop lock: concurrent PATCHes no longer record the same stale `before` (the `shop.update` audit trail is a chain).
+- **2026-10-22 (api, overnight — tests `apps/api/test/tenancy.test.ts` S1–S5, `api.test.ts` 7a; migration `20261022000000_session_timezone_utc`)**:
+  - **New** `POST /v1/auth/signup` (public, 30/min per IP) `{ workspaceName (2–80), name, email, password (≥ 8), phone? }` → **201** `{ user, accessToken, refreshToken }` with the same cookies as login. Creates a tenant (`demoMode: false`, slug from the name, `-2`, `-3` … when taken) and its owner (`role: ADMIN`); audit `tenant.signup`. `409 EMAIL_TAKEN` when the email already signs in to any workspace.
+  - `POST /v1/admin/agents` → `409 EMAIL_TAKEN` also when the email belongs to a user of **another** workspace (the sign-in form has no workspace field — the API's optional `tenantSlug` is not used by the web — so an email signs in to one workspace).
+  - **New** `GET /v1/admin/onboarding` (admin) → `{ steps: { key: 'gold_rate'|'catalog'|'shop'|'agent'|'issue'|'visit', done: boolean }[], complete: boolean }`, answered from real rows: a gold rate exists; a tagged piece exists (so a design too); a shop; a field agent; a piece was ever issued to an agent; a visit was ever planned.
+  - `PATCH /v1/admin/agents/:id` adds `cancelledVisits: number` to the response. Deactivating (`active: false` on an active agent) also cancels the agent's `PLANNED` visits from today (IST) onward (audit `visit.cancel_on_deactivate`); open visits, the bag and memos are left as they are. Reactivating restores nothing automatically (test S6). Assignment and (de)activation lock the agent row, so an assignment racing a deactivation either lands before it (and is cancelled) or gets `409 AGENT_INACTIVE` (test S7).
+  - **New** `AttentionItem.kind` **`AGENT_INACTIVE_CUSTODY`** (high, `entity: {type:'agent', id}`): a deactivated agent still holds pieces or an open visit. Title "Arjun Singh is deactivated and still holds 2 pieces".
+  - `GET /v1/admin/orders` adds opt-in paging, as the delivery log has: **only when `limit` (1–200) or `cursor` is passed** the response is `{ items: Order[], nextCursor?: string }`, keyset on `(createdAt, id)` newest first, filters kept; bad cursor or limit → `400 VALIDATION_FAILED`. Without either it is still the bare `Order[]` (latest 500). Orders now tie-break on `id` (test R6).
+  - Ops: the database default `timezone` is pinned to UTC (raw SQL timing for webhook retries, leases and gold-rate effective time assumed it; a non-UTC server fired retries at once). The API logs an error at boot when its session is not UTC.
+- **2026-10-22 (api, overnight admin — tests `apps/api/test/records.test.ts` R0, R0c)**:
+  - `GET /v1/admin/webhooks`: each endpoint's `stats` adds `retrying24h` (deliveries in `FAILED`, still on the retry ladder) and `dead24h` (`DEAD`) for the last 24 h. `failed24h` is unchanged and stays their sum. Additive.
+  - Seed: when the demo is seeded before 10:00 IST, today's gold-rate rows are stamped 2 h before the seed instead of at the seed time, so every seeded order's `goldRateSnapshot[].effectiveFrom` (and its line items' rate rows) is at or before the order's `createdAt`. No route or shape change.
 - **2026-10-21 (api, fixes for the T3 review `docs/brain/reviews/2026-10-21-audit-api-review.md` — tests A15, A17, A20, A21, E1–E2, L1–L2; migrations `…1100`–`…1300`)** — supersedes the round-2 grace-window and self-ack wording below:
   - **Refresh grace is one reuse, same successor.** A rotated refresh token presented again within 30 s **with the same user agent** returns the **same** successor refresh token it was rotated into (and a fresh access token) — exactly once. A second reuse, another user agent, reuse after 30 s, or a logged-out token is theft: every live refresh token of the user is revoked → `401 INVALID_REFRESH_TOKEN`. Two tabs therefore end up on one session.
   - `POST /v1/auth/logout` revokes **only the presented session** (other devices stay signed in). **New** `POST /v1/auth/logout-all` (authenticated, no body) → `200 {}`: revokes every refresh token of the caller and clears `jr_at`/`jr_rt`.
@@ -160,8 +174,8 @@ type CustodyEventRow = { id: string; seq: number; pieceId: string; tagCode: stri
 type PieceStatus = 'IN_VAULT'|'WITH_AGENT'|'ON_MEMO'|'OVERDUE'|'SOLD'|'LOST'
 type PieceRow = Piece & { status: PieceStatus; memo?: { id: string; number: string; dueDate: string }; lastMovedAt: string; collection: string;
   location?: { kind: 'IN_VISIT'|'LAST_CHECK_IN'|'FIELD_BAG'; label: string; shop?: Ref; visitId?: string; lat?: number; lng?: number; verification?: 'VERIFIED'|'LOW_ACCURACY'|'SIMULATED'; at?: string } /* AGENT custody only */ }
-type AttentionItem = { id: string; kind: 'MEMO_OVERDUE'|'MEMO_DUE_TODAY'|'VISIT_MISSED'|'PROOF_MISSING'|'PROOF_SIMULATED'|'ORDER_PENDING'|'WEBHOOK_FAILING';
-  severity: 'high'|'medium'; title: string; subtitle: string; amountPaise?: number; at: string; entity: { type: 'memo'|'visit'|'order'|'webhook'|'shop'; id: string } }
+type AttentionItem = { id: string; kind: 'MEMO_OVERDUE'|'MEMO_DUE_TODAY'|'VISIT_MISSED'|'PROOF_MISSING'|'PROOF_SIMULATED'|'ORDER_PENDING'|'WEBHOOK_FAILING'|'ACK_SELF_SUSPECTED'|'AGENT_INACTIVE_CUSTODY';
+  severity: 'high'|'medium'; title: string; subtitle: string; amountPaise?: number; at: string; entity: { type: 'memo'|'visit'|'order'|'webhook'|'shop'|'agent'; id: string } }
 type ShopStatus = 'ACTIVE'|'MEMO_OVERDUE'|'DORMANT'|'NEW'   // DORMANT = no visit in 30 days
 type ShopRow = Shop & { assignedAgent?: Ref; lastVisitAt?: string; lastVisitAgent?: Ref; openOrdersPaise: number /* SUBMITTED+APPROVED, last 30 days */;
   activeMemoCount: number; activeMemoValuePaise: number; samplesHereCount: number; samplesHereValuePaise: number;
@@ -214,6 +228,7 @@ type ActivityItem = { id /* evt_... */, type /* event type */, kind /* v3 */, ti
 ```
 
 ## Auth
+- `POST /v1/auth/signup` `{ workspaceName, name, email, password, phone? }` → 201 `{ user: User, accessToken, refreshToken }` (+ cookies). New workspace + owner; `409 EMAIL_TAKEN`.
 - `POST /v1/auth/login` `{ email, password }` → `{ user: User, accessToken }` (+ cookies)
 - `POST /v1/auth/refresh` → `{ accessToken }` (+ rotated cookies)
 - `POST /v1/auth/logout` → `{}`
@@ -240,6 +255,7 @@ type ActivityItem = { id /* evt_... */, type /* event type */, kind /* v3 */, ti
 - Public (no auth): `GET /v1/public/memo-ack/:token` → `{ tenantName, shopName, agentName, memoNumber, dueDate, items: {tagCode, name, imageUrl, purity, netWeightMg, valuePaise}[], totalValuePaise, ackStatus, code /* 6 digits, only while PENDING */ }`; `POST /v1/public/memo-ack/:token` `{ confirm: true }` → `{ ackStatus: 'ACKNOWLEDGED', ackAt }`
 
 ## Admin
+- `GET /v1/admin/onboarding` → `{ steps: { key: 'gold_rate'|'catalog'|'shop'|'agent'|'issue'|'visit', done }[], complete }` (from real rows).
 - `GET /v1/admin/dashboard?date=` → `{ date, metrics: { ordersToday: {count, valuePaise}, visits: {completed, planned, inProgress}, samplesOutside: {count, valuePaise} /* custodian SHOP */, memoValueOutsidePaise, overdueMemos: {count, valuePaise}, pendingApprovals: {count, valuePaise} }, map: { shops: {id,name,lat,lng,visitStatus?: VisitStatus, piecesHere: number}[], checkIns: {visitId, agentName, shopName, lat, lng, at, verification, distanceM}[] }, activity: ActivityItem[] /* latest 40 */, exceptions: { pendingOrders: Order[], overdueMemos: Memo[], missedVisits: VisitSummary[] /* PLANNED for past dates or after 18:00 IST today, plus MISSED */ }, agents: { id, name, visitsPlanned, visitsCompleted, currentVisit?: string /* shop name of the open CHECKED_IN/ACTIVE visit */, ordersValuePaise, bagValuePaise, bagCount: number, lastCheckInAt? }[], visits: (VisitSummary & { agent: {id,name} })[] /* every visit on that date, by agent then sequence */, rates: {purity, ratePaisePerGram, goldRateId, effectiveFrom}[] }`
 - `GET /v1/admin/visits?date=&agentId=&status=` → `VisitSummary & {agent:{id,name}}[]`; `GET /v1/admin/visits/:id` → same as `GET /v1/visits/:id` plus `agent`.
 - `POST /v1/admin/assignments` `{ agentId, shopId, date, sequence? }` → `{ visit }` (unique per agent+shop+date → `409 ALREADY_ASSIGNED`); `DELETE /v1/admin/assignments/:visitId` (only PLANNED)
@@ -250,12 +266,12 @@ type ActivityItem = { id /* evt_... */, type /* event type */, kind /* v3 */, ti
 - `GET /v1/admin/designs` → `(Design & { pieces: Piece[] })[]`; `POST /v1/admin/designs`; `PATCH /v1/admin/designs/:id`; `POST /v1/admin/designs/:id/pieces` `{ count, grossWeightMg?, netWeightMg? }` → `{ pieces }` (intake into VAULT)
 - `GET /v1/admin/pieces?custodianType=&agentId=&shopId=` → `Piece[]`; `GET /v1/admin/pieces/:id/history` → `{ piece, events: {seq, fromLabel, toLabel, reason, actorName, memoNumber?, occurredAt}[] }`
 - `POST /v1/admin/pieces/issue` `{ pieceIds, agentId }` (VAULT → AGENT); `POST /v1/admin/pieces/return-to-vault` `{ pieceIds }` (AGENT → VAULT)
-- `GET /v1/admin/agents` → `{ id, name, email, phone, active, today: {planned, completed}, bag: {count, valuePaise}, lastCheckInAt? }[]`; `POST /v1/admin/agents` `{ name, email, phone?, password }`; `PATCH /v1/admin/agents/:id`
+- `GET /v1/admin/agents` → `{ id, name, email, phone, active, today: {planned, completed}, bag: {count, valuePaise}, lastCheckInAt? }[]`; `POST /v1/admin/agents` `{ name, email, phone?, password }` (`409 EMAIL_TAKEN` if the email signs in to any workspace); `PATCH /v1/admin/agents/:id` (→ `{ agent, cancelledVisits }`; deactivation cancels PLANNED visits from today)
 - `GET /v1/admin/audit?entityType=&entityId=` → `{ id, action, actorName, entityType, entityId, before, after, createdAt }[]`
 
 ## Integrations (webhooks)
 - `GET /v1/admin/webhooks/event-types` → `{ type, description, example }[]` for: `visit.checked_in, visit.completed, visit.proof_uploaded, order.created, order.confirmed, order.pending_approval, order.approved, order.rejected, order.settled, order.cancelled, memo.created, memo.extended, memo.returned, memo.converted, memo.overdue, memo.acknowledged, sample.custody_changed`
-- `GET /v1/admin/webhooks` → `{ id, url, description?, events, active, secretLast4, createdAt, stats: { succeeded24h, failed24h } }[]`
+- `GET /v1/admin/webhooks` → `{ id, url, description?, events, active, secretLast4, createdAt, stats: { succeeded24h, failed24h, retrying24h, dead24h } }[]` (failed24h = retrying24h + dead24h)
 - `POST /v1/admin/webhooks` `{ url, description?, events }` → `{ endpoint, secret /* whsec_..., shown once */ }`; `PATCH /v1/admin/webhooks/:id` `{ url?, events?, active? }`; `DELETE /v1/admin/webhooks/:id`; `POST /v1/admin/webhooks/:id/rotate-secret` → `{ secret }`; `GET /v1/admin/webhooks/:id/secret` → `{ secret }` (reveal, audited)
 - `POST /v1/admin/webhooks/:id/test` → `{ delivery }` (sends a signed `ping` event now)
 - `GET /v1/admin/webhooks/deliveries?endpointId=&status=` → `{ id, endpointId, eventId, eventType, status: 'PENDING'|'SUCCEEDED'|'FAILED'|'DEAD', attempts, lastStatusCode?, lastLatencyMs?, lastError?, nextAttemptAt?, deliveredAt?, createdAt }[]` (latest 100); `GET /v1/admin/webhooks/deliveries/:id` → plus `attemptLog[]` and `payload`; `POST /v1/admin/webhooks/deliveries/:id/retry` → `{ delivery }`

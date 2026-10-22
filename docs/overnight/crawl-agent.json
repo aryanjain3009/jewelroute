@@ -1,0 +1,15 @@
+{
+  "who": "agent",
+  "pages": [
+    "/field/today",
+    "/field/visits",
+    "/field/catalog",
+    "/field/profile",
+    "/field/visits/cmvizk5ah04l8xse4zicg9wfs/sale",
+    "/field/visits/cmvizk5ah04l8xse4zicg9wfs",
+    "/field/visits/cmvizk5ai04laxse41oghtyzl"
+  ],
+  "controls": 67,
+  "failures": [],
+  "at": "2026-10-22T03:43:07.207Z"
+}

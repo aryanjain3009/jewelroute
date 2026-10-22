@@ -1,0 +1,13 @@
+{
+  "who": "agent-empty",
+  "pages": [
+    "/field/today",
+    "/field/visits",
+    "/field/catalog",
+    "/field/profile",
+    "/field/visits?scope=upcoming"
+  ],
+  "controls": 5,
+  "failures": [],
+  "at": "2026-10-22T03:42:01.425Z"
+}

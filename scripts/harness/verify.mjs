@@ -27,8 +27,9 @@ const sha = git('rev-parse', '--short', 'HEAD') || 'unknown';
 const dirty = git('status', '--porcelain').length > 0;
 
 function counts(out) {
-  const pass = out.match(/^# pass (\d+)/m);
-  const fail = out.match(/^# fail (\d+)/m);
+  // node --test prints "# pass N" (tap, Node 22 without a TTY) or "ℹ pass N" (spec, Node 24).
+  const pass = out.match(/^(?:#|ℹ) pass (\d+)/m);
+  const fail = out.match(/^(?:#|ℹ) fail (\d+)/m);
   if (pass) return { pass: +pass[1], fail: +(fail?.[1] ?? 0) };
   const h = out.match(/harness: (\d+) passed, (\d+) failed/);
   if (h) return { pass: +h[1], fail: +h[2] };
