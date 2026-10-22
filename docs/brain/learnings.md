@@ -116,3 +116,8 @@
 - status: confirmed · 2026-10-22 · cluster: platform-webhooks · overnight lead (security review APPROVE with M1/M2)
 - evidence: the sign-in form is email + password with no workspace field (the API accepts an optional `tenantSlug` that the web never sends; `take: 2` → refuse when ambiguous). `User` is unique per `(tenantId, email)` only, so the global rule lives in `lockEmail` + check (signup, agent create); `tenancy.test.ts` S2, S3 (10 parallel signups → 1 workspace).
 - rule: a new path that creates a user calls `lockEmail(tx, email)` and checks the email globally. Before signup is public: email verification and a shared rate-limit store (review M1, M2: email squatting and an EMAIL_TAKEN existence oracle on signup and agent create), or drop the global rule and make login ask for the workspace. Known deviation from INV-5: signup takes no Idempotency-Key — a retry after a lost 201 gets 409 EMAIL_TAKEN (one effect; the owner signs in). Open human decision: a unique index on lower(email) to move the rule into SQL.
+
+## L0024 · Route uniqueness is a shop/day rule, not an agent/day query
+- status: confirmed · 2026-10-22 · cluster: field
+- evidence: `apps/api/test/api.test.ts` test 0: two concurrent agents assigning one shop/date produced `[201,201]` before `Visit_one_shop_per_day`, then `[201,409]`; cancellation followed by reassignment returns 201. Full API suite: 101/101.
+- rule: load the whole business day when checking assignment availability and enforce `(tenantId, shopId, plannedDate)` for non-cancelled visits in SQL. A cancellation preserves history but releases the slot. This supersedes only L0016's advice to create two same-shop visits in concurrency tests; its shop-row-lock rule remains.

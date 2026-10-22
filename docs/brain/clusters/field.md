@@ -6,10 +6,11 @@
 - `packages/shared/src/geo.ts` (`distanceM`, `geofenceDecision`), `packages/shared/src/dates.ts` (`istDate`)
 - assignments in `apps/api/src/modules/admin.ts` (`POST/DELETE /v1/admin/assignments`)
 - `apps/web/src/app/field/**`, `apps/web/src/components/field/**`, `apps/web/src/hooks/use-geolocation*`
-- SQL: `Visit_one_open_per_agent`, UNIQUE `Visit(tenantId,agentId,shopId,plannedDate)`, UNIQUE `VisitProof(visitId,checksumSha256)`, `Shop_geo`
+- SQL: `Visit_one_open_per_agent`, `Visit_one_shop_per_day` (non-cancelled), UNIQUE `VisitProof(visitId,checksumSha256)`, `Shop_geo`
 
 ## Invariants
 - INV-3 one open (CHECKED_IN/ACTIVE) visit per agent. Check-in only when `distance ≤ radius + min(accuracy, 50 m)`, computed on the server (tests 1, 1b, 2)
+- One shop has at most one non-cancelled visit per tenant and business date, regardless of agent (test 0)
 - INV-5 check-in and proofs are idempotent
 - INV-6 an agent sees only their own visits
 - Simulated GPS only when `tenant.demoMode`, stored as `SIMULATED`, never upgraded to VERIFIED

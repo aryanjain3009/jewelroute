@@ -40,7 +40,7 @@ Harness v1 (lite) installed: AGENTS.md map, path rules, brain, 13 skills, 6 suba
 - L0006 idempotent replays are deep-equal, not byte-equal
 - L0008 nested AGENTS.md is not auto-loaded next to a root CLAUDE.md → path rules point to it
 - L0015 zod 4 `.partial()` keeps `.default()` → build PATCH schemas from default-free fields
-- L0016 per-shop money rules lock the shop row (visit lock hides the race; test with two visits)
+- L0016 per-shop money rules lock the shop row; L0024 forbids two active visits at one shop/day
 - L0018 enum value sets change by expand/contract, with a tested down script
 - L0019 an exit from a state that moved custody reverses it or is refused (SQL commit-time guard)
 - L0010 the invariant SQL is at the end of the init migration (line 687+)
