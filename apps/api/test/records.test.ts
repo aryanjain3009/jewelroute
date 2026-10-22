@@ -18,6 +18,30 @@ before(async () => {
 after(stop);
 
 describe('record activity, piece location, delivery paging, batch approve', () => {
+  test('R0. seeded orders are priced from a rate row that was already in force when they were booked', async () => {
+    // Before 10:00 IST the seed's "today" rate used to be stamped with the seed time, after the morning's orders.
+    const orders = await db.order.findMany({ where: { tenantId: AURUM }, include: { items: true } });
+    const rates = new Map((await db.goldRate.findMany({ where: { tenantId: AURUM } })).map((r) => [r.id, r.effectiveFrom]));
+    assert.ok(orders.length > 0, 'seed has orders');
+    for (const o of orders) {
+      for (const s of o.goldRateSnapshot as { effectiveFrom: string }[]) {
+        assert.ok(new Date(s.effectiveFrom) <= o.createdAt, `${o.number}: snapshot rate effective ${s.effectiveFrom} after booking ${o.createdAt.toISOString()}`);
+      }
+      for (const it of o.items) assert.ok(rates.get(it.goldRateId)! <= o.createdAt, `${o.number}: line rate row effective after booking`);
+    }
+  });
+  test('R0c. endpoint stats split "not delivered" into retrying and dead letter (same words as the delivery rows)', async () => {
+    const ep = (await api(ADMIN, 'POST', '/v1/admin/webhooks', { url: 'http://127.0.0.1:9/r0c-hook', events: ['memo.extended'] })).data.endpoint;
+    const d = (await api(ADMIN, 'POST', `/v1/admin/webhooks/${ep.id}/test`)).data.delivery;
+    assert.equal(d.status, 'FAILED', 'unreachable endpoint → retrying');
+    const stats = async () => (await api(ADMIN, 'GET', '/v1/admin/webhooks')).data.find((e: J) => e.id === ep.id).stats;
+    let s = await stats();
+    assert.deepEqual([s.succeeded24h, s.failed24h, s.retrying24h, s.dead24h], [0, 1, 1, 0]);
+    await db.webhookDelivery.update({ where: { id: d.id }, data: { status: 'DEAD' } });
+    s = await stats();
+    assert.deepEqual([s.succeeded24h, s.failed24h, s.retrying24h, s.dead24h], [0, 1, 0, 1], 'failed24h stays the sum');
+    assert.equal((await api(ADMIN, 'DELETE', `/v1/admin/webhooks/${ep.id}`)).status, 200);
+  });
   test('R1. order, memo and piece records carry their own activity (older than the workspace feed)', async () => {
     // order: created (+ decision) events whose aggregate is the order
     const pending = (await api(ADMIN, 'GET', '/v1/admin/orders?status=PENDING_APPROVAL')).data[0];
@@ -165,6 +189,31 @@ describe('record activity, piece location, delivery paging, batch approve', () =
     assert.equal((await api(ADMIN, 'POST', '/v1/admin/orders/approve', { orderIds: [] })).status, 400);
     assert.equal((await api(RAHUL, 'POST', '/v1/admin/orders/approve', { orderIds: [o1.id] })).status, 403);
   });
+  test('R6. admin orders: bare list without paging params; limit/cursor pages with no gaps or overlap, filters kept', async () => {
+    const bare = await api(ADMIN, 'GET', '/v1/admin/orders');
+    assert.equal(bare.status, 200);
+    assert.ok(Array.isArray(bare.data) && bare.data.length >= 3, `orders: ${bare.data?.length}`);
+    const total = await db.order.count({ where: { tenantId: AURUM } });
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    let pages = 0;
+    do {
+      const r = await api(ADMIN, 'GET', `/v1/admin/orders?limit=2${cursor ? `&cursor=${cursor}` : ''}`);
+      assert.equal(r.status, 200, JSON.stringify(r.json));
+      assert.ok(Array.isArray(r.data.items) && r.data.items.length <= 2);
+      seen.push(...r.data.items.map((o: J) => o.id));
+      cursor = r.data.nextCursor;
+      pages++;
+    } while (cursor && pages < 500);
+    assert.equal(seen.length, total);
+    assert.equal(new Set(seen).size, total, 'no overlap');
+    assert.deepEqual(seen, bare.data.map((o: J) => o.id), 'same order as the bare list (createdAt, then id, newest first)');
+    const pending = await api(ADMIN, 'GET', '/v1/admin/orders?status=PENDING_APPROVAL&limit=1');
+    assert.ok(pending.data.items.every((o: J) => o.status === 'PENDING_APPROVAL'));
+    assert.equal((await api(ADMIN, 'GET', '/v1/admin/orders?limit=201')).status, 400);
+    assert.equal((await api(ADMIN, 'GET', '/v1/admin/orders?cursor=bm9wZQ')).status, 400);
+  });
+
   test('R5. shop PATCH: null clears owner and phone, opening balance is editable, omitted fields are untouched', async () => {
     const shop = await db.shop.findFirstOrThrow({ where: { name: 'Sharma Jewellers' } });
     const r = await api(ADMIN, 'PATCH', `/v1/admin/shops/${shop.id}`, { ownerName: null, phone: null, openingOutstandingPaise: 12_345_00 });
@@ -176,5 +225,36 @@ describe('record activity, piece location, delivery paging, batch approve', () =
     assert.equal(after.creditLimitPaise, shop.creditLimitPaise, 'omitted credit limit unchanged');
     assert.equal(after.city, shop.city, 'omitted city unchanged');
     assert.equal((await api(ADMIN, 'PATCH', `/v1/admin/shops/${shop.id}`, { openingOutstandingPaise: -1 })).status, 400);
+  });
+});
+
+describe('hot-path indexes (docs/overnight/EXPLAIN.md)', () => {
+  /** Plan with seq scans, sorts and bitmap scans priced out: any index the planner can use, it will — so a missing index shows up even on a small table. */
+  const plan = (sql: (tx: J) => Promise<{ 'QUERY PLAN': string }[]>) =>
+    db.$transaction(async (tx) => {
+      // Fresh statistics: right after a reseed the planner can think Order has 1 row and pick any tenant index.
+      await tx.$executeRaw`ANALYZE "Order", "MemoExtension"`;
+      await tx.$executeRaw`SET LOCAL enable_seqscan = off`;
+      // On a few dozen rows a sort is cheaper than any index; price sorts and bitmap scans out too, so the plan
+      // answers "can an index serve this?" (a missing index still shows up as a Sort).
+      await tx.$executeRaw`SET LOCAL enable_sort = off`;
+      await tx.$executeRaw`SET LOCAL enable_bitmapscan = off`;
+      return (await sql(tx)).map((r) => r['QUERY PLAN']).join('\n');
+    });
+
+  test('X1. the admin order list (tenant, newest first) and memo extensions by memo read an index, not the whole table', async () => {
+    const orders = await plan((tx) => tx.$queryRaw`EXPLAIN SELECT id FROM "Order" WHERE "tenantId" = ${AURUM} ORDER BY "createdAt" DESC LIMIT 500`);
+    assert.match(orders, /Order_tenantId_createdAt_idx/, orders);
+    assert.doesNotMatch(orders, /Sort/, 'newest-first comes from the index, not a sort of every order');
+    const ext = await plan((tx) => tx.$queryRaw`EXPLAIN SELECT id FROM "MemoExtension" WHERE "memoId" = ANY(${['m1', 'm2']}::text[])`);
+    assert.match(ext, /MemoExtension_memoId_idx/, ext);
+  });
+
+  test("X2. every shop row's lastOrder is that shop's newest order (createdAt, then id)", async () => {
+    const rows = (await api(ADMIN, 'GET', '/v1/admin/shops')).data as J[];
+    assert.ok(rows.length > 1);
+    const orders = await db.order.findMany({ where: { tenantId: AURUM }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { id: true, shopId: true } });
+    assert.ok(new Set(orders.map((o) => o.shopId)).size < orders.length, 'some shop has several orders');
+    for (const r of rows) assert.equal(r.lastOrder?.id, orders.find((o) => o.shopId === r.id)?.id, r.name);
   });
 });

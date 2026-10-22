@@ -692,7 +692,9 @@ describe('v3 settings + migration', () => {
            ('o4','t1','O4','sa','u1','APPROVED','c4',300,0,300,'[]', true, '{ORDER_THRESHOLD}', NULL, NULL, NULL);`,
       );
       sc.psql(`-f "${sqlFile}"`);
-      // Rollbacks run newest first: the final-audit migrations (0900, 1000) come off before v3.
+      // Rollbacks run newest first: the hot-path indexes, the session-timezone pin, then the final-audit migrations (0900, 1000), then v3.
+      sc.psql(`-f "${join(apiRoot, 'prisma/rollback/20261022000100_hot_path_indexes_down.sql')}"`);
+      sc.psql(`-f "${join(apiRoot, 'prisma/rollback/20261022000000_session_timezone_down.sql')}"`);
       sc.psql(`-f "${join(apiRoot, 'prisma/rollback/20261021000900_audit_down.sql')}"`);
       sc.psql(`-f "${join(apiRoot, 'prisma/rollback/20261021000300_v3_down.sql')}"`);
       const one = async <T>(q: Promise<{ v: T }[]>) => (await q)[0].v;

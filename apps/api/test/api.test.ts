@@ -184,6 +184,18 @@ describe('field flow invariants', () => {
     assert.equal((await api(RAHUL, 'GET', '/v1/admin/dashboard')).status, 403);
   });
 
+  test('7a. database sessions run in UTC, so raw SQL timing (retries, leases, rate effective time) is right', async () => {
+    const [{ tz }] = await db.$queryRaw<{ tz: string }[]>`SELECT current_setting('TimeZone') AS tz`;
+    assert.equal(tz, 'UTC');
+    const [{ skew }] = await db.$queryRaw<{ skew: number }[]>`SELECT abs(extract(epoch FROM (now()::timestamp - ${new Date()}::timestamptz::timestamp)))::float AS skew`;
+    assert.ok(skew < 5, `session clock vs UTC skew ${skew}s`);
+    // ...and no raw SQL leans on the session zone: now() is always taken AT TIME ZONE 'UTC' (columns hold UTC).
+    const { readdirSync, readFileSync, statSync } = await import('node:fs');
+    const walk = (d: string): string[] => readdirSync(d).flatMap((f) => (statSync(`${d}/${f}`).isDirectory() ? walk(`${d}/${f}`) : f.endsWith('.ts') ? [`${d}/${f}`] : []));
+    const bare = walk(`${__dirname}/../src`).flatMap((f) => readFileSync(f, 'utf8').split('\n').map((l, i) => ({ f, i, l })).filter((x) => /(?<![.\w])now\(\)(?! AT TIME ZONE 'UTC')/.test(x.l) && !/^\s*(\/\/|\/?\*)/.test(x.l)));
+    assert.deepEqual(bare.map((x) => `${x.f}:${x.i + 1}`), []);
+  });
+
   test('7. webhook signature verifies with the documented scheme; failing endpoint backs off FAILED→…→DEAD after 1 + 6 retries', async () => {
     const got: { headers: IncomingMessage['headers']; body: string }[] = [];
     const srv = createServer((req, res) => {
