@@ -3,6 +3,8 @@
  * the demo tenant, creates real memos through the API as Rahul, and checks state through the API.
  *   E2E_WEB=http://localhost:3301 E2E_API=http://localhost:4301 pnpm exec playwright test --project field public */
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { test, expect, type APIRequestContext, type Browser } from "@playwright/test";
 import { EVENT_DESCRIPTIONS, WEBHOOK_EVENT_TYPES } from "@jewelroute/shared";
 import { sql } from "./admin-helpers";
@@ -87,6 +89,8 @@ test("public: /developers documents every webhook event, the retry ladder and wo
     const url = new URL(href, page.url());
     expect(url.origin, `${href} stays on site`).toBe(new URL(WEB).origin);
     const res = await request.get(url.pathname, { maxRedirects: 0 });
+    // `/signup` is built on another branch; strict as soon as its page exists in this tree (see landing.spec).
+    if (url.pathname === "/signup" && !existsSync(join(__dirname, "../src/app/signup/page.tsx"))) { expect([200, 404]).toContain(res.status()); continue; }
     expect([200, 307], `GET ${url.pathname} → ${res.status()}`).toContain(res.status());
   }
   w.assertClean();
@@ -99,6 +103,10 @@ test("public: /login makes the demo choice obvious — Rahul on a phone, Priya o
   await expect(page.getByLabel(/email/i)).toHaveCount(1);
   await expect(page.getByLabel(/password/i)).toHaveCount(1);
   await expect(page.getByRole("button", { name: /^sign in$/i })).toBeVisible();
+  // A new customer's way in sits quietly under the form, with a full-height tap target.
+  const create = page.getByRole("link", { name: "Create a workspace" });
+  await expect(create).toHaveAttribute("href", "/signup");
+  expect((await create.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   // Phone: two clear rows, Rahul first.
   const rahul = page.getByRole("button", { name: "Continue as Rahul Verma, field agent" });
   await expect(rahul).toBeVisible();
