@@ -1,72 +1,119 @@
 # JewelRoute
 
-> Taking this over? Start with **[HANDOVER.md](HANDOVER.md)** — run it locally in 5 minutes, demo script, docs map, deploy steps.
+**Know where every salesman went, what they sold, and where every gram of jewellery is.**
 
-**Know where every salesman went, what he sold, and where every gram of jewellery is.**
+JewelRoute is a multi-tenant field-sales system for jewellery manufacturers and wholesalers. A business signs up and gets its own workspace. Its managers set the daily gold rate, tag sample pieces and plan routes. Field agents then visit retailers with those pieces:
+- each check-in is verified by GPS and an arrival photo;
+- orders are priced at today's gold rate;
+- pieces left on memo are acknowledged by the retailer;
+- every piece has an immutable custody ledger.
 
-JewelRoute is a multi-tenant field-sales operating system for jewellery manufacturers and wholesalers. Agents carry valuable sample pieces to retailers, take orders, and leave pieces on memo. JewelRoute proves each step and records it in a ledger.
+**Live:** [jewelroute.vercel.app](https://jewelroute.vercel.app)
 
-| | What it does |
+## Product overview
+
+```mermaid
+flowchart LR
+  A[Manager assigns shops] --> B[Rahul visits the retailer]
+  B --> C[GPS + photo proof]
+  C --> D[Order / memo]
+  D --> E[Retailer acknowledges]
+  E --> F[Manager sees everything]
+```
+
+<table>
+<tr>
+<td width="34%"><b>Field flow</b>: Today → Sharma Jewellers → check-in → photo → order → memo<br><img src="docs/assets/readme/field-flow.gif" alt="Field agent flow recorded from the running app" width="100%"></td>
+<td width="66%"><b>Manager flow</b>: Home → order → memo → sample custody<br><img src="docs/assets/readme/manager-flow.gif" alt="Manager flow recorded from the running app" width="100%"></td>
+</tr>
+</table>
+
+Full quality: [field-flow.mp4](docs/assets/readme/field-flow.mp4) · [manager-flow.mp4](docs/assets/readme/manager-flow.mp4). Everything here was captured from the running app with the seeded demo data.
+
+### Manager
+
+| Home: what needs attention, live activity | Sample custody: where the piece is, who has it, why, and when it's due back |
 |---|---|
-| **GPS-verified visits** | The server checks the geofence; check-in is impossible outside the shop's radius. Every visit needs a photo proof with a checksum and capture coordinates. EXIF is never trusted. |
-| **Proof-of-custody memos** | The agent picks exact tagged pieces and sets a due date. Custody moves agent → shop in one transaction, and the retailer acknowledges by QR or 6-digit code on their own phone. |
-| **Gold-rate catalogue + orders** | Prices are computed from today's 22K/18K/24K rate (gold value + making + stones + other + 3% GST). Every order freezes its rate and price snapshot. |
-| **Command centre** | Orders today, visits, samples outside, memo value, overdue value and pending approvals, plus a live map, an activity feed, approvals and exceptions. |
-| **Signed webhooks** | A transactional outbox feeds HMAC-SHA256-signed deliveries. Failed deliveries retry 7 times with backoff and then dead-letter. The page shows delivery logs, sends test events and lets you retry by hand. |
+| <img src="docs/assets/readme/admin-home.png" alt="Admin Home"> | <img src="docs/assets/readme/admin-sample-custody.png" alt="Sample custody record"> |
 
-## Monorepo
+### Field agent and retailer (phone)
+
+| Today | Active visit (GPS + photo) | Sale at today's gold rate | Retailer acknowledgement |
+|---|---|---|---|
+| <img src="docs/assets/readme/field-today.png" alt="Field Today" width="200"> | <img src="docs/assets/readme/field-active-visit.png" alt="Active visit with GPS and photo proof" width="200"> | <img src="docs/assets/readme/field-sale-catalog.png" alt="Catalog and order" width="200"> | <img src="docs/assets/readme/retailer-ack.png" alt="Retailer acknowledgement page" width="200"> |
+
+## Core features
+
+- **GPS + photo verified visits.** The server checks the shop's geofence before accepting a check-in, and a sale needs an arrival photo first.
+- **Live gold-rate catalogue.** Prices come from today's rate per purity, and every order freezes that rate and price.
+- **Orders with approval rules.** An order goes to the manager only when it would cross the shop's credit limit or the approval threshold, and the server decides.
+- **Memo + retailer acknowledgement.** Pieces left with a retailer are confirmed on the retailer's own phone, by QR or a 6-digit code.
+- **Physical sample custody ledger.** Every piece has exactly one holder at a time — vault, agent, shop or sold — recorded in an append-only ledger.
+- **Signed webhooks.** Each change is published as an HMAC-signed event for ERP or accounting systems, retried with backoff, with a dead letter.
+
+## Tech stack
+
+| | |
+|---|---|
+| **Frontend** | Next.js 15.5, React 19.1, TypeScript, Tailwind 4, shadcn/Radix, TanStack Query 5, MapLibre GL 5 (OpenFreeMap tiles) |
+| **Backend** | NestJS 11, Prisma 6.19, PostgreSQL 16 |
+| **Infrastructure** | Vercel; Vercel Blob for photos (Postgres fallback locally); PostgreSQL transactional outbox; HMAC-signed webhooks |
+| **Testing** | API integration tests on real Postgres, Playwright browser E2E plus a route-and-control crawler, a 31-step end-to-end scenario |
+
+## System design
+
+```mermaid
+flowchart LR
+  subgraph CL[Clients]
+    FA[Field agent<br/>phone]
+    MG[Manager<br/>laptop]
+    RT[Retailer<br/>ack link]
+  end
+  FA & MG & RT --> WEB[Next.js web<br/>/api/* proxied]
+  WEB --> API[NestJS API<br/>/v1]
+  API --> DB[(PostgreSQL<br/>via Prisma)]
+  API --> OBJ[(Object storage<br/>arrival photos)]
+
+  subgraph TXG[One database transaction]
+    TX[Business change<br/>order · memo · custody] --> OB[(Outbox row)]
+  end
+  API --> TX
+  OB --> DSP[Webhook dispatcher<br/>after commit + cron]
+  DSP -->|HMAC-signed, retried| ERP[ERP / accounting /<br/>customer systems]
+```
+
+- **Server-side geofence.** The API recomputes the distance from the shop's saved coordinates; the phone's own answer is never trusted. Simulated GPS exists only for demo workspaces and is always labelled.
+- **Transactional custody.** Each piece move locks rows in a fixed order and appends a ledger entry in the same transaction. Database constraints keep one holder per piece, and a piece on at most one open memo.
+- **Immutable snapshots.** Order lines and gold rates are append-only: database triggers block edits, so a historical price never changes.
+- **Idempotent writes.** Orders, memos and check-ins require an `Idempotency-Key`, so a retry replays the original result and never creates a duplicate.
+- **Transactional outbox.** The event row commits with the business change, then it's delivered at least once with signatures and backoff.
+
+## Repository
 
 ```
-apps/api        NestJS 11 + Prisma 6 (PostgreSQL) — REST under /v1, Swagger at /docs
-apps/web        Next.js 15 (App Router) — landing, /login, /field/*, /admin/*, /ack/:token, /developers
-packages/shared pricing, geofence, IST dates, formatting, event catalogue (used by both)
-docs/           CONTRACT.md (API), DECISIONS.md (why), DESIGN.md (design system)
+apps/web         Next.js app: landing, /signup, /login, /field/*, /admin/*, /ack/:token, /developers
+apps/api         NestJS API, Prisma schema and migrations, tests
+packages/shared  pricing, credit, geofence, dates, event catalogue (shared by both apps)
+docs             API contract, design system, decisions, reviews
 ```
 
 ## Run locally
 
+Requires Node 22 and PostgreSQL 16; the script uses a running Postgres, Docker, or installs Postgres with Homebrew on a Mac.
+
 ```bash
-pnpm install
-docker compose up -d db                       # or any Postgres 16
-cp apps/api/.env.example apps/api/.env        # fill secrets (see file)
-pnpm --filter @jewelroute/api db:migrate && pnpm --filter @jewelroute/api db:seed
-pnpm --filter @jewelroute/api dev             # http://localhost:4000  (Swagger /docs)
-# …or everything in one go: ./scripts/run-local.sh
-pnpm --filter @jewelroute/web dev             # http://localhost:3000  (proxies /api → :4000)
+./scripts/run-local.sh --prod       # installs, migrates, seeds the demo; web :3000, API :4000 (Swagger /docs)
+pnpm verify                         # unit + API integration tests, typecheck, lint
+cd apps/web && pnpm e2e             # Playwright against the running app
 ```
 
-Demo logins: field agent `rahul@aurum.test` / `Rahul@2026`, manager `admin@aurum.test` / `Aurum@2026`. The login page also has one-tap demo buttons.
+## Demo
 
-Tests: `pnpm --filter @jewelroute/api test` covers concurrent check-in, idempotent orders, double memo of one piece, custody ledger, tenant isolation, webhook backoff and dead letter, and price snapshots. To run the 26-step end-to-end scenario against any deployment: `BASE_URL=https://… CRON_SECRET=… pnpm --filter @jewelroute/api e2e`.
+[jewelroute.vercel.app](https://jewelroute.vercel.app), or run it locally. The login page has one-tap demo buttons.
 
-## Deploy (Vercel)
+| Role | Login |
+|---|---|
+| Rahul, field agent (open at phone width) | `rahul@aurum.test` / `Rahul@2026` |
+| Priya, manager | `admin@aurum.test` / `Aurum@2026` |
 
-There are two Vercel projects from this repo.
-
-**`apps/api`** (framework "Other")
-- `vercel.json` routes every path to the Nest function.
-- The build runs `prisma migrate deploy` against `DATABASE_URL_DIRECT`.
-- Env:
-  - `DATABASE_URL` (pooled), `DATABASE_URL_DIRECT`
-  - `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`
-  - `APP_ENCRYPTION_KEY` (32-byte base64), `APP_SECRET`, `CRON_SECRET`
-  - `APP_PUBLIC_URL` (web origin), `API_PUBLIC_URL`, `CORS_ORIGINS`
-  - optional `BLOB_READ_WRITE_TOKEN`
-  - optional `ENABLE_DEMO_RECEIVER` (`true`/`false`) for the built-in webhook receiver `/v1/dev/webhook-receiver/:token`. Unset means on in dev, and in production only for demo-mode tenants. `false` makes it always 404.
-- Seed once: `curl -X POST $API/v1/internal/seed -H "x-cron-secret: $CRON_SECRET"`.
-
-**`apps/web`** (Next.js)
-- Env: `API_ORIGIN` = the API URL.
-- `/api/*` is rewritten to the API, so the auth cookies stay first-party.
-
-## Key decisions (full list in docs/DECISIONS.md)
-
-- **No Redis/BullMQ yet.** Vercel functions can't host a long-lived worker. A Postgres outbox with `FOR UPDATE SKIP LOCKED` leasing gives at-least-once, concurrency-safe delivery at this scale. Delivery is triggered after each commit (`waitUntil`), when the dashboard is read, and by cron. `DispatchQueue` is the seam for swapping in BullMQ.
-- **Database-enforced invariants:**
-  - an agent has at most one open visit (partial unique index);
-  - a piece is on at most one open memo (partial unique index);
-  - the custodian column must match the custodian type (CHECK);
-  - gold rates, the custody ledger and order lines are append-only (triggers).
-- **Idempotency.** An `Idempotency-Key` row is written inside the business transaction, and `clientOpId` is unique on orders and memos. Retries replay the stored response and never create a duplicate.
-- **Simulated arrival exists only in demo-mode tenants.** It is stored as `SIMULATED` and never shown as verified.
-- **MapLibre + OpenFreeMap tiles.** The maps need no API key and use OSM data.
+More: [HANDOVER.md](HANDOVER.md) · [API contract](docs/CONTRACT.md) · [Design decisions](docs/DECISIONS.md)
