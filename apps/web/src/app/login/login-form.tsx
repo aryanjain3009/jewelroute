@@ -10,6 +10,7 @@
  * compact rows, then the form. Motion: press scale .98–.99 (150 ms), colour on hover; nothing else.
  */
 import { useEffect, useState } from "react";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
@@ -55,7 +56,7 @@ function Preview({ d }: { d: Demo }) {
   );
 }
 
-function PersonaCard({ d, busy, onPick }: { d: Demo; busy: string | null; onPick: () => void }) {
+function PersonaCard({ d, busy, onPick, active }: { d: Demo; busy: string | null; onPick: () => void; active?: boolean }) {
   const mine = busy === d.key;
   // The preview holds the app's own (inert) buttons, so the card is not a <button>: one transparent
   // button stretched over the whole card takes the click, the focus ring and the accessible name.
@@ -65,6 +66,7 @@ function PersonaCard({ d, busy, onPick }: { d: Demo; busy: string | null; onPick
         "group relative flex min-w-0 flex-col overflow-hidden rounded-[14px] border border-line-strong bg-white",
         "transition-[border-color,box-shadow,scale,opacity] duration-150 ease-out has-[button:active:enabled]:scale-[0.99]",
         "[@media(hover:hover)_and_(pointer:fine)]:has-[button:hover:enabled]:border-[#cfcfd2] [@media(hover:hover)_and_(pointer:fine)]:has-[button:hover:enabled]:shadow-[0_1px_2px_rgb(0_0_0/0.04),0_12px_32px_-16px_rgb(28_29_31/0.18)]",
+        active && "border-ink/60",
         busy && !mine && "opacity-50",
       )}
     >
@@ -151,6 +153,35 @@ function PersonaRow({ d, busy, onPick }: { d: Demo; busy: string | null; onPick:
   );
 }
 
+/** Who is signing in. The account's real role always decides where they land (the server says so);
+ *  the choice tailors the copy and tells them where they'll go, and a mismatch is explained, not blocked. */
+const ROLES = {
+  agent: { label: "Field agent", icon: SmartphoneIcon, lands: "/field", title: "Field app", line: "Your route, check-ins, orders, memos and your bag. Opens on Today — built for your phone." },
+  manager: { label: "Manager", icon: LaptopIcon, lands: "/admin", title: "Manager dashboard", line: "Approvals, visits, shops, samples, gold rate and your team. Opens on Home." },
+} as const;
+type RoleKey = keyof typeof ROLES;
+
+function RolePicker({ value, onChange }: { value: RoleKey; onChange: (r: RoleKey) => void }) {
+  return (
+    <div className="mt-6">
+      <div id="role-label" className="mb-1.5 text-[13px] font-medium text-ink-2">I&apos;m signing in as</div>
+      <ToggleGroup type="single" value={value} onValueChange={(v) => v && onChange(v as RoleKey)} aria-labelledby="role-label"
+        className="grid h-11 w-full grid-cols-2 gap-0 rounded-[10px] border border-line-strong bg-sunken p-1">
+        {(Object.keys(ROLES) as RoleKey[]).map((k) => {
+          const R = ROLES[k];
+          return (
+            <ToggleGroupItem key={k} value={k} aria-label={`${R.label}`}
+              className="h-full min-w-0 gap-1.5 rounded-[7px] text-[14px] font-medium text-ink-2 transition-[background-color,color,box-shadow,scale] duration-150 ease-out hover:bg-transparent hover:text-ink active:scale-[0.98] data-[state=on]:bg-white data-[state=on]:text-ink data-[state=on]:shadow-[0_0_0_1px_#e3e3e3,0_1px_2px_rgb(0_0_0/0.05)]">
+              <R.icon className="size-4" strokeWidth={1.75} />{R.label}
+            </ToggleGroupItem>
+          );
+        })}
+      </ToggleGroup>
+      <p className="mt-2 min-h-[40px] text-[13px] leading-snug text-ink-2" aria-live="polite">{ROLES[value].line}</p>
+    </div>
+  );
+}
+
 export function LoginForm({ hasSession = true }: { hasSession?: boolean }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -159,6 +190,17 @@ export function LoginForm({ hasSession = true }: { hasSession?: boolean }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Default from where they were heading (?next=/admin… → manager), else the URL (?as=), else field agent.
+  const [role, setRole] = useState<RoleKey>(() => {
+    const as = params.get("as"); const next = params.get("next") ?? "";
+    if (as === "manager" || as === "agent") return as;
+    return next.startsWith("/admin") ? "manager" : "agent";
+  });
+  const pickRole = (r: RoleKey) => {
+    setRole(r); setError(null);
+    const q = new URLSearchParams(params.toString()); q.set("as", r);
+    router.replace(`/login?${q}`, { scroll: false });
+  };
 
   // Already signed in with only a refresh cookie (the middleware redirects when the access token is live):
   // /auth/me refreshes once; a user means go home (or to a valid ?next=), a 401 means show the form.
@@ -179,6 +221,9 @@ export function LoginForm({ hasSession = true }: { hasSession?: boolean }) {
     try {
       const { user } = await api<{ user: User; accessToken: string }>("/auth/login", { body: { email: e, password: p } });
       qc.setQueryData(qk.me, user);
+      // The account decides; if it isn't what they picked, say where we're taking them instead of failing.
+      const actual: RoleKey = user.role === "ADMIN" ? "manager" : "agent";
+      if (who === "form" && actual !== role) toast(`This is a ${ROLES[actual].label.toLowerCase()} account`, { description: `Opening the ${ROLES[actual].title.toLowerCase()}.` });
       router.replace(destination(user.role, params.get("next")));
     } catch (err) {
       const msg = err instanceof ApiError
@@ -203,7 +248,7 @@ export function LoginForm({ hasSession = true }: { hasSession?: boolean }) {
           <h2 id="demo-title" className="mt-2 text-balance text-[30px] leading-[1.15] font-semibold tracking-[-0.02em] text-ink">Explore JewelRoute as Rahul or Priya.</h2>
           <p className="mt-3 max-w-[540px] text-[15px] leading-relaxed text-ink-2">Two real accounts on sample data. Rahul works from a phone in the shops; Priya runs the team from a laptop. Sign out any time to switch.</p>
           <div className="mt-8 grid grid-cols-2 gap-4">
-            {DEMO.map((d) => <PersonaCard key={d.key} d={d} busy={busy} onPick={() => signIn(d.email, d.password, d.key)} />)}
+            {DEMO.map((d) => <PersonaCard key={d.key} d={d} busy={busy} active={(d.key === "rahul") === (role === "agent")} onPick={() => signIn(d.email, d.password, d.key)} />)}
           </div>
           <p className="mt-5 text-[12.5px] text-ink-3">Sample data only: nothing in the demo is a real retailer, piece or order.</p>
         </div>
@@ -213,22 +258,12 @@ export function LoginForm({ hasSession = true }: { hasSession?: boolean }) {
       <section className="mx-auto flex min-h-dvh w-full max-w-[420px] flex-col justify-center px-5 py-10 lg:max-w-[400px] lg:justify-start lg:px-0 lg:pt-[178px]">
         <Link href="/" aria-label="JewelRoute home" className="-m-1 mb-10 self-start rounded-[8px] p-1 outline-none focus-visible:ring-[3px] focus-visible:ring-blue/30 lg:hidden"><Logo /></Link>
         <h1 className="text-[24px] font-semibold tracking-[-0.02em] text-ink">Sign in to JewelRoute</h1>
-        <p className="mt-1 text-[14px] text-ink-2"><span className="lg:hidden">Try the demo in one tap, or use your work email.</span><span className="max-lg:hidden">Use your work email and password.</span></p>
+        <p className="mt-1 text-[14px] text-ink-2"><span className="lg:hidden">Pick who you are, then use your work email — or try the demo in one tap.</span><span className="max-lg:hidden">Pick who you are, then use your work email and password.</span></p>
 
-        {/* Phones and tablets: the demo choice first */}
-        <div className="mt-6 lg:hidden" role="group" aria-label="Demo accounts">
-          <div className="space-y-2">
-            {DEMO.map((d) => <PersonaRow key={d.key} d={d} busy={busy} onPick={() => signIn(d.email, d.password, d.key)} />)}
-          </div>
-          <div className="mt-7 flex items-center gap-3">
-            <span className="h-px flex-1 bg-line" />
-            <span className="text-[12.5px] text-ink-3">or with your work email</span>
-            <span className="h-px flex-1 bg-line" />
-          </div>
-        </div>
+        <RolePicker value={role} onChange={pickRole} />
 
         <form
-          className="mt-6 space-y-4 lg:mt-8"
+          className="mt-4 space-y-4"
           onSubmit={(ev) => { ev.preventDefault(); if (!busy) signIn(email.trim(), password, "form"); }}
         >
           <div className="space-y-1.5">
@@ -246,7 +281,19 @@ export function LoginForm({ hasSession = true }: { hasSession?: boolean }) {
           <Button type="submit" className="h-11 w-full text-[15px] transition-[scale,background-color] duration-150 ease-out active:scale-[0.98]" disabled={!!busy}>
             {busy === "form" && <Loader2 className="animate-spin" />}Sign in
           </Button>
+          <p className="text-balance text-center text-[12.5px] text-ink-3">Opens the {ROLES[role].title.toLowerCase()}. Your account decides where you land.</p>
         </form>
+        {/* Phones and tablets: the demo accounts, one per role */}
+        <div className="mt-6 lg:hidden" role="group" aria-label="Demo accounts">
+          <div className="mb-3 flex items-center gap-3">
+            <span className="h-px flex-1 bg-line" />
+            <span className="text-[12.5px] text-ink-3">or try the demo in one tap</span>
+            <span className="h-px flex-1 bg-line" />
+          </div>
+          <div className="space-y-2">
+            {(role === "agent" ? DEMO : [...DEMO].reverse()).map((d) => <PersonaRow key={d.key} d={d} busy={busy} onPick={() => signIn(d.email, d.password, d.key)} />)}
+          </div>
+        </div>
         <p className="mt-2 text-center text-[14px] text-ink-2">
           New to JewelRoute?{" "}
           <Link href="/signup" className="inline-block rounded-[4px] py-3 font-medium text-ink underline decoration-line-strong underline-offset-[3px] outline-none transition-colors duration-150 ease-out hover:decoration-ink focus-visible:ring-[3px] focus-visible:ring-blue/30">Create a workspace</Link>
