@@ -83,7 +83,7 @@ export function CatalogGrid({ visitId, renderCard, onlyInBag }: {
 
       <div className="px-4 pt-3">
         {cat.isPending ? (
-          <div className="grid grid-cols-2 gap-x-3 gap-y-6" aria-busy>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-6 min-[600px]:grid-cols-3" aria-busy>
             {Array.from({ length: 6 }).map((_, i) => <div key={i}><Skeleton className="aspect-[4/5] w-full rounded-xl" /><Skeleton className="mt-3 h-4 w-3/4" /><Skeleton className="mt-2 h-3 w-1/2" /><Skeleton className="mt-2 h-4 w-2/5" /></div>)}
           </div>
         ) : cat.isError ? (
@@ -95,7 +95,7 @@ export function CatalogGrid({ visitId, renderCard, onlyInBag }: {
         ) : (
           <>
             <p className="mb-3 text-[12px] text-ink-3">{plural(designs.length, "design")}{filtersOn ? " match" : ""}</p>
-            <div className={cn("grid grid-cols-2 gap-x-3 gap-y-6 transition-opacity duration-150", cat.isFetching && cat.isPlaceholderData && "opacity-60")}>
+            <div className={cn("grid grid-cols-2 gap-x-3 gap-y-6 min-[600px]:grid-cols-3 transition-opacity duration-150", cat.isFetching && cat.isPlaceholderData && "opacity-60")}>
               {designs.map((d, i) => <div key={d.id}>{renderCard(d, i)}</div>)}
             </div>
           </>

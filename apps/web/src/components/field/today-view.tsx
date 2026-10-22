@@ -19,8 +19,9 @@ import type { FieldVisit, TodayResponse } from "./types";
 
 const isOpen = (v: FieldVisit) => v.status === "CHECKED_IN" || v.status === "ACTIVE";
 const toneFor = (v: FieldVisit, focusId?: string): MapTone => {
-  if (v.status === "COMPLETED") return "done";
-  if (isOpen(v)) return "active";
+  // DESIGN numbered markers: ink for the stop to act on (open or next), green once done, grey planned.
+  if (v.status === "COMPLETED") return "active";
+  if (isOpen(v)) return "next";
   if (v.status === "MISSED") return "alert";
   if (v.status === "CANCELLED") return "muted";
   return v.id === focusId ? "next" : "planned";

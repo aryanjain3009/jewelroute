@@ -81,11 +81,13 @@ export function Photo({ src, alt, className, sizes = "120px", priority }: { src:
 }
 
 /** Small inline street map with a geofence (the field map's look without MapLibre). */
-export function FenceMap({ className, agent = { x: 362, y: 128 }, label = "Sharma Jewellers", distance = "38 m", outside, compact, halo, tone = "blue" }: {
+export function FenceMap({ className, agent = { x: 362, y: 128 }, label = "Sharma Jewellers", distance = "38 m", outside, compact, halo, tone = "blue", away }: {
   className?: string; agent?: { x: number; y: number }; label?: string; distance?: string; outside?: { x: number; y: number; text: string }; compact?: boolean;
   /** Accuracy circle radius (map units) drawn around the agent — a weak GPS fix. */ halo?: number;
   /** Agent pin colour: blue (live GPS), grey (refused, outside), info (simulated). */ tone?: "blue" | "grey" | "info";
+  /** The agent is outside the fence: the app draws the ring amber and the stop marker ink. */ away?: boolean;
 }) {
+  const ring = away ? "#a8661a" : "#2c7a54";
   const pin = tone === "grey" ? "#9b9ca0" : tone === "info" ? "#2f5f8f" : "#2f6bf2";
   return (
     <svg viewBox="0 0 560 300" className={cn("block h-auto w-full", className)} role="img" aria-label={`100 metre geofence around ${label}; the agent is ${distance} from the shop`}>
@@ -103,13 +105,18 @@ export function FenceMap({ className, agent = { x: 362, y: 128 }, label = "Sharm
           <text x="440" y="114">Bank Street</text><text x="40" y="206">Ajmal Khan Road</text><text x="215" y="290" transform="rotate(-80 215 290)">Arya Samaj Rd</text>
         </g>
       )}
-      <circle cx="320" cy="150" r="100" fill="rgb(44 122 84 / .07)" stroke="#2c7a54" strokeWidth="1.5" strokeDasharray="5 5" />
-      {!compact && <text x="386" y="246" fill="#2c7a54" fontSize="11" fontFamily="var(--font-ui)">100 m fence</text>}
+      <circle cx="320" cy="150" r="100" fill={away ? "rgb(168 102 26 / .06)" : "rgb(44 122 84 / .07)"} stroke={ring} strokeWidth="1.5" strokeDasharray="5 5" />
+      {!compact && <text x="386" y="246" fill={ring} fontSize="11" fontFamily="var(--font-ui)">100 m fence</text>}
       <line x1="320" y1="150" x2={agent.x} y2={agent.y} stroke="#1c1d1f" strokeWidth="1" strokeDasharray="2 3" />
-      <rect x="248" y="160" width="146" height="26" rx="13" fill="#2c7a54" />
-      <circle cx="262" cy="173" r="6" fill="#fff" />
-      <text x="274" y="177.5" fill="#fff" fontSize="12" fontWeight="600" fontFamily="var(--font-ui)">1 {label}</text>
-      <circle cx="320" cy="150" r="5" fill="#2c7a54" stroke="#fff" strokeWidth="2" />
+      {/* The app's numbered stop marker: label pill under the GPS dot, numbered circle on top. */}
+      {!compact && (
+        <g>
+          <rect x="337.5" y="139.5" width="120" height="22" rx="8" fill="#fff" stroke="#e3e3e3" />
+          <text x="346" y="154.5" fill="#1c1d1f" fontSize="12" fontWeight="600" fontFamily="var(--font-ui)">{label}</text>
+        </g>
+      )}
+      <circle cx="320" cy="150" r="11" fill={away ? "#1c1d1f" : "#2c7a54"} stroke={away ? "#1c1d1f" : "#2c7a54"} strokeWidth="1.5" />
+      <text x="320" y="154" textAnchor="middle" fill="#fff" fontSize="11" fontWeight="600" fontFamily="var(--font-ui)">1</text>
       {halo ? <circle cx={agent.x} cy={agent.y} r={halo} fill="rgb(168 102 26 / .08)" stroke="#a8661a" strokeWidth="1" strokeDasharray="3 4" /> : null}
       <circle cx={agent.x} cy={agent.y} r="15" fill={tone === "grey" ? "rgb(155 156 160 / .16)" : "rgb(47 107 242 / .14)"} />
       <circle cx={agent.x} cy={agent.y} r="6.5" fill={pin} stroke="#fff" strokeWidth="2.5" />

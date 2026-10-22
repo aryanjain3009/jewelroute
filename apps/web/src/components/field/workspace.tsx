@@ -18,7 +18,7 @@ import { MemoAck } from "./sale/memo-ack";
 import { OrderDecision } from "./order-decision";
 import { CompleteDrawer, ExtendMemoDrawer, NoteDrawer, ReturnDrawer, SellFromMemoDrawer } from "./visit-drawers";
 import { errorMessage, useFieldVisits, useToday } from "./queries";
-import { dayLabel, fmtDay, fmtDistance, fmtDue, fmtTime, plural } from "./format";
+import { dayLabel, fmtDay, fmtDue, fmtFromShop, fmtTime, plural } from "./format";
 import { useGuard } from "./guard";
 import { BottomBar, BottomSpacer } from "./top-bar";
 import type { AckLink, VisitDetail } from "./types";
@@ -34,7 +34,7 @@ export function ArrivalLine({ v }: { v: VisitDetail["visit"] }) {
       <MapPin className={cn("size-[18px] shrink-0", sim ? "text-info" : low ? "text-warn" : "text-verified")} />
       <p className={cn("min-w-0 flex-1 truncate text-[14px] font-medium", sim ? "text-info" : "text-ink")}>
         {sim ? SIMULATED_LOCATION : low ? "Location low accuracy" : "Location verified"}
-        {!sim && v.checkInDistanceM !== undefined && <span className="font-normal text-ink-2">, <span className="num">{fmtDistance(v.checkInDistanceM)}</span> from the shop</span>}
+        {!sim && v.checkInDistanceM !== undefined && <span className="font-normal text-ink-2">, <span className="num">{fmtFromShop(v.checkInDistanceM)}</span></span>}
       </p>
     </div>
   );
@@ -242,7 +242,8 @@ export function ShopContext({ d }: { d: VisitDetail }) {
           </Attr>
         ))}
         <Attr label="Last visit">{last ? <>{fmtDay(last.completedAt)}<span className="text-ink-2">, {last.agentName}</span></> : <span className="text-ink-3">First visit</span>}</Attr>
-        <Attr label="Last order">{prev ? <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1"><span><span className="num">{prev.number}</span><span className="text-ink-2">, </span><Money paise={prev.totalPaise} compact /></span>{prev.status !== "CONFIRMED" && prev.status !== "APPROVED" && <OrderStatusPill status={prev.status} />}</span> : <span className="text-ink-3">No orders yet</span>}</Attr>
+        {/* Before check-in the money strip above already shows the last order. */}
+        {inShop && <Attr label="Last order">{prev ? <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1"><span><span className="num">{prev.number}</span><span className="text-ink-2">, </span><Money paise={prev.totalPaise} compact /></span>{prev.status !== "CONFIRMED" && prev.status !== "APPROVED" && <OrderStatusPill status={prev.status} />}</span> : <span className="text-ink-3">No orders yet</span>}</Attr>}
         <Attr label="Your bag"><span className="num">{plural(d.bag.length, "piece")}</span><span className="text-ink-2"> to show</span></Attr>
       </dl>
     </>
@@ -342,7 +343,7 @@ function Timeline({ data, live }: { data: VisitDetail; live?: boolean }) {
   });
 
   const ev: Ev[] = [];
-  if (visit.checkInAt) ev.push({ at: visit.checkInAt, key: "ci", tone: visit.verification === "SIMULATED" ? "blue" : "green", title: <>Checked in{visit.verification === "SIMULATED" ? " (simulated)" : visit.checkInDistanceM !== undefined ? <span className="font-normal text-ink-2">, <span className="num">{fmtDistance(visit.checkInDistanceM)}</span> from the shop</span> : null}</> });
+  if (visit.checkInAt) ev.push({ at: visit.checkInAt, key: "ci", tone: visit.verification === "SIMULATED" ? "blue" : "green", title: <>Checked in{visit.verification === "SIMULATED" ? " (simulated)" : visit.checkInDistanceM !== undefined ? <span className="font-normal text-ink-2">, <span className="num">{fmtFromShop(visit.checkInDistanceM)}</span></span> : null}</> });
   proofs.forEach((p) => ev.push({ at: p.uploadedAt, key: p.id, tone: "grey", title: "Arrival photo uploaded" }));
   orders.forEach((o) => ev.push({
     at: o.createdAt, key: o.id, tone: "grey", title: <>Order <span className="num">{o.number}</span> booked</>,

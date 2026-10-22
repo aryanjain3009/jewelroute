@@ -1,4 +1,5 @@
 "use client";
+import * as React from "react";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -31,9 +32,22 @@ export function PageBar({ title, subtitle, back, backLabel, right, sub }: {
  *  slides it up once when it first appears in response to an action (the cart's first item). Always
  *  render a spacer of the same height in the page (`BottomSpacer`) so content can scroll clear of it. */
 export function BottomBar({ children, aboveTabs, className, enter }: { children: React.ReactNode; aboveTabs?: boolean; className?: string; enter?: boolean }) {
+  // Publishes how far the bar's top edge sits above the viewport bottom (`--jr-bar-top`), so field toasts
+  // land just above whatever owns the bottom of the screen (see components/ui/sonner.tsx).
+  const bar = React.useRef<HTMLDivElement>(null);
+  React.useLayoutEffect(() => {
+    const el = bar.current; if (!el) return;
+    const root = document.documentElement;
+    const set = () => root.style.setProperty("--jr-bar-top", `${Math.max(0, Math.round(window.innerHeight - el.getBoundingClientRect().top))}px`);
+    set();
+    const ro = new ResizeObserver(set); ro.observe(el);
+    window.addEventListener("resize", set);
+    el.addEventListener("transitionend", set); // the `enter` slide-up moves the top edge without resizing
+    return () => { ro.disconnect(); window.removeEventListener("resize", set); el.removeEventListener("transitionend", set); root.style.removeProperty("--jr-bar-top"); };
+  }, []);
   return (
     <div className="pointer-events-none fixed inset-x-0 z-30" style={{ bottom: aboveTabs ? TAB_BAR_H : 0 }}>
-      <div className={cn("pointer-events-auto mx-auto max-w-[520px] border-t border-line bg-paper px-4 pt-3 min-[521px]:border-x", aboveTabs ? "pb-3" : "safe-bottom",
+      <div ref={bar} className={cn("pointer-events-auto mx-auto max-w-[520px] border-t border-line bg-paper px-4 pt-3 min-[521px]:border-x", aboveTabs ? "pb-3" : "safe-bottom",
         enter && "transition-transform duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] starting:translate-y-full", className)}>
         {children}
       </div>

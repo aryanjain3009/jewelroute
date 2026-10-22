@@ -16,12 +16,11 @@
 import * as React from "react";
 import Link from "next/link";
 import { useInView, useReducedMotion } from "motion/react";
-import { BadgeCheckIcon, CameraIcon, CheckCheckIcon, CheckIcon, ChevronRightIcon, CrosshairIcon, GemIcon, LayoutDashboardIcon, ScrollTextIcon, ShieldCheckIcon, ShoppingBagIcon, SmartphoneIcon } from "lucide-react";
+import { CameraIcon, CheckCheckIcon, CheckIcon, ChevronRightIcon, CircleCheckIcon, CrosshairIcon, GemIcon, LayoutDashboardIcon, ScrollTextIcon, ShieldCheckIcon, ShoppingBagIcon, SmartphoneIcon } from "lucide-react";
 import { formatGrams, formatINR, formatINRCompact, formatRate } from "@jewelroute/shared";
 import { SegmentedTabs, SegmentedTabsContent, SegmentedTabsList, type SegmentedItem } from "@/components/ui/origin/segmented-tabs";
-import { Avatar } from "@/components/app/chrome";
 import { cn } from "@/lib/utils";
-import { AGENTS, ATTENTION, KADA, MEMO, METRICS, ORDER, ORDER_LINES, RATE_22K, VAULT, IMG } from "./data";
+import { ATTENTION, KADA, MEMO, METRICS, ORDER, ORDER_LINES, RATE_22K, VAULT, IMG } from "./data";
 import { FenceMap, PhoneFrame, Photo } from "./kit";
 import { AppWindow, CtaLink, INSET, RAIL, SampleTag } from "./primitives";
 import { CustodyView, ManagerView, PhoneSale, PhoneToday, PhoneTop, Steps, VisitHead } from "./views";
@@ -67,9 +66,9 @@ function PhoneBody({ step }: { step: number }) {
   if (step === 0) return (
     <>
       <div className="mx-4 mt-3 overflow-hidden rounded-[12px] border border-line"><FenceMap compact agent={{ x: 352, y: 122 }} /></div>
-      <div className="mx-4 mt-2.5 flex gap-2.5 rounded-[12px] border border-verified/25 bg-verified-soft px-3 py-2.5">
-        <BadgeCheckIcon className="mt-0.5 size-5 shrink-0 text-verified" strokeWidth={1.75} />
-        <div><div className="text-[14px] font-semibold text-verified">Location verified · 38 m</div><div className="text-[12px] text-ink-2">Inside the 100 m zone at Sharma Jewellers.</div></div>
+      <div className="mx-4 mt-2.5 flex gap-2.5 rounded-[12px] border border-line bg-white px-3 py-2.5">
+        <CircleCheckIcon className="mt-0.5 size-5 shrink-0 text-ink-3" strokeWidth={1.75} />
+        <div className="min-w-0 flex-1"><div className="flex items-baseline gap-2 text-[14px] font-semibold"><span className="text-ink">You&apos;re at Sharma Jewellers</span><span className="num ml-auto text-ink">38 m</span></div><div className="text-[12px] text-ink-2">Inside the 100 m zone. Check in to start the visit.</div></div>
       </div>
       <PhoneAction icon={CrosshairIcon}>Check in</PhoneAction>
     </>
@@ -202,12 +201,6 @@ function MobileManager() {
               </li>
             ))}
           </ul>
-          <div className="mt-4 mb-2 flex items-center text-[14px] font-medium">Live field activity<span className="ml-auto flex items-center gap-1.5 text-[12px] font-normal text-ink-3"><span className="size-1.5 rounded-full bg-verified" />every 10 s</span></div>
-          <ul className="divide-y divide-line overflow-hidden rounded-[10px] border border-line">
-            {AGENTS.slice(0, 2).map((a) => (
-              <li key={a.name} className="flex items-center gap-2.5 px-3 py-2 text-[13px]"><Avatar name={a.name} size={20} /><span className="min-w-0 flex-1 truncate"><span className="font-medium">{a.name}</span> <span className="text-ink-3">· {a.at.replace(/ since .*/, "")}</span></span><span className="num text-[12px] text-ink-3">{a.done}/{a.total}</span></li>
-            ))}
-          </ul>
         </div>
       </div>
     </AppWindow>
@@ -271,6 +264,8 @@ function ProductSwitch() {
       onValueChange={(v) => { setAuto(false); setTab(v as TabId); }}
       activationMode="automatic"
       className="relative"
+      onPointerEnter={(e) => { if (e.pointerType === "mouse") setHover(true); }}
+      onPointerLeave={() => setHover(false)}
     >
       {/* Flat grey stage from the switch's midline down: the whole frame sits on it, no seam cuts a mock. */}
       <div className="absolute inset-x-0 top-6 bottom-0 border-t border-line bg-sunken sm:top-5" aria-hidden />
@@ -290,7 +285,7 @@ function ProductSwitch() {
       </div>
 
       {/* Stage: white above, flat grey below the frame's midline (no gradient). */}
-      <div className="relative mt-8 pb-14 md:mt-10 md:pb-16" onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
+      <div className="relative mt-8 pb-14 md:mt-10 md:pb-16">
         <div ref={stage} className={cn(INSET, "relative")}>
           <div className={cn("relative", STAGE_H)}>
             {TABS.map(({ value }) => {
@@ -303,7 +298,7 @@ function ProductSwitch() {
                   inert={!on}
                   tabIndex={-1}
                   className={cn(
-                    "absolute inset-0 outline-none transition-[opacity,transform,filter] ease-[cubic-bezier(0.23,1,0.32,1)]",
+                    "absolute inset-0 outline-none transition-[opacity,transform,filter] ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
                     on ? "translate-y-0 opacity-100 blur-[0px] duration-[240ms]" : "pointer-events-none translate-y-1.5 opacity-0 blur-[2px] duration-[140ms]",
                   )}
                 >
@@ -332,7 +327,7 @@ export function Hero() {
       <div className={cn(RAIL, "relative")}>
         <div className={cn(INSET, "flex flex-col items-center pt-14 pb-10 text-center sm:pt-20 md:pb-12 lg:pt-[88px]")}>
           <Link href="/#workflow" className="group inline-flex h-8 items-center gap-1 rounded-full border border-line-strong bg-white pr-2.5 pl-3.5 text-[13px] font-medium text-ink-2 outline-none transition-colors duration-150 ease-out focus-visible:ring-[3px] focus-visible:ring-blue/30 [@media(hover:hover)_and_(pointer:fine)]:hover:border-[#cfcfd2] [@media(hover:hover)_and_(pointer:fine)]:hover:text-ink">
-            Field sales operating system for jewelry
+            Field sales operating system for jewellery
             <ChevronRightIcon className="size-3.5 text-ink-3 transition-transform duration-150 ease-out [@media(hover:hover)_and_(pointer:fine)]:group-hover:translate-x-0.5" />
           </Link>
           <h1 id="hero-title" className="mt-6 text-balance text-[34px] font-semibold leading-[1.04] tracking-[-0.03em] text-ink sm:text-[48px] lg:text-[60px] lg:leading-[1]">
@@ -343,7 +338,7 @@ export function Hero() {
             GPS-verified retailer visits with arrival proof, orders priced from today&apos;s gold rate, and a custody record for every sample that leaves the vault.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-2.5">
-            <CtaLink href="/#workflow" tone="secondary">See how it works</CtaLink>
+            <CtaLink href="/signup" tone="secondary">Create your workspace</CtaLink>
             <CtaLink href="/login">Explore live demo</CtaLink>
           </div>
         </div>

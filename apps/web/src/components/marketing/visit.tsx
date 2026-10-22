@@ -9,6 +9,7 @@ import { Tabs as TabsPrimitive } from "radix-ui";
 import { AlertTriangleIcon, BadgeCheckIcon, CameraIcon, FlaskConicalIcon, LocateIcon, ShieldCheckIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { IMG } from "./data";
+import { useKbdFocus } from "@/lib/use-kbd-focus";
 import { FenceMap, Photo } from "./kit";
 import { Eyebrow, Heading, SampleTag, Section, Stage } from "./primitives";
 
@@ -38,7 +39,7 @@ const FRAME: Record<Id, { map: React.ComponentProps<typeof FenceMap>; status: Re
     rows: [["Checked in", "11:42 am"], ["Recorded as", "SIMULATED"], ["Shown as", "Simulated, never verified"], ["Photo", "11:43 am, server time"], ["Allowed in", "Demo workspaces only"]],
   },
   refused: {
-    map: { agent: { x: 446, y: 262 }, distance: "214 m", tone: "grey" },
+    map: { agent: { x: 446, y: 262 }, distance: "214 m", tone: "grey", away: true },
     status: <span className="flex items-center gap-1.5 font-medium text-danger"><span className="size-2 rounded-full bg-danger" />Refused · 214 m from the shop</span>,
   },
 };
@@ -86,18 +87,19 @@ function Frame({ id }: { id: Id }) {
 
 export function VerifiedVisitSection() {
   const [id, setId] = React.useState<Id>("verified");
+  const kbd = useKbdFocus();
   return (
     <Section id="visit" labelledBy="visit-title">
       <TabsPrimitive.Root value={id} onValueChange={(v) => setId(v as Id)} orientation="vertical" className="grid lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
         <div className="px-5 pt-20 pb-10 sm:px-8 md:pt-28 lg:px-14 lg:pt-32 lg:pb-24">
           <Eyebrow>Verified visits</Eyebrow>
           <Heading id="visit-title" className="mt-4" lead="Proof that he was there." rest="Check-in opens only inside the shop's fence, and the arrival photo is stamped on the server." />
-          <TabsPrimitive.List aria-label="Check-in outcomes" className="mt-10 flex flex-col divide-y divide-line border-y border-line">
+          <TabsPrimitive.List {...kbd} aria-label="Check-in outcomes" className="group/kbd mt-10 flex flex-col divide-y divide-line border-y border-line">
             {STATES.map((s) => (
               <TabsPrimitive.Trigger
                 key={s.id}
                 value={s.id}
-                className="group relative flex min-h-[68px] items-start gap-3.5 px-1 py-3.5 text-left outline-none transition-colors duration-150 focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-blue/30 data-[state=active]:bg-selected data-[state=active]:shadow-[inset_2px_0_0_var(--jr-ink)] [@media(hover:hover)_and_(pointer:fine)]:data-[state=inactive]:hover:bg-hover"
+                className="group relative flex min-h-[68px] items-start gap-3.5 px-1 py-3.5 text-left outline-none transition-colors duration-150 group-data-[kbd]/kbd:focus-visible:ring-[3px] group-data-[kbd]/kbd:focus-visible:ring-inset group-data-[kbd]/kbd:focus-visible:ring-blue/30 data-[state=active]:bg-selected data-[state=active]:shadow-[inset_2px_0_0_var(--jr-ink)] [@media(hover:hover)_and_(pointer:fine)]:data-[state=inactive]:hover:bg-hover"
               >
                 <s.icon className={cn("mt-0.5 ml-2.5 size-[18px] shrink-0", s.tone)} strokeWidth={1.75} />
                 <span className="text-[15px] leading-snug text-ink-2"><span className="font-medium text-ink">{s.title}.</span> {s.text}</span>

@@ -46,6 +46,8 @@ export function fmtDistance(m?: number | null) {
   if (m < 1000) return `${Math.round(m)} m`;
   return `${(m / 1000).toFixed(m < 10_000 ? 1 : 0)} km`;
 }
+/** "38 m from the shop", or "at the shop" when the server measured 0 m (never "0 m"). */
+export const fmtFromShop = (m: number) => (Math.round(m) === 0 ? "at the shop" : `${fmtDistance(m)} from the shop`);
 /** "Due in 3 days" / "Due today" / "2 days overdue" */
 export function fmtDue(daysToDue: number) {
   if (daysToDue === 0) return "Due today";

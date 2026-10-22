@@ -26,6 +26,7 @@ export function SiteHeader({ current }: { current?: "developers" }) {
       </>}
       mobileActions={<>
         <CtaLink href="/login" tone="secondary" className="w-full">Sign in</CtaLink>
+        <CtaLink href="/signup" tone="secondary" className="order-last col-span-full w-full">Create your workspace</CtaLink>
         <CtaLink href="/login" className="w-full">Explore live demo</CtaLink>
       </>}
     />
@@ -36,7 +37,7 @@ const COLS: { title: string; links: [string, string][] }[] = [
   { title: "Product", links: [["/#product-route", "Route and bag"], ["/#product-selling", "Selling at today's rate"], ["/#product-memos", "Memos"], ["/#manager", "Manager operations"]] },
   { title: "Field", links: [["/#visit", "Verified visits"], ["/#custody", "Sample custody"], ["/#workflow", "One field day"], ["/#trust", "Trust and audit"]] },
   { title: "Developers", links: [["/developers", "API overview"], ["/developers#events", "Event catalogue"], ["/developers#signatures", "Verifying signatures"], ["/developers#money", "Money in paise"]] },
-  { title: "Account", links: [["/login", "Sign in"], ["/login", "Explore live demo"]] },
+  { title: "Account", links: [["/login", "Sign in"], ["/signup", "Create a workspace"], ["/login", "Explore live demo"]] },
 ];
 
 export function SiteFooter() {

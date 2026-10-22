@@ -1,7 +1,7 @@
 // Integrations (webhooks) response shapes from docs/CONTRACT.md (Admin → Integrations).
 
 export interface EventType { type: string; description: string; example?: unknown }
-export interface WebhookEndpoint { id: string; url: string; description?: string; events: string[]; active: boolean; secretLast4: string; createdAt: string; stats: { succeeded24h: number; failed24h: number } }
+export interface WebhookEndpoint { id: string; url: string; description?: string; events: string[]; active: boolean; secretLast4: string; createdAt: string; stats: { succeeded24h: number; failed24h: number; retrying24h?: number; dead24h?: number } }
 export type DeliveryStatus = "PENDING" | "SUCCEEDED" | "FAILED" | "DEAD";
 export interface Delivery {
   id: string; endpointId: string; eventId: string; eventType: string; status: DeliveryStatus; attempts: number;

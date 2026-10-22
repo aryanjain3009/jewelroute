@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useKbdFocus } from "@/lib/use-kbd-focus";
 import { AlertCircle, ChevronRight, RotateCw } from "lucide-react";
 import { formatINR, formatINRCompact } from "@jewelroute/shared";
 import { Button } from "@/components/ui/button";
@@ -159,12 +160,13 @@ export function Segmented<T extends string>({ value, onChange, items, label, cla
   value: T; onChange: (v: T) => void; label: string; className?: string; children?: React.ReactNode;
   items: { value: T; label: React.ReactNode }[]; wrap?: (list: React.ReactNode) => React.ReactNode;
 }) {
+  const kbd = useKbdFocus(); // keyboard focus gets a ring, a tap does not
   const list = (
     <div className={cn("px-4 pb-2.5", className)}>
-      <TabsList aria-label={label} className="grid h-10 w-full rounded-[10px] bg-sunken p-[3px]" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
+      <TabsList {...kbd} aria-label={label} className="group/kbd grid h-10 w-full rounded-[10px] bg-sunken p-[3px]" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
         {items.map((it) => (
           <TabsTrigger key={it.value} value={it.value}
-            className="h-full rounded-[8px] border-0 text-[14px] font-medium text-ink-2 shadow-none outline-none transition-[background-color,color,box-shadow] duration-150 hover:text-ink focus-visible:border-0 focus-visible:ring-0 focus-visible:outline-none data-[state=active]:bg-paper data-[state=active]:text-ink data-[state=active]:shadow-[0_1px_2px_rgb(0_0_0/0.06),0_0_0_0.5px_rgb(0_0_0/0.08)]">
+            className="h-full rounded-[8px] border-0 text-[14px] font-medium text-ink-2 shadow-none outline-none transition-[background-color,color,box-shadow] duration-150 hover:text-ink focus-visible:border-0 focus-visible:ring-0 focus-visible:outline-none group-data-[kbd]/kbd:focus-visible:ring-[3px] group-data-[kbd]/kbd:focus-visible:ring-blue/35 data-[state=active]:bg-paper data-[state=active]:text-ink data-[state=active]:shadow-[0_1px_2px_rgb(0_0_0/0.06),0_0_0_0.5px_rgb(0_0_0/0.08)]">
             {it.label}
           </TabsTrigger>
         ))}

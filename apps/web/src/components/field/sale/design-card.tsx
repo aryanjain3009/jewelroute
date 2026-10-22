@@ -29,8 +29,8 @@ export function DesignCard({ design, qty, onOpen, onQuickAdd, priority, inBag }:
           <p className="line-clamp-1 font-display text-[17px] leading-snug tracking-[-0.01em] text-ink">{design.name}</p>
           <p className="mt-1 flex items-center gap-1.5 text-[12px] text-ink-3">
             <PurityTag purity={design.purity} className="h-[18px] px-1 text-[10.5px]" />
-            <span className="num">{formatGrams(design.netWeightMg)}</span>
-            <span className="num truncate">{design.sku}</span>
+            <span className="num whitespace-nowrap">{formatGrams(design.netWeightMg)}</span>
+            <span className="num min-w-0 truncate min-[600px]:hidden">{design.sku}</span>
           </p>
           {design.price
             ? <p className="num mt-1.5 text-[15px] font-semibold text-ink">{formatINR(design.price.totalWithGstPaise)}</p>

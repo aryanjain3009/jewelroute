@@ -178,9 +178,9 @@ function GeoPanel({ geo, inside, server, shown, radius, shopName, verifying, ser
   if (inside) {
     const low = server?.verification === "LOW_ACCURACY";
     return (
-      <Notice tone={low ? "warn" : "ok"} icon={CheckCircle2} role="status" className={cn(wrap, "transition-opacity duration-200 starting:opacity-0")}
-        title={<span className={low ? "text-warn" : "text-verified"}>You’re at {shopName}</span>}
-        aside={<span className="num shrink-0 text-[15px] font-semibold text-ink">{fmtDistance(server?.distanceM ?? shown)}</span>}>
+      <Notice tone={low ? "warn" : "neutral"} icon={CheckCircle2} role="status" className={cn(wrap, "transition-opacity duration-200 starting:opacity-0")}
+        title={<span className={low ? "text-warn" : "text-ink"}>You’re at {shopName}</span>}
+        aside={Math.round(server?.distanceM ?? shown ?? 0) > 0 ? <span className="num shrink-0 text-[15px] font-semibold text-ink">{fmtDistance(server?.distanceM ?? shown)}</span> : undefined}>
         {low ? <>GPS is imprecise (<span className="num">±{Math.round(geo.fix?.accuracyM ?? 0)} m</span>). Check-in will be marked low accuracy.</> : <>Inside the <span className="num">{radius} m</span> zone. Check in to start the visit.</>}
       </Notice>
     );

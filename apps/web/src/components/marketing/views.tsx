@@ -2,7 +2,7 @@
 /** The three product states shown in the hero frame, built from the app's own components and fed
  *  with the sample data in ./data. The switcher chooses which one is on screen. */
 import {
-  BadgeCheckIcon, BoxesIcon, CalendarIcon, CameraIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon,
+  BoxesIcon, CircleCheckIcon, CalendarIcon, CameraIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon,
   ClipboardListIcon, CompassIcon, GemIcon, HomeIcon, IndianRupeeIcon, LandmarkIcon, LockIcon, MapPinIcon,
   MapPinnedIcon, NavigationIcon, PhoneIcon, PlugIcon, PlusIcon, ReceiptTextIcon, ScaleIcon, ScrollTextIcon,
   SearchIcon, Settings2Icon, ShieldCheckIcon, ShoppingBagIcon, StoreIcon, TagIcon, UserIcon, UsersIcon,
@@ -234,8 +234,9 @@ export function PhoneToday() {
       <div className="px-4 pt-3">
         <div className="text-[12.5px] text-ink-2">Wed, 21 Oct · 4 stops</div>
         <div className="mt-2.5 grid grid-cols-2 divide-x divide-line rounded-[10px] border border-line">
-          <div className="px-3 py-2"><div className="text-[11.5px] text-ink-3">In your bag</div><div className="num text-[15px] font-medium text-gold-ink">{formatINRCompact(AGENTS[0].bagPaise)}</div><div className="text-[11.5px] text-ink-3">11 pieces</div></div>
-          <div className="px-3 py-2"><div className="text-[11.5px] text-ink-3">Open memos</div><div className="num text-[15px] font-medium">2</div><div className="text-[11.5px] text-danger">1 overdue</div></div>
+          {/* Same custody strip as the real Today: both values are custody, both gold; counts beside them. */}
+          <div className="min-w-0 px-3 py-2"><div className="text-[11.5px] text-ink-3">In your bag</div><div className="mt-0.5 flex items-baseline gap-1.5 whitespace-nowrap"><span className="num text-[15px] font-medium text-gold-ink">{formatINRCompact(AGENTS[0].bagPaise)}</span><span className="text-[11.5px] text-ink-3">11 pieces</span></div></div>
+          <div className="min-w-0 px-3 py-2"><div className="text-[11.5px] text-ink-3">On memo</div><div className="mt-0.5 flex items-baseline gap-1.5 whitespace-nowrap"><span className="num text-[15px] font-medium text-gold-ink">{formatINRCompact(ATTENTION[0].paise)}</span><span className="text-[11.5px] text-danger">1 overdue</span></div></div>
         </div>
       </div>
       <div className="mt-4 px-4 text-[13px] font-semibold">Route</div>
@@ -248,7 +249,7 @@ export function PhoneToday() {
               <div className="truncate text-[12px] text-ink-3"><span className="num">{r.time}</span> · {r.area}</div>
               {i === 0 && <div className="mt-1.5 inline-flex h-7 items-center gap-1 rounded-lg bg-ink px-2.5 text-[12px] font-medium text-white"><NavigationIcon className="size-3" />Open visit</div>}
             </div>
-            {r.note && <Chip tone={r.note.includes("overdue") ? "red" : "gold"} className="text-[11px]">{r.note.includes("overdue") ? "Memo overdue" : "Next"}</Chip>}
+            {r.note && <Chip tone={r.note.includes("overdue") ? "red" : "grey"} className="text-[11px]">{r.note.includes("overdue") ? "Memo overdue" : "Next"}</Chip>}
             {i === 0 && !r.note && <Chip tone="grey" className="text-[11px]">Next</Chip>}
           </li>
         ))}
@@ -265,9 +266,9 @@ export function PhoneCheckIn() {
       <VisitHead status="Planned" tone="grey" />
       <div className="px-4"><Steps at={0} /></div>
       <div className="mx-4 mt-3 overflow-hidden rounded-[12px] border border-line"><FenceMap compact agent={{ x: 352, y: 122 }} /></div>
-      <div className="mx-4 mt-2.5 flex gap-2.5 rounded-[12px] border border-verified/25 bg-verified-soft px-3 py-2.5">
-        <BadgeCheckIcon className="mt-0.5 size-5 shrink-0 text-verified" strokeWidth={1.75} />
-        <div><div className="text-[14px] font-semibold text-verified">Location verified · 38 m</div><div className="text-[12px] text-ink-2">Inside the 100 m zone at Sharma Jewellers.</div></div>
+      <div className="mx-4 mt-2.5 flex gap-2.5 rounded-[12px] border border-line bg-white px-3 py-2.5">
+        <CircleCheckIcon className="mt-0.5 size-5 shrink-0 text-ink-3" strokeWidth={1.75} />
+        <div className="min-w-0 flex-1"><div className="flex items-baseline gap-2 text-[14px] font-semibold"><span className="text-ink">You&apos;re at Sharma Jewellers</span><span className="num ml-auto text-ink">38 m</span></div><div className="text-[12px] text-ink-2">Inside the 100 m zone. Check in to start the visit.</div></div>
       </div>
       <div className="mt-auto border-t border-line px-4 pt-3 pb-4">
         <div className="flex h-11 items-center justify-center gap-2 rounded-[10px] bg-ink text-[15px] font-medium text-white"><CrosshairIcon className="size-4" />Check in</div>
@@ -281,7 +282,7 @@ export function PhoneVisit({ className }: { className?: string }) {
   const actions = [
     { icon: BookOpenIcon, l: "Browse catalog", r: "Today's prices" },
     { icon: ShoppingBagIcon, l: "Create order", r: "1 confirmed" },
-    { icon: GemIcon, l: "Leave on memo", r: "2 acknowledged", gold: true },
+    { icon: GemIcon, l: "Leave on memo", r: "2 acknowledged" },
   ];
   return (
     <PhoneFrame time="11:59" className={cn("h-[600px]", className)}>
@@ -303,7 +304,7 @@ export function PhoneVisit({ className }: { className?: string }) {
       <ul className="mt-1 divide-y divide-line border-y border-line">
         {actions.map((a) => (
           <li key={a.l} className="flex h-11 items-center gap-3 whitespace-nowrap px-4 text-[14px]">
-            <a.icon className={cn("size-[18px]", a.gold ? "text-gold" : "text-ink-2")} strokeWidth={1.6} />
+            <a.icon className="size-[18px] text-ink-2" strokeWidth={1.6} />
             {a.l}
             <span className="ml-auto text-[12px] text-ink-3">{a.r}</span>
             <ChevronRightIcon className="size-3.5 text-ink-3" />

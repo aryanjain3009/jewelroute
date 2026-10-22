@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Lock } from "lucide-react";
 import { toast } from "sonner";
 import { formatGrams, formatINR, formatINRCompact } from "@jewelroute/shared";
@@ -114,8 +114,10 @@ export function SaleView({ visitId }: { visitId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settled, step, urlStep, mode]);
 
-  // A receipt or the QR screen always opens at its top (the review it replaces may have been scrolled).
-  useEffect(() => { if (step === "done" || step === "ack") window.scrollTo(0, 0); }, [step]);
+  // Every step opens at its top (the screen it replaces may have been scrolled; a receipt landing
+  // half-scrolled hid its status under the top bar). Not on first mount: the browser owns that.
+  const prevStep = useRef(step);
+  useEffect(() => { if (prevStep.current !== step) window.scrollTo(0, 0); prevStep.current = step; }, [step]);
 
   // A deep link / refresh on a later step: wait for the draft and the data instead of flashing the catalog.
   if (!settled && urlStep !== "browse") return <PageBar back={backToVisit} backLabel="Visit" title={mode === "memo" ? "Leave on memo" : "New order"} subtitle={shopName || undefined} />;

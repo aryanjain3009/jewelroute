@@ -138,7 +138,7 @@ const routeCells: Cell[] = [
 /* ---------- Selling: catalog → today's gold rate → order ---------- */
 const sellingFlow = (
   <Flow>
-    <Step label="Jewelry catalog">
+    <Step label="Jewellery catalog">
       <Photo src={TEMPLE.img} alt="" className="aspect-[16/10] w-full" sizes="(min-width: 1024px) 300px, 100vw" />
       <div className="px-3 py-2.5">
         <div className="text-[14px] font-medium text-ink">{TEMPLE.design}</div>

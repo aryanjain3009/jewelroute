@@ -70,7 +70,7 @@ function Body({ d, onClose, order, shopName }: { d: Design; onClose: () => void;
 
           <dl className="mt-4 grid grid-cols-3 divide-x divide-line rounded-xl border border-line text-[13px]">
             <div className="px-3 py-2.5"><dt className="text-ink-3">Gross</dt><dd className="num mt-0.5 text-[15px] font-medium text-ink">{formatGrams(d.grossWeightMg)}</dd></div>
-            <div className="px-3 py-2.5"><dt className="text-ink-3">Net gold</dt><dd className="num mt-0.5 text-[15px] font-medium text-ink">{formatGrams(d.netWeightMg)}</dd></div>
+            <div className="px-3 py-2.5"><dt className="text-ink-3">Net weight</dt><dd className="num mt-0.5 text-[15px] font-medium text-ink">{formatGrams(d.netWeightMg)}</dd></div>
             <div className="px-3 py-2.5"><dt className="text-ink-3">Category</dt><dd className="mt-0.5 truncate text-[15px] font-medium text-ink">{d.category}</dd></div>
           </dl>
 
@@ -132,9 +132,8 @@ function Body({ d, onClose, order, shopName }: { d: Design; onClose: () => void;
                   <span className="num w-7 text-center text-[16px] font-semibold" aria-live="polite">{qty}</span>
                   <button type="button" className="grid size-12 place-items-center text-ink-2 transition-colors duration-150 active:bg-sunken" onClick={() => setQty((q) => Math.min(99, q + 1))} aria-label="Increase quantity"><Plus className="size-4" /></button>
                 </div>
-                <Button className={cn("h-12 flex-1 justify-between px-4 text-[15px]", PRESS_BTN)} disabled={!p} onClick={() => { order.onSetQty(d, qty); onClose(); }}>
-                  <span>{order.qty ? (qty === order.qty ? "In order" : "Update order") : "Add to order"}</span>
-                  {p && <span className="num text-[13px] opacity-75">×{qty}</span>}
+                <Button className={cn("h-12 flex-1 px-4 text-[15px]", PRESS_BTN)} disabled={!p} onClick={() => { order.onSetQty(d, qty); onClose(); }}>
+                  {order.qty ? (qty === order.qty ? "In order" : "Update order") : "Add to order"}
                 </Button>
               </div>
               {order.qty > 0 && <button type="button" className="mt-1 h-11 w-full text-[14px] text-ink-2 transition-colors hover:text-danger active:opacity-60" onClick={() => { order.onSetQty(d, 0); onClose(); }}>Remove from order</button>}

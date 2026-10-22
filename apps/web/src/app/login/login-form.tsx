@@ -247,6 +247,10 @@ export function LoginForm({ hasSession = true }: { hasSession?: boolean }) {
             {busy === "form" && <Loader2 className="animate-spin" />}Sign in
           </Button>
         </form>
+        <p className="mt-2 text-center text-[14px] text-ink-2">
+          New to JewelRoute?{" "}
+          <Link href="/signup" className="inline-block rounded-[4px] py-3 font-medium text-ink underline decoration-line-strong underline-offset-[3px] outline-none transition-colors duration-150 ease-out hover:decoration-ink focus-visible:ring-[3px] focus-visible:ring-blue/30">Create a workspace</Link>
+        </p>
         <p className="mt-6 text-[12.5px] leading-relaxed text-ink-3 lg:hidden">Demo accounts sign in to sample data for Aurum Jewels. Nothing here is a real retailer or a real order.</p>
       </section>
     </main>

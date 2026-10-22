@@ -1,7 +1,7 @@
 /** Integrations: JewelRoute → signed webhooks → ERP / accounting / internal systems, four example
  *  events, link to /developers. No payloads here. Reference: the split "SDK/API" block — claim and
  *  button on the left, one diagram on the right. Server-rendered. */
-import { ArrowDownIcon, ArrowRightIcon, KeyRoundIcon } from "lucide-react";
+import { ArrowDownIcon, KeyRoundIcon } from "lucide-react";
 import { EVENT_DESCRIPTIONS } from "@jewelroute/shared";
 import { Logo } from "@/components/jr/logo";
 import { cn } from "@/lib/utils";
@@ -18,7 +18,7 @@ export function IntegrationsSection() {
         <div className="px-5 pt-20 pb-12 sm:px-8 md:pt-28 lg:px-14 lg:py-32">
           <Eyebrow>Integrations</Eyebrow>
           <Heading id="integrations-title" className="mt-4 max-w-[520px]" lead="Signed webhooks." rest="Every visit, order, memo and custody move, delivered to the systems you already run." />
-          <div className="mt-8"><CtaLink href="/developers" tone="secondary">Read the developer docs<ArrowRightIcon className="size-4" /></CtaLink></div>
+          <div className="mt-8"><CtaLink href="/developers" tone="secondary">Read the developer docs</CtaLink></div>
         </div>
         <Stage className="flex items-center border-t border-line px-4 py-12 sm:px-8 lg:border-t-0 lg:border-l lg:px-14 lg:py-20">
           <div className="mx-auto w-full max-w-[560px]" aria-hidden inert>

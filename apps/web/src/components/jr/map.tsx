@@ -83,6 +83,9 @@ export function JrMap({ markers, me, fence, route, className, initialZoom = 12, 
   const loaded = useRef(false);
   const domMarkers = useRef<maplibregl.Marker[]>([]);
   const fitted = useRef(false);
+  // The map's load events fire once, later; they must draw the latest props, not the first render's
+  // (a stale draw painted an "outside" fence after the server had already said inside).
+  const drawLatest = useRef<() => void>(() => {});
 
   useEffect(() => {
     if (!el.current || map.current) return;
@@ -96,8 +99,8 @@ export function JrMap({ markers, me, fence, route, className, initialZoom = 12, 
     if (interactive) map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     // Markers and the camera don't need tiles; layers only need the style. Drawing on "style.load"
     // (not just "load", which waits for every first tile) keeps the map useful when a tile host is slow or blocked.
-    map.current.on("style.load", () => { loaded.current = true; draw(); });
-    map.current.on("load", () => { loaded.current = true; draw(); });
+    map.current.on("style.load", () => { loaded.current = true; drawLatest.current(); });
+    map.current.on("load", () => { loaded.current = true; drawLatest.current(); });
     draw();
     return () => { map.current?.remove(); map.current = null; loaded.current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -109,7 +112,7 @@ export function JrMap({ markers, me, fence, route, className, initialZoom = 12, 
     const numbered = markerStyle === "numbered";
     const meNode = () => {
       const node = document.createElement("div");
-      node.style.cssText = "width:16px;height:16px;border-radius:999px;background:#2f5f8f;border:3px solid #fff;box-shadow:0 0 0 6px rgb(47 95 143/.18)";
+      node.style.cssText = "width:16px;height:16px;border-radius:999px;background:#2f5f8f;border:3px solid #fff;box-shadow:0 0 0 6px rgb(47 95 143/.18);z-index:2;pointer-events:none";
       return node;
     };
     if (numbered && me) domMarkers.current.push(new maplibregl.Marker({ element: meNode() }).setLngLat([me.lng, me.lat]).addTo(m));
@@ -121,21 +124,20 @@ export function JrMap({ markers, me, fence, route, className, initialZoom = 12, 
         const node = document.createElement("button");
         node.type = "button";
         node.setAttribute("aria-label", mk.label ?? "Shop");
-        node.style.cssText = "display:flex;align-items:center;gap:6px;background:none;border:0;padding:0;cursor:pointer;font:600 12px/1 var(--font-ui),system-ui";
-        const dot = document.createElement("span");
-        dot.textContent = mk.badge !== undefined ? String(mk.badge) : "";
-        dot.style.cssText = `width:22px;height:22px;border-radius:999px;display:grid;place-items:center;background:${tone.bg};color:${tone.fg};border:1.5px solid ${tone.ring};box-shadow:0 1px 2px rgb(0 0 0/.08),0 4px 10px -4px rgb(0 0 0/.25);font-size:11px`;
-        node.append(dot);
+        // Three layers so nothing important is ever covered: label pill (z 1) < "me" dot (z 2) < numbered circles (z 3).
+        // The circle is its own marker, so the GPS dot can sit over a label but never over a stop number.
+        node.style.cssText = `width:22px;height:22px;border-radius:999px;display:grid;place-items:center;padding:0;background:${tone.bg};color:${(mk.tone ?? "planned") === "planned" ? "#6e6f73" : tone.fg};border:1.5px solid ${tone.ring};box-shadow:0 1px 2px rgb(0 0 0/.08),0 4px 10px -4px rgb(0 0 0/.25);cursor:pointer;font:600 11px/1 var(--font-ui),system-ui`;
+        node.textContent = mk.badge !== undefined ? String(mk.badge) : "";
+        if (mk.onClick) node.addEventListener("click", (e) => { e.stopPropagation(); mk.onClick!(); });
+        const marker = new maplibregl.Marker({ element: node, anchor: "center" }).setLngLat([mk.lng, mk.lat]);
+        node.style.zIndex = "3";
+        marker.addTo(m); domMarkers.current.push(marker);
         if (mk.label && sel) {
           const l = document.createElement("span");
           l.textContent = mk.label;
-          l.style.cssText = "padding:4px 8px;border-radius:8px;background:#fff;color:#1c1d1f;border:1px solid #e3e3e3;box-shadow:0 4px 12px -6px rgb(0 0 0/.25);white-space:nowrap";
-          node.append(l);
+          l.style.cssText = "padding:4px 8px;border-radius:8px;background:#fff;color:#1c1d1f;border:1px solid #e3e3e3;box-shadow:0 4px 12px -6px rgb(0 0 0/.25);white-space:nowrap;pointer-events:none;font:600 12px/1 var(--font-ui),system-ui;z-index:1";
+          domMarkers.current.push(new maplibregl.Marker({ element: l, anchor: "left", offset: [17, 0] }).setLngLat([mk.lng, mk.lat]).addTo(m));
         }
-        if (mk.onClick) node.addEventListener("click", (e) => { e.stopPropagation(); mk.onClick!(); });
-        // Anchor on the circle's centre (the label hangs off to the right).
-        const marker = new maplibregl.Marker({ element: node, anchor: "left", offset: [-11, 0] }).setLngLat([mk.lng, mk.lat]);
-        marker.addTo(m); domMarkers.current.push(marker);
         continue;
       }
       const tone = TONE[mk.tone ?? "planned"];
@@ -167,7 +169,9 @@ export function JrMap({ markers, me, fence, route, className, initialZoom = 12, 
 
     const styleReady = loaded.current || m.isStyleLoaded();
     if (styleReady) drawLayers(m);
-    fitOnce(m);
+    // Fit only once the style is in: loading a style resets an untouched camera to the style's own centre,
+    // which threw away an earlier fit (Today showed one stop of four).
+    if (styleReady) fitOnce(m);
   }
 
   function drawLayers(m: MLMap) {
@@ -199,15 +203,19 @@ export function JrMap({ markers, me, fence, route, className, initialZoom = 12, 
     if (!fitted.current) {
       const pts: LngLatLike[] = markers.map((x) => [x.lng, x.lat] as [number, number]);
       if (me) pts.push([me.lng, me.lat]);
-      if (pts.length > 1) {
+      // A fence map is about one shop: keep its fence centred at street zoom, wherever the agent is.
+      if (fence) m.jumpTo({ center: [fence.lng, fence.lat], zoom: Math.max(initialZoom, 16) });
+      else if (pts.length > 1) {
         const b = new maplibregl.LngLatBounds(pts[0], pts[0]); pts.forEach((p) => b.extend(p));
-        m.fitBounds(b, { padding: 56, maxZoom: 16, duration: 0 });
+        // Numbered maps hang the focused stop's label to the right of its circle: keep room for it.
+        const labelled = markerStyle === "numbered" && markers.some((x) => x.id === selectedId && x.label);
+        m.fitBounds(b, { padding: labelled ? { top: 36, bottom: 56, left: 36, right: 150 } : 56, maxZoom: 16, duration: 0 });
       } else if (pts.length === 1) m.jumpTo({ center: pts[0], zoom: fence ? 16 : 14 });
       fitted.current = true;
     }
   }
 
-  useEffect(draw); // redraw on every prop change; cheap for < 100 markers
+  useEffect(() => { drawLatest.current = draw; draw(); }); // redraw on every prop change; cheap for < 100 markers
 
   return <div ref={el} className={cn("relative h-full w-full overflow-hidden bg-sunken", className)} />;
 }
